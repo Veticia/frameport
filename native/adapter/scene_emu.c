@@ -550,6 +550,7 @@ static XRAPI_ATTR XrResult XRAPI_CALL scene_get_semantic_labels(XrSession sessio
     scene_app_labels(entities[i].label, labels, text, sizeof(text));
     uint32_t n = (uint32_t)strlen(text) + 1;
     labels->bufferCountOutput = n;
+    LOG("scene: get semantic labels entity=%d label=%s cap=%u", i, entities[i].label, labels->bufferCapacityInput);
     if (!labels->bufferCapacityInput) return XR_SUCCESS;
     if (labels->bufferCapacityInput < n) return XR_ERROR_SIZE_INSUFFICIENT;
     if (!labels->buffer) return XR_ERROR_VALIDATION_FAILURE;
