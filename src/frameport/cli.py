@@ -1017,7 +1017,7 @@ def fex_import_login(prefix: str = typer.Argument(..., help="a Wine prefix on th
 @fex_app.command("install")
 def fex_install(app_name: str = typer.Argument("oculus-first-contact", metavar="APP",
                                                help="Meta's name for the game (verified: oculus-first-contact)"),
-                msaa: Optional[int] = typer.Option(None, help="MSAA samples for the game (1, 2 or 4; game default 4)"),
+                msaa: Optional[int] = typer.Option(None, help="MSAA samples for the game (1, 2 or 4; game default 4). UNVERIFIED: with 2 the game never rendered in two launches"),
                 no_steam: bool = typer.Option(False, "--no-steam", help="don't add it to the Steam library"),
                 frame: Optional[str] = typer.Option(None, help=FRAME_HELP)):
     """Make a game from the prefix playable from the Steam library (fixes, launcher, shortcut)."""
