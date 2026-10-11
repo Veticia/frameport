@@ -7930,7 +7930,7 @@ def fex_helper(command, args=None, timeout=900):
     try:
         out = json.loads(p.stdout.strip().splitlines()[-1])
     except (IndexError, ValueError):
-        raise AgentError(f"fexrift {command} failed: {(p.stderr or p.stdout)[-400:]}")
+        raise AgentError(f"fexrift {command} failed: {(p.stderr or p.stdout)[-400:]}") from None
     if not out.get("ok"):
         raise AgentError(out.get("error") or f"fexrift {command} failed")
     return out["result"]
@@ -7988,18 +7988,21 @@ def cmd_fex_install(args):
     if dep and dep.get("kind") != "frame_fex":
         raise AgentError(f"{pkg} is already installed in another way")
     msaa = args.get("msaa")
-    res = fex_helper("install", {"app": app, "anchor": anchor, "msaa": msaa if msaa in (1, 2, 4) else None})
+    res = fex_helper("install", {"app": app, "anchor": anchor, "msaa": msaa if msaa in (1, 2, 4) else None,
+                                 "force_unverified": bool(args.get("force_unverified"))})
     title = str(args.get("title") or res.get("title") or pkg).replace("\n", " ")
     appid = dep["appid"] if dep else shortcut_appid(f'"{anchor}/launch.sh"', title)
     dep = {"package": pkg, "kind": "frame_fex", "app": app, "appid": int(appid), "title": title,
            "base": res["game_dir"], "exe": res["exe"], "tags": args.get("tags") or [], "vr": True,
-           "fixes": {k: res.get(k) for k in ("ime_patch", "msaa")},
+           "fixes": {k: res.get(k) for k in ("ime_patch", "msaa")}, "verified": bool(res.get("verified")),
+           "checks": res.get("checks") or {},
            "agent_version": AGENT_VERSION, "installed": int(time.time())}
     path = os.path.join(anchor, "deployment.json")
     with open(path + ".tmp", "w") as f:
         json.dump(dep, f, indent=1)
     os.replace(path + ".tmp", path)
-    return {"package": pkg, "appid": dep["appid"], "title": title, "launcher": res["launcher"], "fixes": dep["fixes"]}
+    return {"package": pkg, "appid": dep["appid"], "title": title, "launcher": res["launcher"], "fixes": dep["fixes"],
+            "verified": dep["verified"], "checks": dep["checks"]}
 
 
 def fex_uninstall(pkg, dep, args):

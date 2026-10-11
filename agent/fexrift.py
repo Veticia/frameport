@@ -132,7 +132,7 @@ def download(url, path, sha=None, algo="sha256", tries=4):
             raise
         except OSError as e:
             if i == tries - 1:
-                raise FexError(f"download failed: {url}: {e}")
+                raise FexError(f"download failed: {url}: {e}") from e
             time.sleep(3 * (i + 1))
 
 
@@ -207,8 +207,9 @@ export LD_LIBRARY_PATH="{x86libs}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"
 exec "{fex}/fex-compat-tool" run -- "$@"
 """
 WINE_WRAPPER = '#!/bin/sh\nexec "{fexrun}" "{bin}.x86" "$@"\n'
-WINESERVER_WRAPPER = ('#!/bin/sh\n# FP_NATIVE_WSERVER=1: native arm64 build of the same GE source (protocol and requests '
-                      'match GE\'s x86_64 server)\n[ -n "$FP_NATIVE_WSERVER" ] && exec "{bin}.arm64" "$@"\n'
+WINESERVER_WRAPPER = ('#!/bin/sh\n# FP_NATIVE_WSERVER=1: native arm64 build of the same GE source '
+                      '(protocol and requests match GE\'s x86_64 server)\n'
+                      '[ -n "$FP_NATIVE_WSERVER" ] && exec "{bin}.arm64" "$@"\n'
                       'exec "{fexrun}" "{bin}.x86" "$@"\n')
 
 
@@ -273,7 +274,7 @@ def step_tls():
     if not all(want.values()):
         raise FexError(f"Arch repo snapshot lacks {[k for k, v in want.items() if not v]}")
     os.makedirs(X86LIBS, exist_ok=True)
-    for name, (fname, sha) in want.items():
+    for fname, sha in want.values():
         pkg = download(f"{ARCH_REPO}/{fname}", os.path.join(work, fname), sha)
         subprocess.run(["tar", "--zstd", "-xf", pkg, "-C", work, "usr/lib"], check=True)
     for f in os.listdir(os.path.join(work, "usr/lib")):
@@ -338,7 +339,8 @@ def step_meta():
     marker = os.path.join(META_DIR, ".fp-meta.json")
     if os.path.isfile(marker):
         return "present"
-    cfg_raw = meta_get("https://graph.oculus.com/bootstrap_installer_config?channel_name=LIVE&access_token=" + META_TOKEN)
+    cfg_raw = meta_get("https://graph.oculus.com/bootstrap_installer_config?channel_name=LIVE&access_token="
+                       + META_TOKEN)
     versions = meta_install(json.loads(cfg_raw), os.path.join(ROOT, "meta-pkgs"))
     write_json(marker, {"versions": versions, "installed": int(time.time())})
     return "installed " + ", ".join(f"{k} {v}" for k, v in versions.items())
@@ -391,7 +393,8 @@ def fixes_reg(der):
         r"[HKEY_CURRENT_USER\Software\Oculus VR, LLC\Oculus\Libraries]", f'"DefaultLibrary"="{LIBRARY_GUID}"', "",
         rf"[HKEY_CURRENT_USER\Software\Oculus VR, LLC\Oculus\Libraries\{LIBRARY_GUID}]",
         '"OriginalPath"="C:\\\\Program Files\\\\Meta Horizon\\\\Software"',
-        '"Path"="\\\\\\\\?\\\\Volume{00000000-0000-0000-0000-000000000043}\\\\Program Files\\\\Meta Horizon\\\\Software"',
+        '"Path"="\\\\\\\\?\\\\Volume{00000000-0000-0000-0000-000000000043}'
+        '\\\\Program Files\\\\Meta Horizon\\\\Software"',
         "",
         # Air Link code in the runtime needs a Windows.Devices.WiFi.WiFiAdapter class (FramePort's stand-in)
         r"[HKEY_LOCAL_MACHINE\Software\Microsoft\WindowsRuntime\ActivatableClassId\Windows.Devices.WiFi.WiFiAdapter]",
@@ -492,7 +495,7 @@ def cmd_import_login(args):
                     shutil.move(os.path.join(src, name), target)
                 got[top] = sorted(os.listdir(src) if os.path.isdir(src) else []) or len(os.listdir(dst))
         sess = os.path.join(PFX, LOGIN_TREES["sessions"])
-        for root, dirs, files in os.walk(sess):
+        for root, _dirs, files in os.walk(sess):
             os.chmod(root, 0o700)
             for f in files:
                 os.chmod(os.path.join(root, f), 0o600)
@@ -506,9 +509,11 @@ def cmd_import_login(args):
 
 
 # ------------------------------------------------------------------------------------------------ games
-# Per-game fixes for games verified on the Frame. "ime_patch": Unreal's FWindowsApplication constructor stores
-# Slate.DeferWindowsMessageProcessing = 1 (`mov dword ptr [rsi+0x120], 1`): deferred IME messages deadlock against
-# Wine's IME window ~1 start in 3 -> stored 0 (exe RVA, expected bytes, new bytes, exe SHA-256 before).
+# Games verified on the Frame and what they need beyond the generic fixes. A game's exe and launch arguments come from
+# its Meta manifest (Software/Manifests/<app>.json) when it isn't listed here; the generic fix for Unreal's IME
+# deadlock (find_ime_patch) is found in the binaries, "ime_patch" here is only the fallback when the finder misses
+# (exe RVA, expected bytes, new bytes). Opt-ins that are only safe for a game they were checked with stay per game:
+# fp_mem's big-block cache hands memory back unzeroed; "msaa_ini" lets --msaa write the game's Engine.ini.
 GAMES = {
     "oculus-first-contact": {
         "title": "Oculus First Contact",
@@ -518,9 +523,101 @@ GAMES = {
         # Unreal's large-block allocator gives 0.5-1.6 GB blocks back to the OS every few seconds and this game
         # overwrites them completely: fp_mem keeps them (see native/fexwine/fp_mem.c)
         "env": {"FP_MEM": "1", "FP_BIGCACHE_MB": "256"},
-        "engine_ini": "TouchNUX/Saved/Config/WindowsNoEditor/Engine.ini",
+        "msaa_ini": True,
     },
 }
+
+
+def manifest_launch(app):
+    """Exe (relative to the game's folder), arguments and name from Meta's manifest of an app, or None."""
+    m = read_json(os.path.join(META_DIR, "Software", "Manifests", app + ".json"))
+    exe = m.get("launchFile") if isinstance(m, dict) else None
+    if not isinstance(exe, str) or not exe:
+        return None
+    exe = exe.replace("\\", "/")
+    if exe.startswith("/") or ":" in exe or ".." in exe.split("/"):
+        raise FexError(f"{app}'s manifest names an exe outside its folder: {exe!r}")
+    params = m.get("launchParameters")
+    return {"exe": exe, "args": shlex.split(params) if isinstance(params, str) else [],
+            "title": m.get("canonicalName") or app}
+
+
+def unreal_project(exe_rel):
+    """Unreal's project folder from `<Project>/Binaries/Win64/<exe>`, else None."""
+    parts = exe_rel.split("/")
+    return parts[-4] if len(parts) >= 4 and parts[-3].lower() == "binaries" else None
+
+
+GRAPHICS_DLLS = {"d3d12.dll": "d3d12", "d3d11.dll": "d3d11", "opengl32.dll": "opengl", "vulkan-1.dll": "vulkan",
+                 "d3d9.dll": "d3d9"}
+
+
+def pe_imports(data):
+    """Lower-case DLL names a PE imports, normal and delay-loaded."""
+    pe = struct.unpack_from("<I", data, 0x3c)[0]
+    opt = pe + 24
+    dirs = opt + (112 if struct.unpack_from("<H", data, opt)[0] == 0x20b else 96)
+    secs = pe_sections(data)
+
+    def off(rva):
+        for _, va, vsz, raw, rsz in secs:
+            if va <= rva < va + max(vsz, rsz):
+                return raw + rva - va
+        return None
+
+    def name_at(rva):
+        o = off(rva)
+        return data[o:data.index(b"\0", o)].decode("latin-1").lower() if o is not None else None
+    out = set()
+    for index, size, name_field in ((1, 20, 12), (13, 32, 4)):
+        rva = struct.unpack_from("<I", data, dirs + 8 * index)[0]
+        o = off(rva) if rva else None
+        while o is not None and o + size <= len(data):
+            nrva = struct.unpack_from("<I", data, o + name_field)[0]
+            if not nrva:
+                break
+            name = name_at(nrva)
+            if name:
+                out.add(name)
+            o += size
+    return out
+
+
+def static_checks(exe):
+    """What a game's exe folder shows: engine, graphics APIs its binaries import, the IME fix site."""
+    folder = os.path.dirname(exe)
+    names = os.listdir(folder)
+    bins = [exe] + [os.path.join(folder, n) for n in sorted(names)
+                    if n.lower().endswith(".dll") and re.search(r"(applicationcore|slate|engine|rhi)", n, re.I)]
+    graphics, ue = set(), False
+    for b in bins:
+        with open(b, "rb") as f:
+            data = f.read()
+        try:
+            graphics |= {GRAPHICS_DLLS[d] for d in pe_imports(data) if d in GRAPHICS_DLLS}
+        except (struct.error, ValueError):
+            pass
+        ue = ue or b"++UE4+" in data or b"++UE5+" in data or "++UE4+".encode("utf-16-le") in data
+    unity = any(n.lower() == "unityplayer.dll" for n in names)
+    engine = "unreal" if ue or unreal_project(exe.replace("\\", "/")) else "unity" if unity else "other"
+    target, patch, why = find_ime_target(bins) if engine == "unreal" else (None, None, "not Unreal")
+    # monolithic Unreal imports every RHI it was built with: which one runs comes from the game's config
+    ime = {**patch, "file": os.path.basename(target)} if patch else why
+    return {"engine": engine, "graphics_imports": sorted(graphics), "ime": ime,
+            "_ime_target": target, "_ime_patch": patch}
+
+
+def find_ime_target(bins):
+    """(file, patch, reason): the first binary (exe, then modular Unreal's DLLs) where find_ime_patch hits."""
+    reasons = []
+    for b in bins:
+        with open(b, "rb") as f:
+            patch, why = find_ime_patch(f.read())
+        if patch:
+            return b, patch, None
+        reasons.append(why)
+    found = [r for r in reasons if not r.startswith("no Slate")]     # the binary with the CVar says more
+    return None, None, (found or reasons or ["no binary to search"])[0]
 
 
 def pe_offset(data, rva):
@@ -532,6 +629,84 @@ def pe_offset(data, rva):
         if va <= rva < va + max(vsz, rsz):
             return raw + rva - va
     raise FexError(f"RVA {rva:#x} not in any section")
+
+
+def pe_sections(data):
+    """[(name, virtual address, virtual size, raw offset, raw size)] of a PE file."""
+    pe = struct.unpack_from("<I", data, 0x3c)[0]
+    nsec = struct.unpack_from("<H", data, pe + 6)[0]
+    sec = pe + 24 + struct.unpack_from("<H", data, pe + 20)[0]
+    out = []
+    for i in range(nsec):
+        name, vsz, va, rsz, raw = struct.unpack_from("<8sIIII", data, sec + 40 * i)
+        out.append((name.rstrip(b"\0").decode(errors="replace"), va, vsz, raw, rsz))
+    return out
+
+
+def off_to_rva(sections, off):
+    for _, va, _vsz, raw, rsz in sections:
+        if raw <= off < raw + rsz:
+            return va + off - raw
+    return None
+
+
+IME_CVAR = "Slate.DeferWindowsMessageProcessing"
+_REG_BASE = {0: "rax", 1: "rcx", 2: "rdx", 3: "rbx", 5: "rbp", 6: "rsi", 7: "rdi"}
+
+
+def find_ime_patch(data):
+    """Generic site of Unreal's Slate.DeferWindowsMessageProcessing default (= 1), whose deferred IME messages
+    deadlock against Wine's IME window. Returns ({"rva", "old", "new"}, None) or (None, reason).
+      - the CVar's name (UTF-16) is referenced by a RIP-relative `lea` that passes it to the console manager;
+      - the `lea r8, [...]` just before passes the variable: a member ([reg+disp32]) or a global ([rip+disp32]);
+      - member: the constructor stores `mov dword ptr [reg+disp32], 1` earlier -> imm32 0;
+        global: the int is 1 in the data section -> 0."""
+    name = (IME_CVAR + "\0").encode("utf-16-le")
+    soff = data.find(name)
+    if soff < 0:
+        return None, "no Slate.DeferWindowsMessageProcessing (older Unreal or not Unreal)"
+    secs = pe_sections(data)
+    srva = off_to_rva(secs, soff)
+    text = next((s for s in secs if s[0] == ".text"), None)
+    if srva is None or not text:
+        return None, "PE layout not understood"
+    _, tva, _, traw, trsz = text
+    code = data[traw:traw + trsz]
+    hits = []
+    # lea r64, [rip+rel32]: REX.W(+R) 8D modrm(mod 00, rm 101)
+    for m in re.finditer(rb"[\x48\x4c]\x8d[\x05\x0d\x15\x1d\x25\x2d\x35\x3d]", code):
+        i = m.start()
+        rel = struct.unpack_from("<i", code, i + 3)[0]
+        if tva + i + 7 + rel == srva:
+            hits.append(i)
+    if not hits:
+        return None, "CVar name found but not its reference"
+    for i in hits:
+        window = code[max(0, i - 48):i]
+        base_off = max(0, i - 48)
+        # lea r8, [base+disp32] (4C 8D 80+rm / 4D 8D 80+rm for r8-r15) or lea r8, [rip+rel32] (4C 8D 05)
+        for m in reversed(list(re.finditer(rb"[\x4c\x4d]\x8d[\x80-\x87\x05]", window))):
+            j = base_off + m.start()
+            modrm = code[j + 2]
+            if modrm == 0x05:     # global variable
+                vrva = tva + j + 7 + struct.unpack_from("<i", code, j + 3)[0]
+                voff = pe_offset(data, vrva)
+                if data[voff:voff + 4] == (1).to_bytes(4, "little"):
+                    return {"rva": vrva, "old": "01000000", "new": "00000000"}, None
+                return None, f"global CVar storage at {vrva:#x} isn't 1"
+            rm = modrm & 7
+            if rm == 4:           # SIB form: not used by MSVC for this
+                continue
+            rex_b = code[j] == 0x4d
+            disp = code[j + 3:j + 7]
+            # mov dword ptr [base+disp32], imm32 1: (41) C7 80+rm disp32 01000000
+            want = (b"\x41" if rex_b else b"") + bytes([0xc7, 0x80 + rm]) + disp + (1).to_bytes(4, "little")
+            done = want[:-4] + bytes(4)       # already patched: same site, apply_byte_patch then says "already"
+            k = max(code.rfind(want, max(0, j - 0x600), j), code.rfind(done, max(0, j - 0x600), j))
+            if k >= 0:
+                return {"rva": tva + k, "old": want.hex(), "new": done.hex()}, None
+            return None, f"no `mov [{_REG_BASE.get(rm, 'r?')}+disp], 1` before the CVar registration"
+    return None, "CVar registration doesn't pass the variable in r8"
 
 
 def apply_byte_patch(path, patch):
@@ -617,10 +792,15 @@ python3 -I "$R/artifacts/fexrift.py" vrsetting '{vrsetting}' || true
 "$G/files/bin/wineserver" -k 2>/dev/null; sleep 1
 echo "FramePort: starting Meta's runtime"
 L="$WINEPREFIX/drive_c/users/steamuser/AppData/Local/Oculus"
-( cd "$WINEPREFIX/drive_c/Program Files/Meta Horizon/Support/oculus-runtime" && setsid "$G/files/bin/wine" ./OVRServer_x64.exe >"$A/ovrserver.log" 2>&1 </dev/null & )
+( cd "$WINEPREFIX/drive_c/Program Files/Meta Horizon/Support/oculus-runtime" &&
+  setsid "$G/files/bin/wine" ./OVRServer_x64.exe >"$A/ovrserver.log" 2>&1 </dev/null & )
 # OVRLibrarian (.NET) finishes but never exits under FEX, and the runtime then tracks no later client (the game):
 # end it once it reports completion, and whenever it comes back
-for i in $(seq 1 45); do sleep 2; tail -n 3 "$L/OVRLibrarian.log" 2>/dev/null | grep -q "invocation completed" && pgrep -f "[O]VRLibrarian.exe" >/dev/null && break; done
+for i in $(seq 1 45); do
+    sleep 2
+    tail -n 3 "$L/OVRLibrarian.log" 2>/dev/null | grep -q "invocation completed" &&
+        pgrep -f "[O]VRLibrarian.exe" >/dev/null && break
+done
 sleep 3; pkill -9 -f "[O]VRLibrarian.exe"; sleep 10
 ( while sleep 5; do pkill -9 -f "[O]VRLibrarian.exe"; done ) & LK=$!
 python3 -I "$R/artifacts/fexrift.py" hidewin & HW=$!
@@ -632,42 +812,59 @@ taskset -c 4-7 "$G/proton" run "$R/revive/ReviveInjector.exe" {exe_q} {args}
 """
 
 
-def write_launcher(app, info, anchor, msaa=None):
+def write_launcher(app, info, anchor):
     game_dir = os.path.join(META_DIR, "Software", "Software", app)
     exe = os.path.join(game_dir, info["exe"])
     env = "".join(f"export {k}={shlex.quote(v)}\n" for k, v in info.get("env", {}).items())
     vr = json.dumps({"section": f"steam.app.{GAME_ID}", "key": "motionSmoothingOverride", "kind": "i", "value": 2})
-    text = LAUNCHER.format(title=info["title"], root_q=shlex.quote(ROOT), anchor_q=shlex.quote(anchor),
-                           steam_q=shlex.quote(STEAM), gid=GAME_ID, game_env=env, vrsetting=vr,
-                           gamedir_q=shlex.quote(os.path.dirname(exe)), exe_q=shlex.quote(exe),
-                           args=" ".join(info.get("args", [])))
+    text = LAUNCHER.format(title=re.sub(r"[\\\"$`\n]", "", info["title"]), root_q=shlex.quote(ROOT),
+                           anchor_q=shlex.quote(anchor), steam_q=shlex.quote(STEAM), gid=GAME_ID, game_env=env,
+                           vrsetting=vr, gamedir_q=shlex.quote(os.path.dirname(exe)), exe_q=shlex.quote(exe),
+                           args=" ".join(shlex.quote(a) for a in shlex.split(" ".join(info.get("args", [])))))
     put_text(os.path.join(anchor, "launch.sh"), text, 0o755)
     return exe
 
 
+def game_info(app):
+    """(info, verified): GAMES' entry over the manifest's exe/arguments/name."""
+    verified = app in GAMES
+    info = dict(manifest_launch(app) or {})
+    info.update(GAMES.get(app) or {})
+    if not info.get("exe"):
+        raise FexError(f"{app} has no manifest in the prefix: import it with the login first")
+    info.setdefault("title", app)
+    return info, verified
+
+
 def cmd_install(args):
-    """Install a game Meta's app downloaded (now in the prefix) for Steam: fixes + launcher in its anchor."""
+    """Install a game Meta's app downloaded (now in the prefix) for Steam: fixes + launcher in its anchor. A game
+    that isn't in GAMES needs force_unverified (its static checks come back either way)."""
     app, anchor = args["app"], args["anchor"]
-    info = GAMES.get(app)
-    if not info:
-        raise FexError(f"{app} isn't a verified game for this mode (verified: {', '.join(GAMES)})")
+    info, verified = game_info(app)
     game_dir = os.path.join(META_DIR, "Software", "Software", app)
     exe = os.path.join(game_dir, info["exe"])
     if not os.path.isfile(exe):
         raise FexError(f"{app} isn't in the prefix: import it with the login first")
-    res = {"exe": exe, "game_dir": game_dir}
-    if info.get("ime_patch"):
+    checks = static_checks(exe)
+    target, patch = checks.pop("_ime_target"), checks.pop("_ime_patch")
+    res = {"exe": exe, "game_dir": game_dir, "checks": checks, "verified": verified, "title": info["title"]}
+    if not verified and not args.get("force_unverified"):
+        raise FexError(f"{app} isn't verified for this mode (verified: {', '.join(GAMES)}); static checks: "
+                       f"{json.dumps(checks)}. Install it anyway with force_unverified.")
+    if patch:
+        res["ime_patch"] = apply_byte_patch(target, patch)
+    elif info.get("ime_patch"):
         res["ime_patch"] = apply_byte_patch(exe, info["ime_patch"])
     msaa = args.get("msaa")
-    if info.get("engine_ini") and msaa in (1, 2, 4):
-        ini = os.path.join(USER_DIR, "AppData", "Local", info["engine_ini"])
+    project = unreal_project(info["exe"])
+    if info.get("msaa_ini") and project and msaa in (1, 2, 4):
+        ini = os.path.join(USER_DIR, "AppData", "Local", project, "Saved", "Config", "WindowsNoEditor", "Engine.ini")
         set_ini_values(ini, "SystemSettings", {"r.MobileMSAA": str(msaa)})
         set_ini_values(ini, "/Script/Engine.RendererSettings", {"r.MobileMSAA": str(msaa)})
         res["msaa"] = msaa
     os.makedirs(anchor, exist_ok=True)
     write_launcher(app, info, anchor)
     res["launcher"] = os.path.join(anchor, "launch.sh")
-    res["title"] = info["title"]
     return res
 
 

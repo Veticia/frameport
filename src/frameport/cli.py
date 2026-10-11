@@ -977,7 +977,7 @@ def _fex_target(frame: Optional[str]):
         fexrift.require_enabled()
     except RuntimeError as e:
         typer.echo(str(e), err=True)
-        raise typer.Exit(2)
+        raise typer.Exit(2) from None
     return _target(frame)
 
 
@@ -1002,6 +1002,8 @@ def fex_setup(frame: Optional[str] = typer.Option(None, help=FRAME_HELP)):
 @fex_app.command("import-login")
 def fex_import_login(prefix: str = typer.Argument(..., help="a Wine prefix on this PC where you signed in to Meta's "
                                                             "app (and downloaded the game with it)"),
+                     app: Optional[list[str]] = typer.Option(None, "--app", help="Meta's name of a game to copy "
+                                                             "(repeatable; default: the verified games)"),
                      frame: Optional[str] = typer.Option(None, help=FRAME_HELP)):
     """Copy your Meta login and the games Meta's app downloaded into the Frame's prefix (sign-in tokens: sent over
     SSH, deleted on both sides afterwards)."""
@@ -1010,21 +1012,28 @@ def fex_import_login(prefix: str = typer.Argument(..., help="a Wine prefix on th
     from . import fexrift
 
     t = _fex_target(frame)
-    res = fexrift.import_login(t.frame, Path(prefix).expanduser(), printing_reporter(False))
+    res = fexrift.import_login(t.frame, Path(prefix).expanduser(), printing_reporter(False), apps=app or None)
     typer.echo(json.dumps(res.get("imported"), indent=1))
 
 
 @fex_app.command("install")
 def fex_install(app_name: str = typer.Argument("oculus-first-contact", metavar="APP",
                                                help="Meta's name for the game (verified: oculus-first-contact)"),
-                msaa: Optional[int] = typer.Option(None, help="MSAA samples for the game (1, 2 or 4; game default 4). UNVERIFIED: with 2 the game never rendered in two launches"),
+                msaa: Optional[int] = typer.Option(None, help="MSAA samples for a verified game that allows it (1, 2 "
+                                                         "or 4; game default 4). UNVERIFIED: with 2 the game never "
+                                                         "rendered in two launches"),
                 no_steam: bool = typer.Option(False, "--no-steam", help="don't add it to the Steam library"),
+                force_unverified: bool = typer.Option(False, "--force-unverified",
+                                                      help="install a game that isn't verified with this mode "
+                                                           "(only the generic fixes; may not start)"),
                 frame: Optional[str] = typer.Option(None, help=FRAME_HELP)):
-    """Make a game from the prefix playable from the Steam library (fixes, launcher, shortcut)."""
+    """Make a game from the prefix playable from the Steam library (fixes, launcher, shortcut). Without
+    --force-unverified an unverified game is refused with what the Frame's static checks found."""
     from . import fexrift
 
     t = _fex_target(frame)
-    res = fexrift.install(t.frame, printing_reporter(False), app_name, msaa=msaa, add_to_steam=not no_steam)
+    res = fexrift.install(t.frame, printing_reporter(False), app_name, msaa=msaa, add_to_steam=not no_steam,
+                          force_unverified=force_unverified)
     typer.echo(json.dumps(res, indent=1))
 
 

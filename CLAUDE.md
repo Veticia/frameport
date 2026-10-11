@@ -591,8 +591,13 @@ GPU) helped but the owner misses smooth edges → the game's MSAA CVar is `r.Mob
 branch; no r.MSAACount in the exe), 2x untested. Headless tests need the headset worn once per boot (else "IMU
 fallback" and the game waits at startup forever).
 **Experimental mode on branch `rift-on-frame` (the owner's single linkable branch for this work):** CLI only,
-`FRAMEPORT_EXPERIMENTAL_FEX=1 frameport fex setup | import-login <signed-in PC prefix> | install [oculus-first-contact]
-[--msaa N] | status` (hidden group). PC `src/frameport/fexrift.py` uploads `agent/fexrift.py` + `artifacts/fexrift`
+`FRAMEPORT_EXPERIMENTAL_FEX=1 frameport fex setup | import-login <signed-in PC prefix> [--app <meta name>] | install
+[<meta name>] [--msaa N] [--force-unverified] | status` (hidden group). Generic per game: exe + arguments from Meta's
+manifest (`Software/Manifests/<app>.json` launchFile/launchParameters), the Unreal IME-deadlock fix found in the binaries
+(`find_ime_patch`: the CVar's UTF-16 name → its `lea` xref → `lea r8` member/global → `mov [reg+disp],1` / int 1;
+also modular ApplicationCore/Slate DLLs), `static_checks` (engine, imported graphics DLLs: monolithic Unreal imports
+every RHI, so it can't tell which runs). `agent/fexrift.py` `GAMES` = verified games + per-game opt-ins only (fp_mem's
+unzeroed big-block cache, `msaa_ini`); others need `--force-unverified`. PC `src/frameport/fexrift.py` uploads `agent/fexrift.py` + `artifacts/fexrift`
 (sources native/fexwine) + Revive 3.2.0 with 6 byte patches (refused for other builds); the Frame helper downloads
 GE-Proton11-7 x86_64 (SHA-512), x86 GnuTLS (Arch archive), installs Meta's runtime (Meta's signature checks kept) and
 writes the game's launcher. Agent v79 `fex_prepare/status/setup/import_login/install`, kind `frame_fex` (uninstall

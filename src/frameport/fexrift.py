@@ -13,13 +13,14 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import shutil
 import tarfile
 import time
 from pathlib import Path
 
-from .core.paths import agent_dir, artifacts_dir, user_data_dir
 from .core.events import Reporter
+from .core.paths import agent_dir, artifacts_dir, user_data_dir
 
 EXPERIMENT_ENV = "FRAMEPORT_EXPERIMENTAL_FEX"
 
@@ -170,7 +171,9 @@ def login_archive(prefix: Path, apps: list[str], out: Path) -> dict:
 def import_login(frame, prefix: Path, reporter: Reporter, apps: list[str] | None = None) -> dict:
     require_enabled()
     apps = apps or list(GAMES)
-    tmp = user_data_dir() / "fexrift" / "login.tar"
+    for app in apps:
+        package_for(app)        # Meta's names only: they are globbed and become tar paths
+    tmp =user_data_dir() / "fexrift" / "login.tar"
     try:
         reporter.stage("Pack the Meta login")
         info = login_archive(prefix, apps, tmp)
@@ -187,19 +190,39 @@ def import_login(frame, prefix: Path, reporter: Reporter, apps: list[str] | None
     return res
 
 
+def package_for(app: str) -> str:
+    """FramePort package of a Meta app name (verified games keep theirs)."""
+    if app in GAMES:
+        return GAMES[app]["package"]
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]+", app):
+        raise ValueError(f"bad Meta app name {app!r}")
+    return "rift." + app.replace("-", "_")
+
+
 def install(frame, reporter: Reporter, app: str = "oculus-first-contact", msaa: int | None = None,
-            add_to_steam: bool = True) -> dict:
+            add_to_steam: bool = True, force_unverified: bool = False) -> dict:
+    """A game from the Frame's prefix as a Steam game. Games that aren't verified (GAMES) need force_unverified:
+    they get only the generic fixes the Frame finds in their binaries (the agent refuses otherwise and reports
+    its static checks)."""
     from .install import installer
 
     require_enabled()
-    if app not in GAMES:
-        raise RuntimeError(f"{app} isn't verified for this mode (verified: {', '.join(GAMES)})")
-    g = GAMES[app]
-    reporter.stage(f"Install {g['title']}")
-    res = frame.agent("fex_install", package=g["package"], app=app, title=g["title"], msaa=msaa)
+    pkg = package_for(app)
+    title = GAMES.get(app, {}).get("title")
+    reporter.stage(f"Install {title or app}")
+    res = frame.agent("fex_install", package=pkg, app=app, title=title, msaa=msaa,
+                      force_unverified=force_unverified)
     for k, v in (res.get("fixes") or {}).items():
         if v is not None:
             reporter.check(f"fix: {k}", v not in ("unknown build",), str(v))
+    checks = res.get("checks") or {}
+    if not res.get("verified"):
+        reporter.check("Verified on the Frame", None, f"not yet: {app} gets only the generic fixes")
+    if checks.get("engine") == "unreal" and isinstance(checks.get("ime"), str):
+        reporter.check("Unreal IME fix", None, checks["ime"])
+    apis = checks.get("graphics_imports") or []
+    if apis and not {"d3d11", "vulkan"} & set(apis):
+        reporter.check("Graphics API", None, f"imports only {', '.join(apis)}: untested with this mode")
     if add_to_steam:
-        installer.add_to_steam(frame, [g["package"]], reporter)
+        installer.add_to_steam(frame, [pkg], reporter)
     return res

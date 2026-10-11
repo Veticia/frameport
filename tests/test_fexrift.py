@@ -93,6 +93,102 @@ def test_first_contact_patch_matches_the_real_instruction(fx):
     assert new[6:] == bytes(4)
 
 
+CVAR_AT, VAR_AT = 0x1800, 0x1900
+
+
+def _ime_pe(form="member", value=1):
+    """Synthetic Unreal-like code: the CVar's UTF-16 name, its registration (lea r8 <variable>; lea rdx <name>) and
+    for the member form the constructor's `mov dword ptr [rsi+0x120], value` before it."""
+    code = bytearray(0x1000)
+
+    def put(rva, b):
+        code[rva - 0x1000:rva - 0x1000 + len(b)] = b
+    put(CVAR_AT, ("Slate.DeferWindowsMessageProcessing" + "\0").encode("utf-16-le"))
+    if form == "member":
+        put(0x1100, bytes.fromhex("c78620010000") + value.to_bytes(4, "little"))
+        put(0x1200, bytes.fromhex("4c8d8620010000"))                                   # lea r8, [rsi+0x120]
+    elif form == "global":
+        put(VAR_AT, value.to_bytes(4, "little"))
+        put(0x1200, bytes.fromhex("4c8d05") + struct.pack("<i", VAR_AT - 0x1207))     # lea r8, [rip+var]
+    if form != "unreferenced":
+        put(0x1207, bytes.fromhex("488d15") + struct.pack("<i", CVAR_AT - 0x120e))    # lea rdx, [rip+name]
+    return _pe(0x1000, bytes(code))
+
+
+def test_find_ime_patch_forms(fx, tmp_path):
+    patch, why = fx.find_ime_patch(bytes(_ime_pe("member")))
+    assert why is None and patch == {"rva": 0x1100, "old": "c7862001000001000000", "new": "c7862001000000000000"}
+    patch, _ = fx.find_ime_patch(bytes(_ime_pe("global")))
+    assert patch == {"rva": VAR_AT, "old": "01000000", "new": "00000000"}
+    patch, _ = fx.find_ime_patch(bytes(_ime_pe("member", value=0)))    # already patched: same site
+    assert patch["rva"] == 0x1100
+    exe = tmp_path / "g.exe"
+    exe.write_bytes(_ime_pe("member", value=0))
+    assert fx.apply_byte_patch(str(exe), patch) == "already"
+    assert fx.find_ime_patch(bytes(_ime_pe("unreferenced")))[0] is None
+    assert "no Slate" in fx.find_ime_patch(bytes(_pe(0x1000, b"\x90" * 16)))[1]
+
+
+def test_find_ime_patch_first_contact(fx):
+    """The real exe (FRAMEPORT_FIRST_CONTACT_EXE, original or patched): the finder lands on the known site."""
+    import os
+
+    path = os.environ.get("FRAMEPORT_FIRST_CONTACT_EXE")
+    if not path or not os.path.isfile(path):
+        pytest.skip("set FRAMEPORT_FIRST_CONTACT_EXE to First Contact's TouchNUX-Win64-Shipping.exe")
+    patch, why = fx.find_ime_patch(open(path, "rb").read())
+    assert why is None and patch["rva"] == fx.GAMES["oculus-first-contact"]["ime_patch"]["rva"]
+
+
+def _meta_game(fx, app, exe_rel, manifest=True, params='-mode="vr" -x'):
+    game = Path(fx.META_DIR) / "Software" / "Software" / app
+    exe = game / exe_rel
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(_ime_pe("member"))
+    if manifest:
+        man = Path(fx.META_DIR) / "Software" / "Manifests"
+        man.mkdir(parents=True, exist_ok=True)
+        (man / f"{app}.json").write_text(json.dumps({"canonicalName": app, "launchFile": exe_rel.replace("/", "\\"),
+                                                    "launchParameters": params}))
+    return exe
+
+
+def test_manifest_launch(fx):
+    _meta_game(fx, "some-game", "Proj/Binaries/Win64/Proj-Win64-Shipping.exe")
+    m = fx.manifest_launch("some-game")
+    assert m == {"exe": "Proj/Binaries/Win64/Proj-Win64-Shipping.exe", "args": ["-mode=vr", "-x"],
+                 "title": "some-game"}
+    assert fx.manifest_launch("missing") is None
+    (Path(fx.META_DIR) / "Software" / "Manifests" / "bad.json").write_text(json.dumps({"launchFile": "..\\x.exe"}))
+    with pytest.raises(fx.FexError):
+        fx.manifest_launch("bad")
+    assert fx.unreal_project("Proj/Binaries/Win64/P.exe") == "Proj" and fx.unreal_project("Game.exe") is None
+
+
+def test_install_unverified_needs_force(fx, tmp_path):
+    exe = _meta_game(fx, "some-game", "Proj/Binaries/Win64/Proj-Win64-Shipping.exe")
+    anchor = str(tmp_path / "anchor")
+    with pytest.raises(fx.FexError, match="force_unverified"):
+        fx.cmd_install({"app": "some-game", "anchor": anchor})
+    assert not (exe.parent / (exe.name + ".orig")).exists()          # refused before anything changed
+    res = fx.cmd_install({"app": "some-game", "anchor": anchor, "force_unverified": True, "msaa": 2})
+    assert res["verified"] is False and res["ime_patch"] == "patched" and "msaa" not in res   # msaa: per game only
+    assert res["checks"]["engine"] == "unreal" and res["checks"]["ime"]["rva"] == 0x1100
+    text = (Path(anchor) / "launch.sh").read_text()
+    assert "Proj-Win64-Shipping.exe' -mode=vr -x" in text and "FP_MEM" not in text   # fp_mem: per game only
+    assert fx.cmd_install({"app": "some-game", "anchor": anchor, "force_unverified": True})["ime_patch"] == "already"
+
+
+def test_install_verified_uses_the_finder(fx, tmp_path):
+    _meta_game(fx, "oculus-first-contact", fx.GAMES["oculus-first-contact"]["exe"], manifest=False)
+    res = fx.cmd_install({"app": "oculus-first-contact", "anchor": str(tmp_path / "a"), "msaa": 2})
+    assert res["verified"] and res["ime_patch"] == "patched" and res["msaa"] == 2   # the finder's site, not 0x22a605
+    ini = Path(fx.USER_DIR) / "AppData/Local/TouchNUX/Saved/Config/WindowsNoEditor/Engine.ini"
+    assert "r.MobileMSAA=2" in ini.read_text()
+    with pytest.raises(fx.FexError, match="no manifest"):
+        fx.cmd_install({"app": "not-here", "anchor": str(tmp_path / "b"), "force_unverified": True})
+
+
 def test_ini_values_keep_crlf_and_replace(fx, tmp_path):
     ini = tmp_path / "Engine.ini"
     ini.write_bytes(b"[Core.System]\r\nPaths=x\r\n\r\n[SystemSettings]\r\nr.MobileMSAA=4\r\nr.Other=1\r\n")
@@ -112,7 +208,7 @@ def test_launcher_renders(fx, tmp_path):
     assert exe.endswith("TouchNUX-Win64-Shipping.exe")
     for needle in ("flock -n 9", "FP_NATIVE_WSERVER=1", "FP_MEM=1", "FP_BIGCACHE_MB=256", "taskset -c 4-7",
                    "ReviveInjector.exe", "OVRLibrarian", "wineserver\" -k", "motionSmoothingOverride",
-                   '-gamemode="experienceonly"', "plays.log", "ENABLE_GAMESCOPE_WSI=0", "unset LD_PRELOAD"):
+                   "-gamemode=experienceonly", "plays.log", "ENABLE_GAMESCOPE_WSI=0", "unset LD_PRELOAD"):
         assert needle in text, needle
     assert (anchor / "launch.sh").stat().st_mode & 0o100
 
@@ -170,8 +266,10 @@ def test_agent_fex_install_and_uninstall(monkeypatch, tmp_path):
     assert calls[0][0] == "install" and calls[0][1]["msaa"] == 2
     dep = a.deployment("rift.oculus_first_contact")
     assert dep["kind"] == "frame_fex" and dep["base"] == str(game_dir) and dep["fixes"]["ime_patch"] == "patched"
-    assert res["appid"] == a.shortcut_appid(f'"{a.ANCHORS}/rift.oculus_first_contact/launch.sh"', "Oculus First Contact")
+    launcher = f'"{a.ANCHORS}/rift.oculus_first_contact/launch.sh"'
+    assert res["appid"] == a.shortcut_appid(launcher, "Oculus First Contact")
     assert a.shortcut_args("rift.oculus_first_contact")[4] == "PC VR on Frame"
+    assert calls[0][1]["force_unverified"] is False
     with pytest.raises(a.AgentError):
         a.cmd_fex_install({"package": "rift.oculus_first_contact", "app": "../evil"})
     monkeypatch.setattr(a, "pcvr_pids", lambda base: [])
@@ -200,6 +298,16 @@ def test_gate(monkeypatch):
         fexrift.require_enabled()
     monkeypatch.setenv(fexrift.EXPERIMENT_ENV, "1")
     assert fexrift.enabled()
+
+
+def test_package_for():
+    from frameport import fexrift
+
+    assert fexrift.package_for("oculus-first-contact") == "rift.oculus_first_contact"
+    assert fexrift.package_for("some-game") == "rift.some_game"
+    for bad in ("../x", "a*", "A"):
+        with pytest.raises(ValueError):
+            fexrift.package_for(bad)
 
 
 def test_patch_revive_refuses_other_builds(tmp_path):
