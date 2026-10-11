@@ -83,11 +83,12 @@ class MetaPermissions(Patch):
         if uses_scene(a):  # gets the room (scene_emul) too: without the permission it never asks for it
             return Suggestion(True, "Uses Meta's room or anchor APIs: their permissions must be granted, or the "
                                     "game never asks for the room (for example NOPE's MR mode).")
-        scene = [p for p in a.meta_permissions if any(k in p for k in ("SCENE", "ANCHOR", "SPATIAL", "BOUNDARY"))]
+        perms = a.meta_permissions or (a.extra or {}).get("meta_permissions_used") or []
+        scene = [p for p in perms if any(k in p for k in ("SCENE", "ANCHOR", "SPATIAL", "BOUNDARY"))]
         if scene:
             names = ", ".join(p.rsplit(".", 1)[-1] for p in scene[:3])
-            return Suggestion(False, "Uses Meta scene/anchor permissions (" + names
-                              + "); enable if the game says it needs spatial data access.")
+            return Suggestion(True, "Uses Meta scene/spatial data permissions (" + names
+                              + "); declared so Android grants spatial data access at install.")
         return None
 
     def applies(self, a):
