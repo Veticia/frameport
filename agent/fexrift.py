@@ -594,6 +594,10 @@ unset STEAM_COMPAT_INSTALL_PATH STEAM_COMPAT_LIBRARY_PATHS
 export SteamAppId={gid} SteamGameId={gid} STEAM_COMPAT_APP_ID={gid}
 export XR_RUNTIME_JSON=/opt/steamvr/steamxr_linux64.json
 export XDG_RUNTIME_DIR="/run/user/$(id -u)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
+# Started by Steam, gamescope's Vulkan WSI layer would take over the game's desktop mirror window, which gamescope
+# doesn't show in VR mode: its presents then block (~1 fps). Steam's overlay preload can't load here (native/x86).
+export ENABLE_GAMESCOPE_WSI=0
+unset LD_PRELOAD
 # speed (native/fexwine/README.md): native arm64 wineserver + ntsync, FEX without x86 memory ordering, Vulkan thunk
 export FP_NATIVE_WSERVER=1 FP_VKTHUNK=1 FEX_TSOENABLED=0 FEX_VECTORTSOENABLED=0 FEX_MEMCPYSETTSOENABLED=0
 export FEX_MULTIBLOCK=1 FEX_PROFILESTATS=0

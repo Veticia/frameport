@@ -112,7 +112,7 @@ def test_launcher_renders(fx, tmp_path):
     assert exe.endswith("TouchNUX-Win64-Shipping.exe")
     for needle in ("flock -n 9", "FP_NATIVE_WSERVER=1", "FP_MEM=1", "FP_BIGCACHE_MB=256", "taskset -c 4-7",
                    "ReviveInjector.exe", "OVRLibrarian", "wineserver\" -k", "motionSmoothingOverride",
-                   '-gamemode="experienceonly"', "plays.log"):
+                   '-gamemode="experienceonly"', "plays.log", "ENABLE_GAMESCOPE_WSI=0", "unset LD_PRELOAD"):
         assert needle in text, needle
     assert (anchor / "launch.sh").stat().st_mode & 0o100
 
