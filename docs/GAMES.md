@@ -81,6 +81,7 @@ Generated from [catalog/games](../catalog/games) by `scripts/compat_list.py`.
 | KillerFrequency | Quest | ✅ Works |  |
 | Ladder | Quest | ✅ Works |  |
 | Lambda1VR | Quest | ✅ Works |  |
+| Laser Dance | Quest | ✅ Works |  |
 | LEGO® Bricktales | Quest | ✅ Works |  |
 | Lost Recipes | Quest | ✅ Works |  |
 | Lucky's Tale | Quest | ✅ Works |  |
