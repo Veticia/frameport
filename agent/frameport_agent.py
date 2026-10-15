@@ -8005,6 +8005,31 @@ def cmd_fex_install(args):
             "verified": dep["verified"], "checks": dep["checks"]}
 
 
+# ---------------------------------------------------------------------- FEX launch-time settings / bounded bench
+# Kept separate from install: settings are read at launch and never require changing the game's files.
+def cmd_fex_settings(args):
+    values = args.get("values")
+    if values is not None and (not isinstance(values, dict) or "app" in values):
+        raise AgentError("values must be a settings object without app")
+    return fex_helper("settings_set" if values is not None else "settings_get",
+                      dict(values or {}, app=args["app"]), timeout=60)
+
+
+def cmd_fex_bench(args):
+    seconds = args.get("seconds", 120)
+    if type(seconds) is not int or not 1 <= seconds <= 120:
+        raise AgentError("seconds must be an integer in 1..120")
+    if game_running():  # includes Lepton containers even when their processes are in another PID namespace
+        raise AgentError("benchmark refused: a game or container is running")
+    app = args["app"]
+    for pkg in sorted(os.listdir(ANCHORS)) if os.path.isdir(ANCHORS) else []:
+        dep = deployment(pkg)
+        if dep and dep.get("kind") == "frame_fex" and dep.get("app") == app:
+            return fex_helper("bench", {"app": app, "seconds": seconds,
+                                        "launcher": os.path.join(ANCHORS, pkg, "launch.sh")}, timeout=seconds + 30)
+    raise AgentError("install this FEX game before benchmarking")
+
+
 def fex_uninstall(pkg, dep, args):
     """Only the launcher, artwork and shortcut go: the game stays in the shared prefix (Meta's app owns it)."""
     anchor = os.path.join(ANCHORS, pkg)
