@@ -182,6 +182,7 @@ class _SantaCruzGate(Patch):
 
 class QuestPrecompileDone(_SantaCruzGate):
     id = "frame.unreal_quest_precompile"
+    on_pc = True
     title = "Unreal: don't wait for the Quest shader precompile"
     description = ("ILMxLAB's Unreal games (for example Vader Immortal) wait on their loading card until "
                    "UVRUtils::GetQuestShaderPrecompilePercent reaches 100 %. The precompile only starts on a Quest "
@@ -201,6 +202,7 @@ class QuestPrecompileDone(_SantaCruzGate):
 
 class QuestKeyMap(_SantaCruzGate):
     id = "frame.unreal_quest_keymap"
+    on_pc = True
     title = "Unreal: Quest controller bindings (RPOC key map)"
     description = ("ILMxLAB's Unreal games (for example Vader Immortal) bind their controls through URPOCKeyMapManager"
                    "Component, which for an Oculus headset picks the Quest (\"SantaCruz\") or the Gear VR key set by "

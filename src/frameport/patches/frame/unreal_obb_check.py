@@ -60,6 +60,7 @@ def patch_dex(dex: Dex, package: str) -> list[str]:
 
 class UnrealSkipObbCheck(Patch):
     id = "frame.unreal_skip_obb_check"
+    on_pc = True
     title = "Unreal: start without the OBB check"
     description = ("Unreal games can check their whole data file (.obb) before starting (bVerifyOBBOnStartUp). On "
                    "the Frame that check's progress and error screens are invisible (Lepton runs VR games without "
@@ -96,6 +97,7 @@ register(UnrealSkipObbCheck)
 
 class UnrealSkipObbDelivery(Patch):
     id = "frame.unreal_skip_obb_delivery"
+    on_pc = True
     title = "Unreal: skip the OBB delivery check"
     description = ("Unreal's Java OBB delivery check can leave a game on an invisible DownloaderActivity screen "
                    "even with the manifest CRC check off (e.g. Into The Radius). Makes known Unreal "

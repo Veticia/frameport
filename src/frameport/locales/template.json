@@ -1395,7 +1395,7 @@
  "Skip this version": "",
  "Skips a Quest-only reporting step in Meta's audio library that crashes some games.": "",
  "Skips a separate data-file check when an Unreal game still hangs at startup with the content check off. Experimental; the game still needs its data.": "",
- "Skips Meta XR Audio's telemetry under x86_64 ARM translation (emulators). Not needed on the Frame, which runs games natively.": "",
+ "Skips Meta XR Audio's telemetry under x86_64 ARM translation (emulators). Not needed on the Frame, which runs games natively; added by itself to builds for this PC (AXRB) of games with Meta XR Audio.": "",
  "Skips picture layers the Frame would refuse. Leave it on.": "",
  "Sleep": "",
  "Smooth as butter": "",

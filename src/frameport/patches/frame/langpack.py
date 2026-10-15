@@ -68,6 +68,7 @@ EXPORTS = (
 
 class LanguagePacks(Patch):
     id = "frame.langpacks"
+    on_pc = True
     title = "Language packs from the game's files"
     description = ("OVRPort's platform loader answers the Meta Platform SDK's language-pack calls "
                    "(ovr_LanguagePack_GetCurrent/SetCurrent) with 'no request', so a game that asks for its language "
@@ -116,6 +117,7 @@ class LanguagePacks(Patch):
 
 class AssetFiles(Patch):
     id = "frame.asset_files"
+    on_pc = True
     title = "Content files from the game's data"
     description = ("Some games keep content in separate files next to their OBB (for example Star Wars: Tales from the "
                    "Galaxy's Edge: its seasons and sound banks) and ask Meta's platform for them as asset files. "

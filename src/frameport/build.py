@@ -6,7 +6,7 @@ import hashlib
 import shutil
 from pathlib import Path
 
-from .apk import sign
+from .apk import axml, sign
 from .apk.workspace import ApkWorkspace
 from .core.events import Reporter
 from .core.models import Analysis, BuildResult, Recipe, SourceGame
@@ -43,9 +43,9 @@ def apk_patches(selection: dict) -> list[base.Patch]:
 
 
 def apply_frame_fixes(apk_in: Path, apk_out_unsigned: Path, analysis: Analysis, recipe: Recipe,
-                      reporter: Reporter) -> tuple[list[str], list[dict], dict[str, str]]:
+                      reporter: Reporter, pc: bool = False) -> tuple[list[str], list[dict], dict[str, str]]:
     """Apply the recipe's apk-stage patches; returns (applied ids, checks, workarounds left out because OVRPort's
-    output already has the upstream fix (patches/upstream.py))."""
+    output already has the upstream fix (patches/upstream.py)). pc: the build for this PC (extract_native_libs)."""
     applied, checks = [], []
     with ApkWorkspace(apk_in) as ws:
         selection = upstream.resolve(ws, recipe.patches, reporter)
@@ -57,8 +57,24 @@ def apply_frame_fixes(apk_in: Path, apk_out_unsigned: Path, analysis: Analysis, 
                 reporter.log(f"applied {patch.id}" + (f" ({'; '.join(ctx.notes)})" if ctx.notes else ""))
             for name, ok, detail in patch.validate(ctx):
                 checks.append({"name": name, "ok": ok, "detail": detail})
+        if pc and "frame.adapter" in selection.patches and extract_native_libs(ws):
+            reporter.log("AndroidManifest.xml: extractNativeLibs on (FrameBridge reads its settings next to itself)")
         ws.write(apk_out_unsigned)
     return applied, checks, selection.superseded
+
+
+def extract_native_libs(ws: ApkWorkspace) -> bool:
+    """Builds for this PC: have Android unpack the native libraries. FrameBridge reads lib/<abi>/libframe_settings.so
+    with fopen next to its own path (dladdr); an app with extractNativeLibs="false" maps its libraries straight from
+    base.apk ("base.apk!/lib/..."), where fopen finds nothing. On the Frame the agent also hands the adapter the
+    settings (settings.conf via FRAMEBRIDGE_CONFIG, framebridge.conf in the game's storage), so the Frame build stays
+    unchanged; in AXRB the library is the only source."""
+    manifest = ws.read("AndroidManifest.xml")
+    changed = axml.set_bool_attr(manifest, "application", "extractNativeLibs", True)
+    if not changed or changed == manifest:
+        return False
+    ws.put("AndroidManifest.xml", changed)
+    return True
 
 
 def check_a32(analysis: Analysis, recipe: Recipe) -> None:
@@ -82,7 +98,11 @@ def build(source: SourceGame, analysis: Analysis, recipe: Recipe, outdir: Path, 
     """pc: the build for this PC (AXRB): only OVRPort's patches and the on_pc APK fixes (base.pc_selection)."""
     pkg = analysis.package
     if pc:
-        recipe = dataclasses.replace(recipe, patches=base.pc_selection(recipe.patches))
+        patches = base.pc_selection(recipe.patches, analysis)
+        if not recipe.overport:  # FrameBridge wraps OVRPort's loader: nothing to wrap without OVRPort
+            patches = {pid: p for pid, p in patches.items()
+                       if pid != "frame.adapter" and not pid.startswith("adapter.")}
+        recipe = dataclasses.replace(recipe, patches=patches)
     else:
         check_a32(analysis, recipe)
     work = work_dir() / pkg
@@ -116,7 +136,8 @@ def build(source: SourceGame, analysis: Analysis, recipe: Recipe, outdir: Path, 
                 shutil.copyfile(input_apk, patched)
             reporter.stage(f"Frame fixes ({variant})")
             unsigned = work / f"{pkg}.{variant}.unsigned.apk"
-            applied, checks, left_out = apply_frame_fixes(patched, unsigned, analysis, recipe, reporter)
+            applied, checks, left_out = apply_frame_fixes(patched, unsigned, analysis, recipe, reporter,
+                                                          **({"pc": True} if pc else {}))
             if variant == "primary":
                 superseded = left_out
             patched.unlink(missing_ok=True)
@@ -125,7 +146,8 @@ def build(source: SourceGame, analysis: Analysis, recipe: Recipe, outdir: Path, 
             sign.sign(unsigned, final, pkg)
             unsigned.unlink(missing_ok=True)
             reporter.stage(f"validate ({variant})")
-            checks += check_apk(final, pkg, expect_adapter=recipe.overport and not pc)
+            checks += check_apk(final, pkg, expect_adapter=recipe.overport and "frame.adapter" in recipe.patches
+                                if pc else recipe.overport)
             for c in checks:
                 reporter.check(c["name"], c["ok"], c["detail"])
             results[variant] = final

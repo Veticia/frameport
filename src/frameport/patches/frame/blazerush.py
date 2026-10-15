@@ -125,6 +125,7 @@ def patch_library(data: bytes) -> tuple[bytes, dict | None]:
 
 class BlazeRush(Patch):
     id = "frame.blazerush"
+    on_pc = True
     title = "BlazeRush: controllers without Meta avatars, own shader cache"
     description = ("BlazeRush 1.0.349 only (Klownicle's guide, GitHub #57). Its menus wait for Meta's avatar, which "
                    "never comes on the Frame, before they create the game's own controllers: the second menu ignored "

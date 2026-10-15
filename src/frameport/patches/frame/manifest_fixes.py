@@ -9,6 +9,7 @@ MANIFEST = "AndroidManifest.xml"
 
 class Launcher(Patch):
     id = "frame.launcher"
+    on_pc = True
     a32 = True  # also for 32-bit games on the bridge
     needs_vr = False
     title = "Launcher category (INFO → LAUNCHER)"
@@ -35,6 +36,7 @@ class Launcher(Patch):
 
 class NoDebuggable(Patch):
     id = "frame.nodebug"
+    on_pc = True
     needs_vr = False
     title = "Clear android:debuggable"
     description = ("OVRPort marks apps debuggable; that turns on CheckJNI, which aborts some Unreal games on sloppy "
@@ -68,6 +70,7 @@ class NoDebuggable(Patch):
 
 class MetaPermissions(Patch):
     id = "frame.meta_permissions"
+    on_pc = True
     title = "Declare Meta-only permissions"
     description = ("Declares com.oculus.permission.* / horizonos.permission.* that the app uses, so Android grants "
                    "them at install (for example the 'use spatial data' permission of mixed-reality games like "

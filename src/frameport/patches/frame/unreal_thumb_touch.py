@@ -138,6 +138,7 @@ def _engine(ws) -> str | None:
 
 class UnrealThumbTouch(Patch):
     id = "frame.unreal_thumb_touch"
+    on_pc = True
     title = "Unreal: thumb follows the capacitive touches"
     description = ("Unreal 4's Oculus input sets the ThumbUp axis (games animate the hand's thumb with it) from "
                    "Meta's near-touch sensing, which the Frame never reports: the thumb always points up. Uses the "
