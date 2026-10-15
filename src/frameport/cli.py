@@ -1017,8 +1017,14 @@ def fex_import_login(prefix: str = typer.Argument(..., help="a Wine prefix on th
 
 
 @fex_app.command("install")
-def fex_install(app_name: str = typer.Argument("oculus-first-contact", metavar="APP",
+def fex_install(app_name: Optional[str] = typer.Argument(None, metavar="APP",
                                                help="Meta's name for the game (verified: oculus-first-contact)"),
+                from_library: Optional[str] = typer.Option(None, "--from-library", help="Rift library ID: rift.<slug>"),
+                folder: Optional[Path] = typer.Option(None, "--folder", help="upload an existing game folder unchanged"),
+                title: Optional[str] = typer.Option(None, "--title", help="title for a local game copy"),
+                app_id: Optional[str] = typer.Option(None, "--app-id", help="Meta app ID if no config/cached ID exists"),
+                dest: Optional[str] = typer.Option(None, "--dest", help="external drive mount point on the Frame"),
+                runtime_check: bool = typer.Option(False, "--runtime-check", help="probe Meta's library state (<=120 s)"),
                 msaa: Optional[int] = typer.Option(None, help="MSAA samples for a verified game that allows it (1, 2 "
                                                          "or 4; game default 4). UNVERIFIED: with 2 the game never "
                                                          "rendered in two launches"),
@@ -1027,13 +1033,24 @@ def fex_install(app_name: str = typer.Argument("oculus-first-contact", metavar="
                                                       help="install a game that isn't verified with this mode "
                                                            "(only the generic fixes; may not start)"),
                 frame: Optional[str] = typer.Option(None, help=FRAME_HELP)):
-    """Make a game from the prefix playable from the Steam library (fixes, launcher, shortcut). Without
+    """Install a prefix game or upload a local Rift copy (fixes, launcher, shortcut). Without
     --force-unverified an unverified game is refused with what the Frame's static checks found."""
     from . import fexrift
 
     t = _fex_target(frame)
-    res = fexrift.install(t.frame, printing_reporter(False), app_name, msaa=msaa, add_to_steam=not no_steam,
-                          force_unverified=force_unverified)
+    if from_library or folder:
+        from . import fexinstall
+        res = fexinstall.install(t.frame, printing_reporter(False), from_library=from_library, folder=folder,
+                                 title=title, app=app_name, app_id=app_id, dest=dest, runtime_check=runtime_check,
+                                 msaa=msaa, add_to_steam=not no_steam, force_unverified=force_unverified)
+    else:
+        if title or app_id or dest:
+            raise typer.BadParameter("--title, --app-id and --dest require --from-library or --folder")
+        res = fexrift.install(t.frame, printing_reporter(False), app_name or "oculus-first-contact", msaa=msaa,
+                              add_to_steam=not no_steam, force_unverified=force_unverified)
+        if runtime_check:
+            res["checks"] = dict(res.get("checks") or {}, **t.frame.agent(
+                "fex_runtime_state", app=app_name or "oculus-first-contact", timeout=125))
     typer.echo(json.dumps(res, indent=1))
 
 

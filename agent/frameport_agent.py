@@ -7976,6 +7976,37 @@ def cmd_fex_import_login(args):
     return fex_helper("import_login", {"tar": os.path.join(FEX_ROOT, "incoming", "login.tar")})
 
 
+# Local-copy extension commands: validate removable storage here (the helper has no drive discovery). Never let a
+# missing mount silently turn an SD-card install into an upload to the root filesystem.
+def fex_local_dest(dest):
+    if not dest or dest == "internal":
+        return None
+    for d in cmd_drives({})["drives"]:
+        if not d["internal"] and d["path"] == dest:
+            resolve_dest(dest)                 # existing filesystem / writable-mount checks
+            return dest
+    raise AgentError("--dest must name an available external drive's mount point (see frame drives)")
+
+
+def cmd_fex_prepare_local(args):
+    pkg = check_pkg(args["package"])
+    dep = deployment(pkg)
+    if dep and (dep.get("kind") != "frame_fex" or dep.get("source") != "local_copy"
+                or dep.get("app") != args.get("app")):
+        raise AgentError(f"{pkg} is already installed in another way; uninstall it first")
+    return fex_helper("prepare_local", dict(args, package=pkg, dest=fex_local_dest(args.get("dest"))))
+
+
+def cmd_fex_register_local(args):
+    info = fex_helper("local_info", {"app": args["app"]})
+    fex_local_dest(info.get("dest"))
+    return fex_helper("register_local", args, timeout=7200)  # hashes large copies on the Frame, not on NTFS
+
+
+def cmd_fex_runtime_state(args):
+    return fex_helper("runtime_state", {"app": args["app"]}, timeout=120)
+
+
 def cmd_fex_install(args):
     """A game Meta's app downloaded (now in the prefix) as a Steam game: per-game fixes + launch.sh +
     deployment.json (kind frame_fex). The Steam shortcut is added like for other games (shortcuts)."""
@@ -7987,6 +8018,12 @@ def cmd_fex_install(args):
     dep = deployment(pkg)
     if dep and dep.get("kind") != "frame_fex":
         raise AgentError(f"{pkg} is already installed in another way")
+    local = None
+    if args.get("source") == "local_copy" or (dep or {}).get("source") == "local_copy":
+        local = fex_helper("local_info", {"app": app})
+        if local.get("package") != pkg or not local.get("registered"):
+            raise AgentError("local copy must be registered for this package first")
+        fex_local_dest(local.get("dest"))
     msaa = args.get("msaa")
     res = fex_helper("install", {"app": app, "anchor": anchor, "msaa": msaa if msaa in (1, 2, 4) else None,
                                  "force_unverified": bool(args.get("force_unverified"))})
@@ -7997,6 +8034,8 @@ def cmd_fex_install(args):
            "fixes": {k: res.get(k) for k in ("ime_patch", "msaa")}, "verified": bool(res.get("verified")),
            "checks": res.get("checks") or {},
            "agent_version": AGENT_VERSION, "installed": int(time.time())}
+    if local:
+        dep.update({k: local.get(k) for k in ("source", "app_id", "app_id_source", "store_app_id", "skipped", "dest")})
     path = os.path.join(anchor, "deployment.json")
     with open(path + ".tmp", "w") as f:
         json.dump(dep, f, indent=1)
@@ -8006,8 +8045,11 @@ def cmd_fex_install(args):
 
 
 def fex_uninstall(pkg, dep, args):
-    """Only the launcher, artwork and shortcut go: the game stays in the shared prefix (Meta's app owns it)."""
+    """Meta-owned games stay; FramePort local copies lose their game folder and manifests, preserving the prefix."""
     anchor = os.path.join(ANCHORS, pkg)
+    if dep.get("source") == "local_copy":
+        fex_local_dest(dep.get("dest"))
+        fex_helper("unregister_local", {"app": dep["app"], "package": pkg}, timeout=180)
     removed_sc = False
     if args.get("remove_shortcut") and steam_users():
         removed_sc = cmd_shortcuts({"remove": [{"exe": f'"{anchor}/launch.sh"', "appid": dep.get("appid")}]})["started"]
