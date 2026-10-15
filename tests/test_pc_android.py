@@ -706,7 +706,7 @@ def test_backend_patch_goes_into_the_pc_selection():
 
     p = get("pc.axrb_backend")
     assert p.on_pc and p.stage == "install" and p.CHOICES[0] == ("", "Automatic")
-    assert pc_selection({"pc.axrb_backend": {"backend": "direct"}, "frame.adapter": {}}) == {
+    assert pc_selection({"pc.axrb_backend": {"backend": "direct"}, "frame.gl_shim": {}}) == {
         "pc.axrb_backend": {"backend": "direct"}}
 
 
@@ -767,7 +767,8 @@ def test_install_for_direct_mode(tmp_path, monkeypatch, win):
         axrb.direct_launcher_text(inst)
     dep = json.loads((tmp_path / "rec" / "deployment.json").read_text())
     assert dep["backend"] == "direct" and dep["flags"] == ["-Translator", "digitalis"]
-    assert dep["recipe"]["patches"] == ["patch_oculus_unreal", "pc.axrb_backend"]
+    assert dep["recipe"]["patches"] == ["adapter.focus_hold", "frame.adapter", "patch_oculus_unreal",
+                                        "pc.axrb_backend"]
     exe, _, opts = pc_android.shortcut_fields(dep)
     assert "fp-axrb-direct.ps1" in opts and "-Package com.game.x " in opts and opts.endswith("-Translator digitalis")
     # an uninstall that drops the saves removes direct mode's Android data too

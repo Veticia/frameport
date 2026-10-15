@@ -2344,7 +2344,7 @@ Lets typing reach this app from Steam's on-screen keyboard or your PC's keyboard
 
 For this PC only: run the game in AXRB's direct mode (no Android emulator) or in AXRB's Android emulator. Automatic uses direct mode for Vulkan games.
 
-- `pc.axrb_backend`
+- `pc.axrb_backend` · also in builds for this PC (AXRB)
 - **Changes:** Install only: written on the Frame when the game is installed; the APK isn't changed.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
