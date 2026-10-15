@@ -817,7 +817,7 @@ python3 -I "$R/artifacts/fexrift.py" hidewin & HW=$!
 ( pp=$PPID; while sleep 2; do kill -0 "$pp" 2>/dev/null || {{ "$G/files/bin/wineserver" -k; break; }}; done ) & WD=$!
 echo "FramePort: starting {title}"
 cd {gamedir_q}
-taskset -c 4-7 "$G/proton" run "$R/revive/ReviveInjector.exe" {exe_q} {args}
+taskset -c 4-7 "$G/proton" run {injector}{exe_q} {args}
 """
 
 
@@ -830,6 +830,7 @@ def write_launcher(app, info, anchor):
     text = LAUNCHER.format(title=re.sub(r"[\\\"$`\n]", "", info["title"]), root_q=shlex.quote(ROOT),
                            anchor_q=shlex.quote(anchor), steam_q=shlex.quote(STEAM), gid=GAME_ID, game_env=env,
                            vrsetting=vr, gamedir_q=shlex.quote(os.path.dirname(exe)), exe_q=shlex.quote(exe),
+                           injector='"$R/revive/ReviveInjector.exe" ' if info.get("revive", True) else "",
                            args=" ".join(shlex.quote(a) for a in shlex.split(" ".join(info.get("args", [])))))
     put_text(os.path.join(anchor, "launch.sh"), text, 0o755)
     return exe
@@ -837,9 +838,12 @@ def write_launcher(app, info, anchor):
 
 def game_info(app):
     """(info, verified): GAMES' entry over the manifest's exe/arguments/name."""
-    verified = app in GAMES
     info = dict(manifest_launch(app) or {})
     info.update(GAMES.get(app) or {})
+    # Compatibility profiles may match a manifest name or a surveyed executable, without replacing its launch path.
+    for hook in GAME_INFO_HOOKS:
+        hook(app, info)
+    verified = info.get("status", "verified" if app in GAMES else "untested") == "verified"
     if not info.get("exe"):
         raise FexError(f"{app} has no manifest in the prefix: import it with the login first")
     info.setdefault("title", app)
@@ -858,7 +862,13 @@ def cmd_install(args):
     checks = static_checks(exe)
     target, patch = checks.pop("_ime_target"), checks.pop("_ime_patch")
     res = {"exe": exe, "game_dir": game_dir, "checks": checks, "verified": verified, "title": info["title"]}
-    if not verified and not args.get("force_unverified"):
+    # A static "likely" profile is installable with a warning, never promoted to headset verification. Blocked
+    # profiles (e.g. anti-cheat) cannot be forced; both decisions happen before any executable/launcher edits.
+    if info.get("status") == "blocked":
+        raise FexError(f"{app} is blocked for this mode: {info.get('notes', '')}")
+    if info.get("status") == "likely":
+        res["warnings"] = ["Static compatibility profile only; rendering and gameplay are unverified."]
+    if not verified and info.get("status") != "likely" and not args.get("force_unverified"):
         raise FexError(f"{app} isn't verified for this mode (verified: {', '.join(GAMES)}); static checks: "
                        f"{json.dumps(checks)}. Install it anyway with force_unverified.")
     if patch:
@@ -1218,6 +1228,7 @@ COMMANDS = {"status": cmd_status, "setup": cmd_setup, "import_login": cmd_import
 EXTENSIONS = ("login", "install", "compat", "perf")
 LAUNCHER_ENV_HOOKS = []    # fn(app, info) -> list of "export X=Y" lines added to the launcher's environment block
 INSTALL_CHECK_HOOKS = []   # fn(app, info, result) -> dict of extra checks merged into cmd_install's result
+GAME_INFO_HOOKS = []       # fn(app, info): enrich manifest data with a compatibility profile before install/launch
 LOADED_EXTENSIONS = []
 
 

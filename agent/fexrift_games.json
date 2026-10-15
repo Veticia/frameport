@@ -1,10 +1,12 @@
 {
   "_comment": [
-    "Games verified on the Frame and what they need beyond the generic fixes (agent/fexrift.py load_games).",
-    "A game's exe and launch arguments come from its Meta manifest when it isn't listed here; the generic fix for",
-    "Unreal's IME deadlock (find_ime_patch) is found in the binaries, ime_patch here is only the fallback when the",
-    "finder misses (exe RVA, expected bytes, new bytes). Opt-ins only safe for a game they were checked with stay per",
-    "game: fp_mem's big-block cache hands memory back unzeroed; msaa_ini lets --msaa write the game's Engine.ini."
+    "FEX compatibility profiles, loaded by fexrift.py and matched by fexrift_compat.py. No entitlement changes.",
+    "match: OR of canonical_names (exact Meta names), sha256 (list of exe hashes), executables (list of {name,size}, both required). Without match the key is the exact canonical name. Ambiguous matches are refused.",
+    "status: verified (headset checked), likely (static evidence; install with warning), untested (force_unverified required), blocked (refuse even force). graphics: d3d11|d3d9 (DXVK), d3d12 (vkd3d-proton), opengl (PROTON_USE_WINED3D), vulkan.",
+    "env: string-valued environment; args: optional launch arguments override (absent keeps manifest). dxvk: dxvk.conf lines written only to the launcher anchor. notes: evidence and first-launch checks. revive: false for direct OpenVR games, otherwise true.",
+    "ime_patch: optional fallback {rva,old,new}, RVA may be hex; generic finder always wins, including old modular Core.dll. Null means no fallback, never an exemption from IME checks.",
+    "fp_mem: off|candidate|enabled; candidate is informational and NEVER enables the unzeroed cache. enabled requires verified status. bigcache_mb: cache size when enabled, default 256. env FP_MEM is an explicit opt-in retained for First Contact.",
+    "exe is the verified First Contact fallback only; other profiles keep the Meta manifest launch path. msaa_ini allows --msaa for that verified game only."
   ],
   "oculus-first-contact": {
     "title": "Oculus First Contact",
@@ -22,6 +24,11 @@
       "FP_MEM": "1",
       "FP_BIGCACHE_MB": "256"
     },
-    "msaa_ini": true
+    "msaa_ini": true,
+    "status": "verified",
+    "graphics": "d3d11",
+    "fp_mem": "enabled",
+    "bigcache_mb": 256,
+    "notes": "Headset verified; r.MobileMSAA=2 prevented rendering. Other games remain unverified."
   }
 }

@@ -117,3 +117,39 @@ def test_verdict(sv):
         == "likely OK"
     assert sv.verdict(dict(ok, engine="custom", ime_patch=None))[0] == "needs work"
     assert sv.verdict(dict(ok, drm=["anti-cheat files"]))[0] == "blocked"
+
+
+def test_runtime_facts_and_routes(sv):
+    facts = sv.runtime_facts({"XAUDIO2_7.dll", "MFReadWrite.dll", "bink2w64.dll"}, {"game.exe"})
+    assert facts == {"xaudio2": True, "media_foundation": True, "bink": True, "anti_cheat": False}
+    assert sv.runtime_facts({"EasyAntiCheat.dll"}, set())["anti_cheat"]
+    assert sv.graphics_route({"graphics": ["opengl", "d3d9"]}) == "d3d9"
+    assert sv.graphics_route({"graphics": ["d3d12"]}) == "d3d12"
+    assert sv.graphics_route({"graphics": ["opengl"]}) == "opengl"
+
+
+def test_ready_to_paste_profile_and_cache_hint(sv):
+    r = {"title": "Game", "exe": "Proj/Binaries/Win64/Game.exe", "exe_size": 123,
+         "graphics": ["d3d11"], "large_block_alloc": "FMallocBinned2: fp_mem candidate",
+         "runtime": {"media_foundation": True}, "verdict": ("likely OK", "static survey")}
+    p = sv.suggested_profile(r)
+    assert p["match"] == {"executables": [{"name": "Game.exe", "size": 123}]}
+    assert p["status"] == "likely" and p["fp_mem"] == "candidate" and p["env"] == {}
+    assert "Media Foundation" in p["notes"]
+    assert sv.suggested_profile(dict(r, verdict=("blocked", "anti-cheat")))["status"] == "blocked"
+
+
+def test_survey_per_exe_facts_and_profile(sv, tmp_path, monkeypatch):
+    from frameport.analysis.rift import PEInfo
+    from types import SimpleNamespace
+
+    exe = tmp_path / "Game.exe"
+    exe.write_bytes(b"not executed")
+    analysis = SimpleNamespace(xr="OpenVR", engine="Unity", extra={"platform_sdk": False,
+                               "exe_candidates": [{"path": "Game.exe"}]})
+    monkeypatch.setattr(sv.rift, "analyze", lambda *a: analysis)
+    monkeypatch.setattr(sv.rift, "read_pe", lambda *a, **kw: (PEInfo("x86", ["opengl32.dll", "mfplat.dll"]), b"5.4.2f2"))
+    result = sv.survey_game("Game", tmp_path, "Game.exe")
+    assert result["exe_32bit"] and result["executables"][0]["exe_32bit"]
+    assert result["runtime"]["media_foundation"] and result["suggested_graphics"] == "opengl"
+    assert result["profile"]["status"] == "untested"
