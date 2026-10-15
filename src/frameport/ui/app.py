@@ -1307,17 +1307,15 @@ class FramePortApp:
             def ok(e):
                 self.page.pop_dialog()
                 ask_obb()
-            self.page.show_dialog(ft.AlertDialog(
-                title=ft.Text(tr("Set up Quest games on this PC?"), weight=ft.FontWeight.W_600),
-                content=ft.Container(C.body(
-                    C.HELP["pc_android"] + "\n\n" +
-                    tr("FramePort installs AXRB from its official release (per user, no administrator rights) and "
-                       "Google's Android emulator files. AXRB is a separate program with its own licence; "
-                       "you can remove it later from Windows' app list.")), width=T.px(520)),
-                bgcolor=T.SURFACE_2, shape=ft.RoundedRectangleBorder(radius=T.RADIUS),
-                modal=True, on_dismiss=pick(closed),
-                actions=[C.ghost(tr("Cancel"), on_click=pick(cancel)),
-                         C.primary(tr("Download and install"), on_click=pick(ok))]))
+            self.page.show_dialog(C.dialog(
+                tr("Set up Quest games on this PC?"),
+                C.body(C.HELP["pc_android"] + "\n\n" +
+                       tr("FramePort installs AXRB from its official release (per user, no administrator rights) and "
+                          "Google's Android emulator files. AXRB is a separate program with its own licence; "
+                          "you can remove it later from Windows' app list.")),
+                [C.ghost(tr("Cancel"), on_click=pick(cancel)),
+                 C.primary(tr("Download and install"), on_click=pick(ok))],
+                modal=True, on_dismiss=pick(closed)))
 
         def ask_frame_oculus():
             # Installing an Oculus/LibOVR Rift game on the Frame: warn that it needs Revive (which can't run there)
