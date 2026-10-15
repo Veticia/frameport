@@ -5,7 +5,6 @@ import re
 import shlex
 import struct
 
-
 STATUSES = {"verified", "likely", "untested", "blocked"}
 GRAPHICS = {"d3d11", "d3d9", "d3d12", "opengl", "vulkan"}
 
@@ -112,6 +111,9 @@ def register(core):
         facts = exe_facts(result["exe"])
         facts.update(profile=info.get("profile"), profile_status=info.get("status", "untested"),
                      graphics=info.get("graphics", "d3d11"), fp_mem=info.get("fp_mem", "off"))
+        # frameport_agent forwards checks to the PC and deployment.json; top-level helper warnings aren't forwarded.
+        if result.get("warnings"):
+            facts["profile_warnings"] = result["warnings"]
         if facts.get("exe_32bit"):
             facts["wow64"] = "untested: requires GE WoW64, 32-bit graphics and SteamVR vrclient bridge under FEX"
         if facts["graphics"] == "opengl":

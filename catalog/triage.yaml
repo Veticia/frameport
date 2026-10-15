@@ -39,7 +39,7 @@ signatures:
     suggest: []
   - id: fex-wined3d-init
     kind: pcvr
-    pattern: '(?i:wined3d[^\r\n]*(?:failed to (?:create|initialize)|could not (?:create|initialize)|OpenGL support is disabled))'
+    pattern: '(?i:wined3d[^\r\n]*(?:failed to (?:create|initialize|find)|could not (?:create|initialize)|OpenGL support is disabled))'
     severity: error
     diagnosis: Wine's OpenGL renderer could not initialize. The FEX route has no configured GL thunk; verify the guest rootfs GL driver and display access. A Vulkan thunk alone does not provide host OpenGL. Prefer the game's D3D9 or D3D11 route when available.
     suggest: []

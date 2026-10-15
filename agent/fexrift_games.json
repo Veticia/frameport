@@ -30,5 +30,367 @@
     "fp_mem": "enabled",
     "bigcache_mb": 256,
     "notes": "Headset verified; r.MobileMSAA=2 prevented rendering. Other games remain unverified."
+  },
+  "arktika-1": {
+    "title": "Arktika 1",
+    "match": {
+      "executables": [
+        {
+          "name": "arktika1.exe",
+          "size": 20181504
+        }
+      ]
+    },
+    "status": "untested",
+    "graphics": "d3d11",
+    "env": {},
+    "ime_patch": null,
+    "fp_mem": "off",
+    "bigcache_mb": 256,
+    "dxvk": [],
+    "notes": "graphics API unclear (?); custom engine: no Unreal/Unity fixes apply; startup/allocator behaviour unknown; d3d11 is a trial default, not a detected API"
+  },
+  "asgards-wrath": {
+    "title": "Asgards Wrath",
+    "match": {
+      "executables": [
+        {
+          "name": "WrathGame-Win64-Shipping.exe",
+          "size": 63707648
+        }
+      ]
+    },
+    "status": "likely",
+    "graphics": "d3d11",
+    "env": {},
+    "ime_patch": null,
+    "fp_mem": "candidate",
+    "bigcache_mb": 256,
+    "dxvk": [],
+    "notes": "same profile as First Contact (x64, D3D11, LibOVR/OpenVR); Media Foundation videos need a playback test"
+  },
+  "brass-tactics": {
+    "title": "Brass Tactics",
+    "match": {
+      "executables": [
+        {
+          "name": "Brass-Win64-Shipping.exe",
+          "size": 52790272
+        }
+      ]
+    },
+    "status": "likely",
+    "graphics": "d3d11",
+    "env": {},
+    "ime_patch": null,
+    "fp_mem": "off",
+    "bigcache_mb": 256,
+    "dxvk": [],
+    "notes": "same profile as First Contact (x64, D3D11, LibOVR/OpenVR); Media Foundation videos need a playback test"
+  },
+  "chronos": {
+    "title": "Chronos",
+    "match": {
+      "executables": [
+        {
+          "name": "Chronos-Win64-Shipping.exe",
+          "size": 40722432
+        }
+      ]
+    },
+    "status": "likely",
+    "graphics": "d3d11",
+    "env": {},
+    "ime_patch": null,
+    "fp_mem": "off",
+    "bigcache_mb": 256,
+    "dxvk": [],
+    "notes": "same profile as First Contact (x64, D3D11, LibOVR/OpenVR); Media Foundation videos need a playback test"
+  },
+  "defector": {
+    "title": "Defector",
+    "match": {
+      "executables": [
+        {
+          "name": "DFCTR.exe",
+          "size": 16204288
+        }
+      ]
+    },
+    "status": "untested",
+    "graphics": "d3d11",
+    "env": {},
+    "ime_patch": null,
+    "fp_mem": "off",
+    "bigcache_mb": 256,
+    "dxvk": [],
+    "notes": "custom engine: no Unreal/Unity fixes apply; startup/allocator behaviour unknown"
+  },
+  "hubris": {
+    "title": "Hubris",
+    "match": {
+      "executables": [
+        {
+          "name": "HubrisVR-Win64-Shipping.exe",
+          "size": 85706240
+        }
+      ]
+    },
+    "status": "likely",
+    "graphics": "d3d11",
+    "env": {},
+    "ime_patch": null,
+    "fp_mem": "candidate",
+    "bigcache_mb": 256,
+    "dxvk": [],
+    "notes": "same profile as First Contact (x64, D3D11, LibOVR/OpenXR/OpenVR); Media Foundation videos need a playback test"
+  },
+  "lies-beneath": {
+    "title": "Lies Beneath",
+    "match": {
+      "executables": [
+        {
+          "name": "Kodiak-Win64-Shipping.exe",
+          "size": 63537664
+        }
+      ]
+    },
+    "status": "likely",
+    "graphics": "d3d11",
+    "env": {},
+    "ime_patch": null,
+    "fp_mem": "candidate",
+    "bigcache_mb": 256,
+    "dxvk": [],
+    "notes": "same profile as First Contact (x64, D3D11, LibOVR/OpenVR); Media Foundation videos need a playback test"
+  },
+  "lone-echo": {
+    "title": "Lone Echo",
+    "match": {
+      "executables": [
+        {
+          "name": "loneecho.exe",
+          "size": 22336512
+        }
+      ]
+    },
+    "status": "untested",
+    "graphics": "d3d11",
+    "env": {},
+    "ime_patch": null,
+    "fp_mem": "off",
+    "bigcache_mb": 256,
+    "dxvk": [],
+    "notes": "custom engine: no Unreal/Unity fixes apply; startup/allocator behaviour unknown"
+  },
+  "lone-echo-2": {
+    "title": "Lone Echo 2",
+    "match": {
+      "executables": [
+        {
+          "name": "loneecho2.exe",
+          "size": 33436160
+        }
+      ]
+    },
+    "status": "untested",
+    "graphics": "d3d12",
+    "env": {},
+    "ime_patch": null,
+    "fp_mem": "off",
+    "bigcache_mb": 256,
+    "dxvk": [],
+    "notes": "D3D12: needs vkd3d-proton on Turnip under FEX (untested); custom engine: no Unreal/Unity fixes apply; startup/allocator behaviour unknown"
+  },
+  "rick-and-morty-virtual-rick-ality": {
+    "title": "Rick and Morty - Virtual Rick-ality",
+    "match": {
+      "executables": [
+        {
+          "name": "RickAndMortyVR.exe",
+          "size": 21284352
+        }
+      ]
+    },
+    "status": "untested",
+    "graphics": "opengl",
+    "env": {},
+    "ime_patch": null,
+    "fp_mem": "off",
+    "bigcache_mb": 256,
+    "dxvk": [],
+    "notes": "OpenGL: no FEX GL thunk configured; rootfs GL renderer unverified; OpenVR directly, no Platform SDK; guest GL and speech WinRT need a device check",
+    "revive": false
+  },
+  "robo-recall": {
+    "title": "Robo Recall",
+    "match": {
+      "executables": [
+        {
+          "name": "RoboRecall-Win64-Shipping.exe",
+          "size": 198144
+        }
+      ]
+    },
+    "status": "likely",
+    "graphics": "d3d11",
+    "env": {},
+    "ime_patch": null,
+    "fp_mem": "off",
+    "bigcache_mb": 256,
+    "dxvk": [],
+    "notes": "same profile as First Contact (x64, D3D11, LibOVR/OpenVR)"
+  },
+  "skydances-behemoth": {
+    "title": "Skydances BEHEMOTH",
+    "match": {
+      "executables": [
+        {
+          "name": "BHM-Win64-Shipping.exe",
+          "size": 144449024
+        }
+      ]
+    },
+    "status": "likely",
+    "graphics": "d3d11",
+    "env": {},
+    "ime_patch": null,
+    "fp_mem": "candidate",
+    "bigcache_mb": 256,
+    "dxvk": [],
+    "notes": "same profile as First Contact (x64, D3D11, LibOVR/OpenXR); Media Foundation videos need a playback test"
+  },
+  "stormland": {
+    "title": "Stormland",
+    "match": {
+      "executables": [
+        {
+          "name": "Stormland.exe",
+          "size": 85195776
+        }
+      ]
+    },
+    "status": "untested",
+    "graphics": "d3d11",
+    "env": {},
+    "ime_patch": null,
+    "fp_mem": "off",
+    "bigcache_mb": 256,
+    "dxvk": [],
+    "notes": "custom engine: no Unreal/Unity fixes apply; startup/allocator behaviour unknown; Media Foundation videos need a playback test"
+  },
+  "the-climb": {
+    "title": "The Climb",
+    "match": {
+      "executables": [
+        {
+          "name": "Climb.exe",
+          "size": 95534080
+        }
+      ]
+    },
+    "status": "untested",
+    "graphics": "d3d9",
+    "env": {},
+    "ime_patch": null,
+    "fp_mem": "off",
+    "bigcache_mb": 256,
+    "dxvk": [],
+    "notes": "D3D9: DXVK under FEX (untested); CryEngine engine: no Unreal/Unity fixes apply; startup/allocator behaviour unknown; D3D9 preferred over imported GL; confirm the actual selected renderer"
+  },
+  "the-unspoken": {
+    "title": "The Unspoken",
+    "match": {
+      "executables": [
+        {
+          "name": "Unspoken.exe",
+          "size": 69496320
+        }
+      ]
+    },
+    "status": "untested",
+    "graphics": "d3d11",
+    "env": {},
+    "ime_patch": null,
+    "fp_mem": "off",
+    "bigcache_mb": 256,
+    "dxvk": [],
+    "notes": "custom engine: no Unreal/Unity fixes apply; startup/allocator behaviour unknown; Media Foundation videos need a playback test"
+  },
+  "vader-immortal-episode-i": {
+    "title": "Vader Immortal - Episode I",
+    "match": {
+      "executables": [
+        {
+          "name": "WKND-Win64-Shipping.exe",
+          "size": 58100736
+        }
+      ]
+    },
+    "status": "likely",
+    "graphics": "d3d11",
+    "env": {},
+    "ime_patch": null,
+    "fp_mem": "off",
+    "bigcache_mb": 256,
+    "dxvk": [],
+    "notes": "same profile as First Contact (x64, D3D11, LibOVR); Media Foundation videos need a playback test"
+  },
+  "vader-immortal-episode-ii": {
+    "title": "Vader Immortal - Episode II",
+    "match": {
+      "executables": [
+        {
+          "name": "WKND-Win64-Shipping.exe",
+          "size": 59464192
+        }
+      ]
+    },
+    "status": "likely",
+    "graphics": "d3d11",
+    "env": {},
+    "ime_patch": null,
+    "fp_mem": "off",
+    "bigcache_mb": 256,
+    "dxvk": [],
+    "notes": "same profile as First Contact (x64, D3D11, LibOVR); Media Foundation videos need a playback test"
+  },
+  "vader-immortal-episode-iii": {
+    "title": "Vader Immortal - Episode III",
+    "match": {
+      "executables": [
+        {
+          "name": "WKND-Win64-Shipping.exe",
+          "size": 59814912
+        }
+      ]
+    },
+    "status": "likely",
+    "graphics": "d3d11",
+    "env": {},
+    "ime_patch": null,
+    "fp_mem": "off",
+    "bigcache_mb": 256,
+    "dxvk": [],
+    "notes": "same profile as First Contact (x64, D3D11, LibOVR/OpenVR); Media Foundation videos need a playback test"
+  },
+  "wilsons-heart": {
+    "title": "Wilsons Heart",
+    "match": {
+      "executables": [
+        {
+          "name": "WHVR.exe",
+          "size": 15379968
+        }
+      ]
+    },
+    "status": "untested",
+    "graphics": "d3d11",
+    "env": {},
+    "ime_patch": null,
+    "fp_mem": "off",
+    "bigcache_mb": 256,
+    "dxvk": [],
+    "notes": "custom engine: no Unreal/Unity fixes apply; startup/allocator behaviour unknown"
   }
 }

@@ -114,7 +114,7 @@ def test_verdict(sv):
     assert sv.verdict(dict(ok, graphics=["d3d12"]))[0] == "needs work"
     assert sv.verdict(dict(ok, ime_patch="CVar name found but not its reference"))[0] == "needs work"
     assert sv.verdict(dict(ok, ime_patch="no Slate.DeferWindowsMessageProcessing (older Unreal or not Unreal)"))[0] \
-        == "likely OK"
+        == "needs work"  # a missing marker is not proof that an older engine cannot defer IME messages
     assert sv.verdict(dict(ok, engine="custom", ime_patch=None))[0] == "needs work"
     assert sv.verdict(dict(ok, drm=["anti-cheat files"]))[0] == "blocked"
 
@@ -135,20 +135,23 @@ def test_ready_to_paste_profile_and_cache_hint(sv):
     p = sv.suggested_profile(r)
     assert p["match"] == {"executables": [{"name": "Game.exe", "size": 123}]}
     assert p["status"] == "likely" and p["fp_mem"] == "candidate" and p["env"] == {}
+    assert "args" not in p  # preserve Meta's manifest arguments when pasted into the profile catalog
     assert "Media Foundation" in p["notes"]
     assert sv.suggested_profile(dict(r, verdict=("blocked", "anti-cheat")))["status"] == "blocked"
 
 
 def test_survey_per_exe_facts_and_profile(sv, tmp_path, monkeypatch):
-    from frameport.analysis.rift import PEInfo
     from types import SimpleNamespace
+
+    from frameport.analysis.rift import PEInfo
 
     exe = tmp_path / "Game.exe"
     exe.write_bytes(b"not executed")
     analysis = SimpleNamespace(xr="OpenVR", engine="Unity", extra={"platform_sdk": False,
                                "exe_candidates": [{"path": "Game.exe"}]})
     monkeypatch.setattr(sv.rift, "analyze", lambda *a: analysis)
-    monkeypatch.setattr(sv.rift, "read_pe", lambda *a, **kw: (PEInfo("x86", ["opengl32.dll", "mfplat.dll"]), b"5.4.2f2"))
+    pi = PEInfo("x86", ["opengl32.dll", "mfplat.dll"])
+    monkeypatch.setattr(sv.rift, "read_pe", lambda *a, **kw: (pi, b"5.4.2f2"))
     result = sv.survey_game("Game", tmp_path, "Game.exe")
     assert result["exe_32bit"] and result["executables"][0]["exe_32bit"]
     assert result["runtime"]["media_foundation"] and result["suggested_graphics"] == "opengl"

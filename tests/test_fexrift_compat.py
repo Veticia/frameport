@@ -7,7 +7,6 @@ import struct
 from pathlib import Path
 
 import pytest
-
 from test_fexrift import _ime_pe, _meta_game
 from test_fexrift_ext import load_copy
 
@@ -52,6 +51,7 @@ def test_likely_installs_with_warning_and_without_fp_mem(fx, tmp_path):
     assert info["exe"] == "Proj/Binaries/Win64/Game.exe" and not verified
     result = fx.cmd_install({"app": "manifest-name", "anchor": str(tmp_path / "anchor")})
     assert result["warnings"] and result["verified"] is False
+    assert result["checks"]["profile_warnings"] == result["warnings"]
     assert result["checks"]["profile"] == "survey-name" and result["checks"]["fp_mem"] == "candidate"
     text = Path(result["launcher"]).read_text()
     assert "export FP_MEM=1" not in text and "graphics=d3d11" in text
@@ -69,6 +69,14 @@ def test_untested_requires_force_and_blocked_cannot_be_forced(fx, tmp_path):
     fx.GAMES["test"]["status"] = "blocked"
     with pytest.raises(fx.FexError, match="blocked"):
         fx.cmd_install(dict(args, force_unverified=True))
+
+
+def test_profile_key_does_not_bypass_its_build_match(fx):
+    _meta_game(fx, "same-name", "Proj/Binaries/Win64/Game.exe")
+    fx.GAMES["same-name"] = {"match": {"executables": [{"name": "Game.exe", "size": 99}]},
+                             "status": "likely", "graphics": "d3d12"}
+    info, verified = fx.game_info("same-name")
+    assert not verified and "status" not in info and "graphics" not in info
 
 
 @pytest.mark.parametrize("route", ["d3d11", "d3d9", "d3d12", "opengl", "vulkan"])
@@ -147,5 +155,6 @@ def test_fex_triage(log, sig):
 def test_fex_triage_does_not_treat_normal_completion_as_hang():
     from frameport.validate.triage import triage
 
-    result = triage("OVRLibrarian: Service invocation completed\nReviveInjector: Succesfully injected!", "RUNNING", "rift.test")
+    log = "OVRLibrarian: Service invocation completed\nReviveInjector: Succesfully injected!"
+    result = triage(log, "RUNNING", "rift.test")
     assert not any(f.id in ("fex-librarian-stuck", "fex-revive-injector") for f in result.findings)

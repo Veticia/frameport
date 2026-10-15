@@ -839,11 +839,14 @@ def write_launcher(app, info, anchor):
 def game_info(app):
     """(info, verified): GAMES' entry over the manifest's exe/arguments/name."""
     info = dict(manifest_launch(app) or {})
-    info.update(GAMES.get(app) or {})
+    known = GAMES.get(app) or {}
+    legacy = app in GAMES and "match" not in known
+    if legacy:
+        info.update(known)
     # Compatibility profiles may match a manifest name or a surveyed executable, without replacing its launch path.
     for hook in GAME_INFO_HOOKS:
         hook(app, info)
-    verified = info.get("status", "verified" if app in GAMES else "untested") == "verified"
+    verified = info.get("status", "verified" if legacy else "untested") == "verified"
     if not info.get("exe"):
         raise FexError(f"{app} has no manifest in the prefix: import it with the login first")
     info.setdefault("title", app)

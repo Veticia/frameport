@@ -347,7 +347,7 @@ def survey_game(title: str, game_dir: Path, exe_rel: str | None) -> dict:
         rhi, src = unreal_rhi(cfg.get("config") or {})
         res["graphics"] = [rhi]
         res["graphics_from"] = src
-        # Unreal IME deadlock fix: exe (monolithic), else modular ApplicationCore/Slate
+        # Unreal IME deadlock fix: exe (monolithic), else modular ApplicationCore/Slate (Core before that split).
         patch, why = FX.find_ime_patch(data)
         if not patch:
             for n, p in sorted(names.items()):
@@ -402,7 +402,9 @@ def survey_game(title: str, game_dir: Path, exe_rel: str | None) -> dict:
         try:
             pi = info if p == exe else rift.read_pe(p, limit=80 << 20)[0]
             facts = runtime_facts(set(pi.imports) | set(pi.delay_imports), names)
-            res["executables"].append(dict(exe=rel, arch=pi.machine, exe_32bit=pi.machine == "x86", **facts))
+            g = sorted({GRAPHICS[i] for i in set(pi.imports) | set(pi.delay_imports) if i in GRAPHICS})
+            res["executables"].append(dict(exe=rel, arch=pi.machine, exe_32bit=pi.machine == "x86",
+                                           graphics_imports=g, **facts))
         except (OSError, rift.PEError, struct.error, ValueError):
             res["executables"].append({"exe": rel, "error": "PE unreadable"})
     other = []
@@ -439,7 +441,7 @@ def graphics_route(r: dict) -> str:
     g = r.get("graphics", [])
     # Unreal's config already reduced its imports to the selected RHI. For custom multi-API engines prefer a
     # DXVK route over GL; imports prove availability, not that the game will select that renderer at runtime.
-    return next((api for api in ("d3d12", "d3d11", "d3d9", "opengl", "vulkan") if api in g), "d3d11")
+    return next((api for api in ("d3d11", "d3d12", "d3d9", "opengl", "vulkan") if api in g), "d3d11")
 
 
 def suggested_profile(r: dict) -> dict:
@@ -448,7 +450,7 @@ def suggested_profile(r: dict) -> dict:
             "match": {"executables": [{"name": Path(r["exe"]).name, "size": r["exe_size"]}]},
             "status": status, "graphics": graphics_route(r), "env": {}, "ime_patch": None,
             "fp_mem": "candidate" if "candidate" in r.get("large_block_alloc", "") else "off",
-            "bigcache_mb": 256, "dxvk": [], "args": [],
+            "bigcache_mb": 256, "dxvk": [],
             "notes": r["verdict"][1] + ("; Media Foundation videos need a playback test" if
                                        r.get("runtime", {}).get("media_foundation") else "")}
 
@@ -477,8 +479,7 @@ def verdict(r: dict) -> tuple[str, str]:
         work.append("anti-tamper section (" + ", ".join(r["drm"]) + "): heavier under FEX, may break")
     if r.get("vr") == ["?"]:
         work.append("VR API not detected")
-    if r.get("engine", "").startswith("Unreal") and isinstance(r.get("ime_patch"), str) \
-            and "older Unreal" not in r["ime_patch"]:
+    if r.get("engine", "").startswith("Unreal") and isinstance(r.get("ime_patch"), str):
         work.append(f"IME fix site not found ({r['ime_patch']})")
     if r.get("engine") in ("custom", "CryEngine"):
         work.append(f"{r['engine']} engine: no Unreal/Unity fixes apply; startup/allocator behaviour unknown")
