@@ -78,3 +78,46 @@ Shadow); an AXRB issue for the Pinball crash.
 - A game in the headset through SteamVR (picture, audio, controllers; Steam Frame controllers: AXRB #20).
 - Pinball FX VR's Vulkan crash with the host attached (AXRB's demo game: likely an AXRB/emulator issue if it repeats).
 - Play from the PC's Steam library (shortcut → launcher script → AXRB).
+
+## Testing without a headset (Monado's simulated HMD, 2026-10-15)
+
+AXRB's host bridge needs an OpenXR session with a D3D11 binding, which SteamVR doesn't give without a headset. For
+unattended tests FramePort can run the bridge against **Monado for Windows** with Monado's simulated HMD instead,
+without changing the system's OpenXR runtime or touching SteamVR:
+
+- **Monado build:** an official CI artifact of `monado/monado` (gitlab.freedesktop.org, project 2685), job `windows`
+  of a `main` pipeline (there is no Windows release asset; the job's `install/` folder is the portable runtime:
+  `bin\monado-service.exe`, `bin\openxr_monado.dll`, `openxr_monado.json`, SDL2/Vulkan loader DLLs). Tested build:
+  pipeline 1766968, job 112793105, commit 8b259763f (`v25.1.0-917-g8b259763f`). Unpacked by hand into
+  `%LOCALAPPDATA%\FramePort-dev\monado\install` (or `FRAMEPORT_MONADO_DIR`): no installer, no UAC, no registry. Its
+  `share\steamvr-monado` (a SteamVR driver) is never registered.
+- **Selection per process only:** the OpenXR loader's `XR_RUNTIME_JSON=<monado>\openxr_monado.json`. HKLM's
+  `ActiveRuntime` stays SteamVR. AXRB's run script registers an app identity with SteamVR whenever HKLM names SteamVR
+  (an OpenVR utility client, which starts SteamVR), so under the simulator FramePort's launcher call answers that one
+  `python steamvr_app_identity.py` call "failed" (the script only warns).
+- **Service settings** (`tools/xr_sim.SERVICE_ENV`): `SIMULATED_ENABLE=1` (the simulated builder; the Windows build
+  only has the qwerty/remote/simulated builders, so no real device is probed), `SIMULATED_LEFT/RIGHT=ml2` (the only
+  simulated controllers whose bindings cover the Vive wand profile: AXRB suggests Touch/Index/Vive, so with `simple`
+  or `wmr` its hands stay inactive), `XRT_COMPOSITOR_DEFAULT_FRAMERATE=72`. Headless variant: `XRT_COMPOSITOR_NULL=1`
+  + `XRT_COMPOSITOR_NULL_FPS=72` (no window, nothing to capture).
+- **D3D11 + adapter:** Monado's D3D11 client compositor works (timeline semaphores); it renders on the discrete GPU
+  (Vulkan device 0, RTX 4080 SUPER here; `XRT_COMPOSITOR_FORCE_GPU_INDEX` would change it) and asks D3D11 clients for
+  that adapter's LUID, which DXGI finds.
+- **Results:** a minimal D3D11 client (`native/xrsimprobe/xr_sim_probe.cpp`, built with VS Build Tools against the
+  Khronos `openxr_loader_windows` 1.1.63 release) went IDLE → READY → SYNCHRONIZED → VISIBLE → FOCUSED in 0.01 s
+  and submitted 72 frames/s until it asked to exit. AXRB's host bridge (`--serve-openxr 38490 0 <title>`, no
+  emulator) reached `D3D11 graphics binding ready`, session state 5 (FOCUSED), `AXRB TCP: listening on
+  0.0.0.0:38490`, both controllers active with valid poses, `host-end-frame: rate=72.0/s`, its splash in both eyes.
+  No game was run yet.
+- **Seeing what is drawn:** the windowed compositor ("Monado (Windowed)", 1264×681, both eyes side by side without
+  distortion) can be saved with `native/xrsimprobe/xr_sim_capture.cpp` (`PrintWindow`, works behind other windows;
+  `xr_sim.capture(path)`), and `--sim` also sets AXRB's own opt-in `AXRB_CAPTURE_PREFIX` (4 PPM readbacks of the
+  submitted layers, 5 s apart, from frame 300) into `<data>/logs/xr-sim/`. Monado itself has no screenshot function;
+  `XRT_WINDOW_PEEK` and `XRT_DEBUG_GUI` exist but only show windows.
+- **Use:** `frameport test <pkg> --to pc --sim` (or `FRAMEPORT_PC_XR_SIM=1`): starts `monado-service.exe` hidden
+  (WMI, like AXRB's scripts; ready when its pipe `\\.\pipe\<%TEMP%>\monado_comp_ipc` exists), passes the environment to
+  the AXRB launch (`pc_android.launch_test(extra_env=…)`, default `xr_sim.active_env()`), stops the service afterwards
+  (an already running Monado is used and left running). Service log: `<data>/logs/xr-sim-service.log`.
+- **Limits:** the simulated head wobbles slowly and the controllers hold still with no buttons pressed, so it proves
+  startup, frame submission and what is drawn, not gameplay; the windowed compositor opens a visible window on the
+  desktop; frame pacing is Monado's, not a headset's.

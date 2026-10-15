@@ -17,7 +17,7 @@ from pathlib import Path
 from ..core import winhost
 from ..core.events import Reporter
 from ..core.models import Recipe, data_manifest
-from ..tools import axrb
+from ..tools import axrb, xr_sim
 
 KIND = "android"
 OBB_ROOT = "/sdcard/Android/obb"
@@ -154,8 +154,10 @@ def game_logs() -> dict[str, str]:
     return out
 
 
-def launch_test(dep: dict, reporter: Reporter, seconds: int = 45, triage=None):
-    """Start the game through FramePort's launcher (= AXRB's run script), watch its Android process, stop it again."""
+def launch_test(dep: dict, reporter: Reporter, seconds: int = 45, triage=None, extra_env: dict | None = None):
+    """Start the game through FramePort's launcher (= AXRB's run script), watch its Android process, stop it again.
+    extra_env: environment for the launcher's processes; default = the simulated headset's while one runs
+    (tools/xr_sim.py, `frameport test --to pc --sim`)."""
     reporter.stage("Launch test (this PC, AXRB)")
     package = dep["package"]
     if axrb.emulator_online() and _pid(package):
@@ -165,7 +167,9 @@ def launch_test(dep: dict, reporter: Reporter, seconds: int = 45, triage=None):
     log.unlink(missing_ok=True)
     before = time.time()
     q = axrb._ps_quote
-    pid = axrb.spawn_detached(axrb.logged(
+    # --- xr-sim hook (tools/xr_sim.py): env + SteamVR-registration shim before the launcher call
+    sim = xr_sim.launcher_prefix(xr_sim.active_env() if extra_env is None else extra_env)
+    pid = axrb.spawn_detached(sim + axrb.logged(
         f"& {q(dep['launcher_win'])} -Package {q(package)} -Activity {q(dep['activity'])} "
         f"-GameName {q(dep['title'])} -CaptureGuestLog", winhost.to_windows(log)))
     seen, state, boot_deadline = False, "NEVER_STARTED", time.time() + 900  # the emulator boot comes first
