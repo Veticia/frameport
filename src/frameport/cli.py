@@ -460,6 +460,18 @@ def build(package: Optional[str] = typer.Argument(None), all_: bool = typer.Opti
     raise typer.Exit(1 if failed else 0)
 
 
+def _set_axrb_backend(target, backend: Optional[str]) -> None:
+    if backend is None:
+        return
+    from .tools import axrb
+
+    if backend not in axrb.BACKENDS:
+        raise typer.BadParameter(f"--axrb-backend: {' or '.join(axrb.BACKENDS)}")
+    if getattr(target, "kind", "") != "pc":
+        raise typer.BadParameter("--axrb-backend needs --to pc")
+    target.axrb_backend = backend
+
+
 @app.command()
 def install(package: Optional[str] = typer.Argument(None), all_: bool = typer.Option(False, "--all", help=ALL_HELP),
             frame: Optional[str] = typer.Option(None, help=FRAME_HELP),
@@ -473,9 +485,13 @@ def install(package: Optional[str] = typer.Argument(None), all_: bool = typer.Op
                                                           "for example a test build signed with the game's key)"),
             dest: Optional[str] = typer.Option(None, help="drive for new installs: 'internal' or a drive's path from "
                                                           "'frameport frame drives' (default: the app's setting); "
-                                                          "installed games stay where they are")):
+                                                          "installed games stay where they are"),
+            axrb_backend: Optional[str] = typer.Option(None, help="with --to pc, Quest games: AXRB's 'direct' mode "
+                                                       "(no emulator, Vulkan games) or its Android 'emulator' "
+                                                       "(default: the recipe's choice, else by the game's graphics)")):
     """Install games on the Frame (or on this PC) and add them to the Steam library."""
     target = _target(frame, password, to)
+    _set_axrb_backend(target, axrb_backend)
     if dest is not None and hasattr(target, "dest"):
         target.dest = "" if dest == "internal" else dest
     pkgs = _pkgs(package, all_)
@@ -497,9 +513,12 @@ def install(package: Optional[str] = typer.Argument(None), all_: bool = typer.Op
 def test(package: Optional[str] = typer.Argument(None), all_: bool = typer.Option(False, "--all", help=ALL_HELP),
          frame: Optional[str] = typer.Option(None, help=FRAME_HELP),
          seconds: int = typer.Option(45, help="how long the game runs before it's stopped"),
-         to: str = typer.Option("frame", help="frame, or pc (games installed on this PC)")):
+         to: str = typer.Option("frame", help="frame, or pc (games installed on this PC)"),
+         axrb_backend: Optional[str] = typer.Option(None, help="with --to pc: check that Quest games are installed "
+                                                    "for this AXRB backend (direct or emulator)")):
     """Headless launch test on the Frame (or this PC) and log triage."""
     target = _target(frame, to=to)
+    _set_axrb_backend(target, axrb_backend)
     installed = {g["package"] for g in target.installed()}
     for pkg in _pkgs(package, all_):
         if pkg not in installed:
@@ -760,19 +779,25 @@ def frame_proton(frame: Optional[str] = typer.Option(None, help=FRAME_HELP),
 # ------------------------------------------------------------------------------------------ pc (Revive)
 @pc_app.command("info")
 def pc_info():
-    """Steam, SteamVR, Revive and AXRB on this PC (JSON)."""
+    """Steam, SteamVR, Revive and AXRB (its emulator and its direct mode) on this PC (JSON)."""
     typer.echo(json.dumps(_target(None, to="pc").describe(), indent=1, default=str))
 
 
 @pc_app.command("install-axrb")
-def pc_install_axrb():
+def pc_install_axrb(backend: str = typer.Option("emulator", help="'emulator' (AXRB's Android emulator: Google's "
+                                                "emulator pieces, about 2.5 GB) or 'direct' (AXRB-Emulatorless: "
+                                                "Google's Android 16 arm64 system image, about 0.8 GB)"),
+                    update: bool = typer.Option(False, "--update", help="also update an installed AXRB to the "
+                                                "newest release with an installer for this backend")):
     """Install AXRB (Android XR Bridge, for Quest games on this PC) and set up its Android runtime. Normally done by
     the first `frameport install <quest game> --to pc`. Downloads AXRB's official installer plus Google's Android
-    emulator pieces (about 2.5 GB)."""
+    files. A local build (FRAMEPORT_AXRB_DIRECT_DIR / FRAMEPORT_AXRB_DIR) is set up but never replaced."""
     from .targets import pc_android
     from .tools import axrb
 
-    pc_android.ensure_axrb(printing_reporter(False))
+    if backend not in axrb.BACKENDS:
+        raise typer.BadParameter(f"--backend: {' or '.join(axrb.BACKENDS)}")
+    pc_android.ensure_axrb(printing_reporter(False), backend, update=update)
     typer.echo(json.dumps(axrb.status(), indent=1, default=str))
 
 

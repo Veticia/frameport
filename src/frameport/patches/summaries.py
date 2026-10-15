@@ -134,6 +134,8 @@ SUMMARIES = {
                                 "keeps working.",
     "device.display_mode": "Choose Flat window if a phone or tablet app shows nothing in the headset, VR if a VR app "
                            "opens as a flat window.",
+    "pc.axrb_backend": "For this PC only: run the game in AXRB's direct mode (no Android emulator) or in AXRB's "
+                       "Android emulator. Automatic uses direct mode for Vulkan games.",
     "device.steam_gamepad": "Lets the game use your controllers as a gamepad instead of a pointer, for 2D games with "
                             "touch controls (for example SDL games).",
     "device.lepton_env": "Extra settings for the Android container (for testing).",

@@ -821,6 +821,33 @@ class TextInputWindow(Patch):
         ctx.flatscreen = True
 
 
+class AxrbBackend(Patch):
+    id = "pc.axrb_backend"
+    title = "AXRB mode on this PC"
+    description = ("Only for installs on this PC (AXRB): which AXRB runs the game. Automatic picks AXRB's direct mode "
+                   "(AXRB-Emulatorless: the game's arm64 code runs in one Windows process, no Android emulator) for "
+                   "Vulkan games and the Android emulator for OpenGL ES games, since direct mode has no OpenGL ES "
+                   "renderer yet. The other parameters are direct mode's per-game options (AXRB's "
+                   "run_direct_game.ps1): "
+                   "translator (dynarmic, AXRB's default, or digitalis), precompose (AXRB composes the game's "
+                   "projection layers itself; also used by the emulator), and legacy_oculus_driver / quest_identity / "
+                   "controllers_only for unconverted APKs with older Oculus loaders (controllers_only needs "
+                   "legacy_oculus_driver). The Steam Frame ignores this.")
+    category = "device"
+    stage = "install"
+    on_pc = True  # read by targets/pc_android.py; nothing on the Frame
+    params = [Param("backend", "str", "", "direct or emulator (empty = automatic)"),
+              Param("translator", "str", "", "dynarmic or digitalis (direct mode; empty = AXRB's default)"),
+              Param("precompose", "bool", False, "AXRB composes projection layers itself"),
+              Param("legacy_oculus_driver", "bool", False, "direct mode: provide com.oculus.systemdriver"),
+              Param("quest_identity", "bool", False, "direct mode: report a Quest 3 device"),
+              Param("controllers_only", "bool", False, "direct mode: hide hand tracking (needs legacy_oculus_driver)")]
+    CHOICES = (("", "Automatic"), ("direct", "Direct mode (no emulator)"), ("emulator", "Android emulator"))
+
+    def install(self, ctx: InstallContext) -> None:
+        pass  # a choice for this PC only
+
+
 for _spec in SETTINGS:
     register(AdapterSetting(*_spec))
 register(DeviceFiles)
@@ -831,3 +858,4 @@ register(SteamGamepad)
 register(TextInputWindow)
 register(DisplayMode)
 register(Foveation)
+register(AxrbBackend)

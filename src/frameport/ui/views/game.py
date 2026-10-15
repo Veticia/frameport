@@ -275,7 +275,9 @@ class GameView:
             cards.append(self.target_card(
                 G.PC, tr("This PC (AXRB, experimental)"),
                 tr("In your Steam library · patches changed — update it") if stale else tr("In your Steam library"),
-                T.WARN if stale else T.PC, tr("AXRB {value} · Android emulator").format(
+                T.WARN if stale else T.PC, (tr("AXRB {value} · direct mode (no emulator)")
+                                            if dep.get("backend") == "direct" else
+                                            tr("AXRB {value} · Android emulator")).format(
                     value=dep.get("axrb_version") or ""),
                 log_button(True) + [C.icon_btn(G.TEST, tr("Launch test on this PC"),
                                                lambda e: app.test_game(pkg, "pc")),

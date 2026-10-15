@@ -102,6 +102,7 @@ def local_installs() -> dict[str, dict]:
 class PcReviveTarget(Target):
     kind = "pc"
     label = PC_LABEL
+    axrb_backend: str | None = None  # Quest games: AXRB's backend for this run (CLI --axrb-backend), None = per game
 
     def __init__(self):
         if not winhost.available():
@@ -182,7 +183,7 @@ class PcReviveTarget(Target):
             raise RuntimeError("Steam for Windows was not found on this PC")
         return pc_android.install(package, title, Path(apk), Path(data_dir) if data_dir else None, recipe, reporter,
                                   apk_only, data_files, record_dir=pc_dir() / package,
-                                  appid=_vdf().shortcut_appid)
+                                  appid=_vdf().shortcut_appid, backend=self.axrb_backend)
 
     def install_pcvr(self, package, title, game_dir, exe, recipe: Recipe, reporter: Reporter, **extra):
         from ..tools import revive
@@ -317,6 +318,9 @@ class PcReviveTarget(Target):
     def launch_test(self, package, reporter, seconds=45):
         dep = self._dep(package)
         if is_android(dep):
+            if self.axrb_backend and self.axrb_backend != pc_android.dep_backend(dep):
+                raise RuntimeError(f"{dep['title']} is installed for AXRB's {pc_android.dep_backend(dep)} backend: "
+                                   f"install it again with --axrb-backend {self.axrb_backend} first")
             return pc_android.launch_test(dep, reporter, seconds, triage)
         reporter.stage("Launch test (this PC)")
         image = Path(dep["exe_local"]).name

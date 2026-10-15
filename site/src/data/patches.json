@@ -779,6 +779,11 @@
   "title": "VrApi → OpenXR adapter (OVRPort)",
   "group": "Patches from OVRPort"
  },
+ "pc.axrb_backend": {
+  "anchor": "pc-axrb_backend",
+  "title": "AXRB mode on this PC",
+  "group": "Files and settings on the Frame"
+ },
  "pcvr.launch_args": {
   "anchor": "pcvr-launch_args",
   "title": "Launch options (SteamVR or OpenXR)",
