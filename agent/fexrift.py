@@ -514,18 +514,27 @@ def cmd_import_login(args):
 # deadlock (find_ime_patch) is found in the binaries, "ime_patch" here is only the fallback when the finder misses
 # (exe RVA, expected bytes, new bytes). Opt-ins that are only safe for a game they were checked with stay per game:
 # fp_mem's big-block cache hands memory back unzeroed; "msaa_ini" lets --msaa write the game's Engine.ini.
-GAMES = {
-    "oculus-first-contact": {
-        "title": "Oculus First Contact",
-        "exe": "TouchNUX/Binaries/Win64/TouchNUX-Win64-Shipping.exe",
-        "args": ['-gamemode="experienceonly"'],
-        "ime_patch": {"rva": 0x22a605, "old": "c78620010000" "01000000", "new": "c78620010000" "00000000"},
-        # Unreal's large-block allocator gives 0.5-1.6 GB blocks back to the OS every few seconds and this game
-        # overwrites them completely: fp_mem keeps them (see native/fexwine/fp_mem.c)
-        "env": {"FP_MEM": "1", "FP_BIGCACHE_MB": "256"},
-        "msaa_ini": True,
-    },
-}
+def load_games():
+    """Per-game profiles from fexrift_games.json (uploaded next to this file): data, not code. Keys starting with "_"
+    are comments; an "ime_patch" RVA may be written as a hex string."""
+    try:
+        with open(os.path.join(HERE, "fexrift_games.json"), encoding="utf-8") as f:
+            raw = json.load(f)
+    except FileNotFoundError:
+        return {}
+    games = {}
+    for app, info in raw.items():
+        if app.startswith("_"):
+            continue
+        info = {k: v for k, v in info.items() if not k.startswith("_")}
+        patch = info.get("ime_patch")
+        if patch and isinstance(patch.get("rva"), str):
+            info["ime_patch"] = dict(patch, rva=int(patch["rva"], 0))
+        games[app] = info
+    return games
+
+
+GAMES = load_games()
 
 
 def manifest_launch(app):
@@ -813,9 +822,10 @@ taskset -c 4-7 "$G/proton" run "$R/revive/ReviveInjector.exe" {exe_q} {args}
 
 
 def write_launcher(app, info, anchor):
-    game_dir = os.path.join(META_DIR, "Software", "Software", app)
+    game_dir = info.get("game_dir") or os.path.join(META_DIR, "Software", "Software", app)
     exe = os.path.join(game_dir, info["exe"])
     env = "".join(f"export {k}={shlex.quote(v)}\n" for k, v in info.get("env", {}).items())
+    env += "".join(f"{line}\n" for hook in LAUNCHER_ENV_HOOKS for line in hook(app, info))
     vr = json.dumps({"section": f"steam.app.{GAME_ID}", "key": "motionSmoothingOverride", "kind": "i", "value": 2})
     text = LAUNCHER.format(title=re.sub(r"[\\\"$`\n]", "", info["title"]), root_q=shlex.quote(ROOT),
                            anchor_q=shlex.quote(anchor), steam_q=shlex.quote(STEAM), gid=GAME_ID, game_env=env,
@@ -841,7 +851,7 @@ def cmd_install(args):
     that isn't in GAMES needs force_unverified (its static checks come back either way)."""
     app, anchor = args["app"], args["anchor"]
     info, verified = game_info(app)
-    game_dir = os.path.join(META_DIR, "Software", "Software", app)
+    game_dir = info.get("game_dir") or os.path.join(META_DIR, "Software", "Software", app)
     exe = os.path.join(game_dir, info["exe"])
     if not os.path.isfile(exe):
         raise FexError(f"{app} isn't in the prefix: import it with the login first")
@@ -865,6 +875,8 @@ def cmd_install(args):
     os.makedirs(anchor, exist_ok=True)
     write_launcher(app, info, anchor)
     res["launcher"] = os.path.join(anchor, "launch.sh")
+    for hook in INSTALL_CHECK_HOOKS:
+        res["checks"].update(hook(app, info, res) or {})
     return res
 
 
@@ -1198,6 +1210,45 @@ COMMANDS = {"status": cmd_status, "setup": cmd_setup, "import_login": cmd_import
             "hidewin": cmd_hidewin, "vrsetting": cmd_vrsetting}
 
 
+
+# Extension modules uploaded next to this file (fexrift_<name>.py), one per area of work (login, install, compat,
+# perf). Each defines register(core): it may add COMMANDS and append to the hook lists below, and reads this module's
+# globals through `core` at call time (so tests that patch them keep working). Loaded by path: the agent starts this
+# file with python3 -I, which keeps its folder off sys.path.
+EXTENSIONS = ("login", "install", "compat", "perf")
+LAUNCHER_ENV_HOOKS = []    # fn(app, info) -> list of "export X=Y" lines added to the launcher's environment block
+INSTALL_CHECK_HOOKS = []   # fn(app, info, result) -> dict of extra checks merged into cmd_install's result
+LOADED_EXTENSIONS = []
+
+
+class _Core:
+    """This module as an object for extensions: attribute reads and writes go to its live globals (a module loaded by
+    path isn't in sys.modules, and tests patch the globals)."""
+
+    def __getattr__(self, name):
+        try:
+            return globals()[name]
+        except KeyError:
+            raise AttributeError(name) from None
+
+    def __setattr__(self, name, value):
+        globals()[name] = value
+
+
+def load_extensions():
+    import importlib.util
+    core = _Core()
+    for name in EXTENSIONS:
+        path = os.path.join(HERE, f"fexrift_{name}.py")
+        if not os.path.isfile(path):
+            continue
+        spec = importlib.util.spec_from_file_location(f"fexrift_{name}", path)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        mod.register(core)
+        LOADED_EXTENSIONS.append(name)
+
+
 def main():
     name = sys.argv[1] if len(sys.argv) > 1 else "status"
     if name not in COMMANDS:
@@ -1214,4 +1265,5 @@ def main():
 
 
 if __name__ == "__main__":
+    load_extensions()
     sys.exit(main())

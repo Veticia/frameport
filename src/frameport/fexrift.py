@@ -58,8 +58,13 @@ def artifact_files() -> list[tuple[Path, str]]:
     """(local file, path under the Frame's artifacts/) for everything fexrift.py needs, except Revive."""
     root = artifacts_dir() / "fexrift"
     out = [(p, p.relative_to(root).as_posix()) for p in sorted(root.rglob("*")) if p.is_file()]
-    helper = agent_dir() / "fexrift.py"   # release bundles carry a .txt copy (their .py files are compiled away)
-    out.append((helper if helper.exists() else agent_dir() / "fexrift.py.txt", "fexrift.py"))
+    # fexrift.py, its extension modules (fexrift_<area>.py) and per-game data; release bundles carry .txt copies of
+    # the .py files (their .py files are compiled away)
+    names = {p.name.removesuffix(".txt") for p in agent_dir().glob("fexrift*.py*") if p.suffix in (".py", ".txt")}
+    names |= {p.name for p in agent_dir().glob("fexrift*.json")}
+    for name in sorted(names):
+        src = agent_dir() / name
+        out.append((src if src.exists() else agent_dir() / f"{name}.txt", name))
     return out
 
 
@@ -173,7 +178,7 @@ def import_login(frame, prefix: Path, reporter: Reporter, apps: list[str] | None
     apps = apps or list(GAMES)
     for app in apps:
         package_for(app)        # Meta's names only: they are globbed and become tar paths
-    tmp =user_data_dir() / "fexrift" / "login.tar"
+    tmp = user_data_dir() / "fexrift" / "login.tar"
     try:
         reporter.stage("Pack the Meta login")
         info = login_archive(prefix, apps, tmp)

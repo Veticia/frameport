@@ -1,0 +1,27 @@
+{
+  "_comment": [
+    "Games verified on the Frame and what they need beyond the generic fixes (agent/fexrift.py load_games).",
+    "A game's exe and launch arguments come from its Meta manifest when it isn't listed here; the generic fix for",
+    "Unreal's IME deadlock (find_ime_patch) is found in the binaries, ime_patch here is only the fallback when the",
+    "finder misses (exe RVA, expected bytes, new bytes). Opt-ins only safe for a game they were checked with stay per",
+    "game: fp_mem's big-block cache hands memory back unzeroed; msaa_ini lets --msaa write the game's Engine.ini."
+  ],
+  "oculus-first-contact": {
+    "title": "Oculus First Contact",
+    "exe": "TouchNUX/Binaries/Win64/TouchNUX-Win64-Shipping.exe",
+    "args": [
+      "-gamemode=\"experienceonly\""
+    ],
+    "ime_patch": {
+      "rva": "0x22a605",
+      "old": "c7862001000001000000",
+      "new": "c7862001000000000000"
+    },
+    "_env": "Unreal's large-block allocator gives 0.5-1.6 GB blocks back every few seconds and this game overwrites them completely: fp_mem keeps them (native/fexwine/fp_mem.c)",
+    "env": {
+      "FP_MEM": "1",
+      "FP_BIGCACHE_MB": "256"
+    },
+    "msaa_ini": true
+  }
+}
