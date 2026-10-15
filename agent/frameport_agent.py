@@ -8008,6 +8008,63 @@ def cmd_fex_runtime_state(args):
     return fex_helper("runtime_state", {"app": args["app"]}, timeout=120)
 
 
+# Browser sign-in: this block deliberately uses stdin, not fex_helper's JSON argv. A callback carries credentials.
+FEX_LOGIN_PACKAGE = "linux.frameport_meta_signin"
+
+
+def fex_login_call(command, args=None):
+    if not os.path.isfile(FEX_HELPER):
+        raise AgentError("run fex setup before signing in")
+    p = subprocess.run([sys.executable, "-I", FEX_HELPER, command], input=json.dumps(args or {}),
+                       capture_output=True, text=True, timeout=120)
+    try:
+        out = json.loads(p.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        raise AgentError("Meta sign-in helper did not answer") from None
+    if not out.get("ok"):
+        # No raw subprocess output in errors for the commands handling URLs.
+        raise AgentError(out.get("error", "Meta sign-in failed") if command == "login_start" else
+                         "Meta sign-in helper failed; retry fex login --stop")
+    return out["result"]
+
+
+def cmd_fex_login(args):
+    result = fex_login_call("login_start", {"start_now": bool(args.get("start_now")),
+                                           "via_pc": bool(args.get("via_pc")),
+                                           "timeout": int(args.get("login_timeout") or 900)})
+    if not args.get("start_now"):
+        anchor = os.path.join(ANCHORS, FEX_LOGIN_PACKAGE)
+        os.makedirs(anchor, exist_ok=True)
+        launcher = os.path.join(anchor, "launch.sh")
+        if os.path.lexists(launcher):
+            os.remove(launcher)
+        os.symlink(result["launcher"], launcher)
+        with open(os.path.join(anchor, "deployment.json"), "w") as f:
+            json.dump({"package": FEX_LOGIN_PACKAGE, "kind": "linux", "title": "Meta sign-in (FramePort)",
+                       "base": os.path.join(FEX_ROOT, "login"), "vr": False, "desktop_entry": False,
+                       "appid": shortcut_appid(f'"{launcher}"', "Meta sign-in (FramePort)")}, f)
+        result["package"] = FEX_LOGIN_PACKAGE
+    return result
+
+
+def cmd_fex_login_status(args):
+    return fex_login_call("login_status", {"take_url": bool(args.get("take_url"))})
+
+
+def cmd_fex_login_callback(args):
+    return fex_login_call("login_callback", {"url": args.get("url")})
+
+
+def cmd_fex_login_cancel(args):
+    result = fex_login_call("login_stop")
+    anchor = os.path.join(ANCHORS, FEX_LOGIN_PACKAGE)
+    if os.path.exists(os.path.join(anchor, "deployment.json")):
+        cmd_shortcuts({"remove": [{"exe": f'"{anchor}/launch.sh"'}], "restart": True})
+        devkit_unregister(FEX_LOGIN_PACKAGE, steam_running=run(["pgrep", "-x", "steam"]).returncode == 0)
+        remove_tree(anchor)
+    return result
+
+
 def cmd_fex_install(args):
     """A game Meta's app downloaded (now in the prefix) as a Steam game: per-game fixes + launch.sh +
     deployment.json (kind frame_fex). The Steam shortcut is added like for other games (shortcuts)."""

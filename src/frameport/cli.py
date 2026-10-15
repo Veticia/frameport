@@ -1016,6 +1016,19 @@ def fex_import_login(prefix: str = typer.Argument(..., help="a Wine prefix on th
     typer.echo(json.dumps(res.get("imported"), indent=1))
 
 
+@fex_app.command("login")
+def fex_login(start_now: bool = typer.Option(False, "--start-now", help="start Meta's app now instead of using Steam"),
+              timeout: int = typer.Option(900, min=1, max=86400, help="seconds to wait for sign-in"),
+              via_pc: bool = typer.Option(False, "--via-pc", help="use the PC browser and a temporary Oculus handler"),
+              stop: bool = typer.Option(False, "--stop", help="end sign-in and restore link handlers; keep the login"),
+              frame: Optional[str] = typer.Option(None, help=FRAME_HELP)):
+    """Sign in with your Meta account in the Frame's shared Wine prefix."""
+    from . import fexlogin
+
+    t = _fex_target(frame)
+    fexlogin.login(t.frame, start_now=start_now, timeout=timeout, via_pc=via_pc, stop=stop, emit=typer.echo)
+
+
 @fex_app.command("install")
 def fex_install(app_name: Optional[str] = typer.Argument(None, metavar="APP",
                                                help="Meta's name for the game (verified: oculus-first-contact)"),

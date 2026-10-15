@@ -36,4 +36,6 @@ for d in $DLLS; do cp "dlls/$d/x86_64-windows/$d.dll" "$OUT/"; done
 # Wi-Fi WinRT stand-in (not a Wine DLL: goes into the prefix's system32 + its activation class registry key)
 x86_64-w64-mingw32-clang -O2 -shared -s -Wl,--no-insert-timestamp -o "$OUT/windows.devices.wifi.dll" \
   "$HERE/wifi_stub.c" "$HERE/wifi_stub.def" -lole32 -lwindowsapp
+# Meta's single-instance pipe, used by browser sign-in (no entitlement or Platform SDK changes).
+x86_64-w64-mingw32-clang -O2 -s -Wl,--no-insert-timestamp -o "$OUT/fp_pipesend.exe" "$HERE/pipesend.c"
 ls -la "$OUT"
