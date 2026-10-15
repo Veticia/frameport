@@ -727,8 +727,12 @@ def logged(call: str, log_win: str) -> str:
     throw their failure reason), and a final "FP_EXIT <code>" line (the caller can't see the exit code of a process
     started through WMI)."""
     log = _ps_quote(log_win)
-    return (f"try {{ {call} *>> {log}; $c = $(if ($LASTEXITCODE) {{ $LASTEXITCODE }} else {{ 0 }}) }} "
-            f"catch {{ ($_ | Out-String) *>> {log}; $c = 1 }}; \"{EXIT_MARK} $c\" *>> {log}; exit $c")
+    # AXRB's run scripts end with `trap { [Console]::Error.WriteLine(<reason>); exit 1 }`: that bypasses PowerShell's
+    # streams (*>> never sees it), so the console's error writer is swapped for the call and its text logged after
+    return ("$fpErr = [IO.StringWriter]::new(); $fpOld = [Console]::Error; [Console]::SetError($fpErr); "
+            f"try {{ {call} *>> {log}; $c = $(if ($LASTEXITCODE) {{ $LASTEXITCODE }} else {{ 0 }}) }} "
+            f"catch {{ ($_ | Out-String) *>> {log}; $c = 1 }} finally {{ [Console]::SetError($fpOld) }}; "
+            f"if ($fpErr.ToString()) {{ $fpErr.ToString() *>> {log} }}; \"{EXIT_MARK} $c\" *>> {log}; exit $c")
 
 
 def exit_code(log: Path) -> int | None:

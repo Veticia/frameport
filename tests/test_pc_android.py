@@ -147,6 +147,8 @@ def test_read_log_handles_powershell_utf16(tmp_path):
 def test_logged_call_reports_its_exit_code(tmp_path, win):
     cmd = axrb.logged("& 'x.ps1' -A 1", r"C:\l.log")
     assert "*>> 'C:\\l.log'" in cmd and '"FP_EXIT $c"' in cmd and cmd.endswith("exit $c")
+    # AXRB's trap writes its failure reason straight to the console's stderr: captured and logged too
+    assert cmd.index("[Console]::SetError($fpErr)") < cmd.index("x.ps1") < cmd.index("$fpErr.ToString() *>>")
     log = tmp_path / "l.log"
     log.write_bytes(b"\xff\xfe" + "output\nFP_EXIT 4\n".encode("utf-16-le"))
     assert axrb.exit_code(log) == 4
