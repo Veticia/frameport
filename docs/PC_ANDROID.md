@@ -25,7 +25,10 @@ folder) and picks per game:
 
 - **Choice** (`targets/pc_android.choose_backend`): `--axrb-backend direct|emulator` on `frameport install --to pc`,
   else the recipe's `pc.axrb_backend` (device category, `on_pc`: part of the PC build's selection, no-op on the
-  Frame), else **direct for `graphics` Vulkan, emulator for GLES / unknown**. `deployment.json` records `backend`
+  Frame), else **direct for `graphics` Vulkan, emulator for GLES / unknown**. Unreal games never declare
+  `android.hardware.vulkan`; since analysis version 20 their manifest meta-data
+  `com.epicgames.{ue4,unreal}.GameActivity.bSupportsVulkan` = true makes them "Vulkan (Unreal bSupportsVulkan)"
+  (UE 4.25+ Quest builds, e.g. Deadpool VR, Pinball FX VR, Myst; false or missing = GLES: Espire 1, Vader Immortal). `deployment.json` records `backend`
   and the launcher `flags`; installs from before have none (= emulator). Switching leaves the other backend's copy
   and saves alone.
 - **Per-game options** (`pc.axrb_backend` params → `run_direct_game.ps1` switches): `translator` (`dynarmic` =
