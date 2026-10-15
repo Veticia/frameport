@@ -32,6 +32,7 @@ def load_fexrift():
     spec = importlib.util.spec_from_file_location("fexrift_helper", ROOT / "agent" / "fexrift.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    mod.load_extensions()
     return mod
 
 
@@ -147,6 +148,8 @@ def survey_game(title: str, game_dir: Path, exe_rel: str | None) -> dict:
     data = bytes(data)
     res["exe"] = exe_rel
     res["arch"] = info.machine
+    res["exe_32bit"] = info.machine == "x86"
+    res["exe_size"] = exe.stat().st_size
     res["vr"] = [x for x in a.xr.split("+") if x != "?"] or ["?"]
     res["platform_sdk"] = bool(a.extra.get("platform_sdk"))
     res["own_platform_dll"] = any(n.startswith("libovrplatform") for n in names)   # noted only, never used
@@ -163,11 +166,11 @@ def survey_game(title: str, game_dir: Path, exe_rel: str | None) -> dict:
         rhi, src = unreal_rhi(cfg.get("config") or {})
         res["graphics"] = [rhi]
         res["graphics_from"] = src
-        # Unreal IME deadlock fix: exe (monolithic), else modular ApplicationCore/Slate
+        # Unreal IME deadlock fix: exe (monolithic), else modular ApplicationCore/Slate (Core before that split).
         patch, why = FX.find_ime_patch(data)
         if not patch:
             for n, p in sorted(names.items()):
-                if "applicationcore" in n or re.search(r"-slate(-win64-shipping)?\.dll$", n):
+                if "applicationcore" in n or re.search(r"-(slate|core)(-win64-shipping)?\.dll$", n):
                     p2, why2 = FX.find_ime_patch(p.read_bytes())
                     if p2:
                         patch, why = dict(p2, module=n), None
@@ -204,14 +207,33 @@ def survey_game(title: str, game_dir: Path, exe_rel: str | None) -> dict:
         drm.append("anti-cheat files")
     res["drm"] = drm
     # other runtime needs
+    # Imports in modular engine/audio/video DLLs matter too. Reuse this for each candidate exe below; companion
+    # middleware is a folder-level hint, not proof that a particular movie or audio route will be exercised.
+    runtime_imports = set(imports)
+    for p in files:
+        if p.suffix.lower() == ".dll" and p.parent == exe.parent and p.stat().st_size <= 80 << 20:
+            runtime_imports |= imports_of(p)
+    res["runtime"] = runtime_facts(runtime_imports, names)
+    res["executables"] = []
+    for candidate in a.extra.get("exe_candidates", []):
+        rel = candidate["path"]
+        p = game_dir / rel
+        try:
+            pi = info if p == exe else rift.read_pe(p, limit=80 << 20)[0]
+            facts = runtime_facts(set(pi.imports) | set(pi.delay_imports), names)
+            g = sorted({GRAPHICS[i] for i in set(pi.imports) | set(pi.delay_imports) if i in GRAPHICS})
+            res["executables"].append(dict(exe=rel, arch=pi.machine, exe_32bit=pi.machine == "x86",
+                                           graphics_imports=g, **facts))
+        except (OSError, rift.PEError, struct.error, ValueError):
+            res["executables"].append({"exe": rel, "error": "PE unreadable"})
     other = []
     if "mscoree.dll" in imports:
         other.append(".NET")
-    if any(i.startswith("xaudio2") for i in imports):
+    if res["runtime"]["xaudio2"]:
         other.append("XAudio2")
-    if any(i in imports for i in ("mfplat.dll", "mfreadwrite.dll")):
-        other.append("Media Foundation")
-    if any(n.startswith("bink") for n in names):
+    if res["runtime"]["media_foundation"]:
+        other.append("Media Foundation: video playback is a Proton compatibility risk")
+    if res["runtime"]["bink"]:
         other.append("Bink video")
     winrt_re = rb"W\x00i\x00n\x00d\x00o\x00w\x00s\x00\.\x00(?:[A-Z]\x00[a-zA-Z\x00\.]{4,80})"
     winrt = sorted({w.decode("utf-16-le") for w in re.findall(winrt_re, data)})[:5]
@@ -220,7 +242,47 @@ def survey_game(title: str, game_dir: Path, exe_rel: str | None) -> dict:
     res["other"] = other
     res["size_gib"] = round(sum(p.stat().st_size for p in game_dir.rglob("*") if p.is_file()) / 2**30, 1)
     res["verdict"] = verdict(res)
+    res["suggested_graphics"] = graphics_route(res)
+    res["profile"] = suggested_profile(res)
     return res
+
+
+def runtime_facts(imports: set[str], names) -> dict:
+    imports = {i.lower() for i in imports}
+    names = {n.lower() for n in names}
+    return {"xaudio2": any(i.startswith("xaudio2") for i in imports),
+            "media_foundation": bool(imports & {"mf.dll", "mfplat.dll", "mfreadwrite.dll", "evr.dll"}),
+            "bink": any(n.startswith("bink") for n in names | imports),
+            "anti_cheat": any(any(s in n for s in ANTICHEAT_FILES) for n in names | imports)}
+
+
+def graphics_route(r: dict) -> str:
+    g = r.get("graphics", [])
+    # Unreal's config already reduced its imports to the selected RHI. For custom multi-API engines prefer a
+    # DXVK route over GL; imports prove availability, not that the game will select that renderer at runtime.
+    return next((api for api in ("d3d11", "d3d12", "d3d9", "opengl", "vulkan") if api in g), "d3d11")
+
+
+def suggested_profile(r: dict) -> dict:
+    status = {"likely OK": "likely", "blocked": "blocked"}.get(r["verdict"][0], "untested")
+    profile = {"title": r["title"],
+            "match": {"executables": [{"name": Path(r["exe"]).name, "size": r["exe_size"]}]},
+            "status": status, "graphics": graphics_route(r), "env": {}, "ime_patch": None,
+            "fp_mem": "candidate" if "candidate" in r.get("large_block_alloc", "") else "off",
+            "bigcache_mb": 256, "dxvk": [],
+            "notes": r["verdict"][1] + ("; Media Foundation videos need a playback test" if
+                                       r.get("runtime", {}).get("media_foundation") else "")}
+    if r.get("vr") == ["OpenVR"]:
+        profile["revive"] = False
+    if r.get("folder"):
+        info = {"exe": r["exe"], "game_dir": r["folder"]}
+        for hook in FX.GAME_INFO_HOOKS:
+            hook("", info)
+        # Keep an existing build-matched direct-OpenVR choice (e.g. Unity that also contains inert LibOVR strings)
+        # when generating pasteable data. Do not propagate guesses from the folder/title or a bundled crack.
+        if info.get("revive") is False:
+            profile["revive"] = False
+    return profile
 
 
 def verdict(r: dict) -> tuple[str, str]:
@@ -233,20 +295,21 @@ def verdict(r: dict) -> tuple[str, str]:
     if "d3d11" not in g:
         if "d3d12" in g:
             work.append("D3D12: needs vkd3d-proton on Turnip under FEX (untested)")
+        elif "d3d9" in g:
+            work.append("D3D9: DXVK under FEX (untested)")
         elif "opengl" in g:
-            work.append("OpenGL: wined3d on Zink (untested)")
+            work.append("OpenGL: no FEX GL thunk configured; rootfs GL renderer unverified")
         elif "vulkan" in g:
             work.append("Vulkan: Turnip through FEX's Vulkan thunk (untested with a game)")
         else:
             work.append(f"graphics API unclear ({', '.join(g)})")
-    if "anti-cheat files" in r.get("drm", []):
+    if "anti-cheat files" in r.get("drm", []) or r.get("runtime", {}).get("anti_cheat"):
         blockers.append("anti-cheat")
     elif r.get("drm"):
         work.append("anti-tamper section (" + ", ".join(r["drm"]) + "): heavier under FEX, may break")
     if r.get("vr") == ["?"]:
         work.append("VR API not detected")
-    if r.get("engine", "").startswith("Unreal") and isinstance(r.get("ime_patch"), str) \
-            and "older Unreal" not in r["ime_patch"]:
+    if r.get("engine", "").startswith("Unreal") and isinstance(r.get("ime_patch"), str):
         work.append(f"IME fix site not found ({r['ime_patch']})")
     if r.get("engine") in ("custom", "CryEngine"):
         work.append(f"{r['engine']} engine: no Unreal/Unity fixes apply; startup/allocator behaviour unknown")
@@ -289,6 +352,9 @@ def main():
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     (out / "survey.json").write_text(json.dumps(results, indent=1))
+    profiles = {re.sub(r"[^a-z0-9]+", "-", r["title"].lower()).strip("-"): r["profile"]
+                for r in results if r.get("profile")}
+    (out / "profiles.json").write_text(json.dumps(profiles, indent=2) + "\n")
     lines = ["# Rift-on-Frame static survey", "",
              "| Game | Verdict | Engine | Graphics | VR | Platform SDK | IME fix | AA config | Notes |",
              "|---|---|---|---|---|---|---|---|---|"]
