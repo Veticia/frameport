@@ -10,6 +10,7 @@ SHIM = "libglshim.so"
 
 class VrApiBridge(Patch):
     id = "frame.vrapi_bridge"
+    on_pc = "experimental"
     title = "VrApi → OpenXR bridge"
     description = (
         "Replaces libvrapi.so with a VrApi→OpenXR bridge (Android-XR-Bridge/OVRPort fork, GPL-3.0, patched for the "

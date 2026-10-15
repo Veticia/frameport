@@ -976,11 +976,14 @@ def _build_record(entry: dict, apk: Path | None = None, superseded=None) -> dict
             "overport_stat": converter_stat}
 
 
-def pc_recipe_fingerprint(recipe: dict, package: str = "") -> str:
-    """Fingerprint of what the build for this PC contains (Frame-only patch changes don't make it outdated)."""
+def pc_recipe_fingerprint(recipe: dict, package: str = "", analysis=None) -> str:
+    """Fingerprint of what the build for this PC contains (Frame-only patch changes don't make it outdated).
+    analysis (an Analysis or its dict): also the PC-only patches the game gets (Patch.pc_detect)."""
     from .patches.base import pc_selection
 
-    return recipe_fingerprint(dict(recipe, patches=pc_selection(recipe.get("patches") or {})), package)
+    if isinstance(analysis, dict):
+        analysis = library.analysis_from_dict(analysis)
+    return recipe_fingerprint(dict(recipe, patches=pc_selection(recipe.get("patches") or {}, analysis)), package)
 
 
 def build_key(entry: dict, pc: bool) -> str:
@@ -1029,7 +1032,8 @@ def build_game(package: str, reporter: Reporter, outdir: Path | None = None, pc:
     build_info = {"apk": str(res.apk), "alt_apk": str(res.alt_apk) if res.alt_apk else None, "sha256": res.sha256,
                   "alt_sha256": res.alt_sha256, "applied": res.applied, "checks": res.checks, "ok": res.ok,
                   "overport": res.meta.get("overport"),
-                  "recipe_fp": (pc_recipe_fingerprint if pc else recipe_fingerprint)(entry["recipe"], package),
+                  "recipe_fp": (pc_recipe_fingerprint(entry["recipe"], package, a) if pc
+                                else recipe_fingerprint(entry["recipe"], package)),
                   "superseded": res.meta.get("superseded") or {}, "source_version": _source_version(entry),
                   **_build_record(entry, res.apk, res.meta.get("superseded"))}
     library.upsert_game(package, **{build_key(entry, pc): build_info}, title=entry.get("title") or store_title,
@@ -1140,6 +1144,11 @@ def install_game(package: str, target: Target, reporter: Reporter, apk_only: boo
     data_dir = Path(entry["data_dir"]) if entry.get("data_dir") else None
     title = steam_title(entry)
     preserve_data = apk_only or (optimized and deployment is not None and not update.data and not force)
+    if pc:  # the deployment records what the build for this PC contains (pc_selection)
+        from .patches.base import pc_selection
+
+        analysis = library.analysis_from_dict(entry["analysis"]) if entry.get("analysis") else None
+        recipe = dataclasses.replace(recipe, patches=pc_selection(recipe.patches, analysis))
     result = target.install(package, title, apk, data_dir, recipe, reporter, preserve_data,
                             data_files=entry.get("data_files"))
     if add_to_library:  # also after a reinstall: the agent restarts Steam only when the entry changes

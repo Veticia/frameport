@@ -105,6 +105,7 @@ def _keystore(package: str) -> bytes:
 
 class OvrStableUser(Patch):
     id = "frame.ovr_stable_user"
+    on_pc = True
     title = "Keep the same Meta user between starts"
     description = ("Without a Meta account, OVRPort's platform library makes up a new user id at every start "
                    "(ovr_GetLoggedInUserID). Games that file saves under the user id (for example Walkabout Mini "

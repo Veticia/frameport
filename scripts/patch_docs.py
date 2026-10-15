@@ -276,6 +276,10 @@ def entry(p: base.Patch, games: list[str], sigs: list[tuple[str, str, str]]) -> 
         facts.append("experimental")
     if not p.needs_vr:
         facts.append("also for 2D apps")
+    if p.on_pc and p.category != "overport":  # OVRPort's patches are all in builds for this PC
+        facts.append("also in builds for this PC (AXRB" + (", experimental)" if p.on_pc == "experimental" else ")"))
+    elif getattr(p, "pc_added", False):
+        facts.append("builds for this PC (AXRB) add it when needed")
     rev = p.revision
     if rev > 1:
         facts.append(f"revision {rev}")

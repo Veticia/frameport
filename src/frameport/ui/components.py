@@ -211,9 +211,11 @@ def pc_outdated(g: dict, dep: dict) -> bool:
     installed = set((dep.get("recipe") or {}).get("patches") or [])
     want = set((g.get("recipe") or {}).get("patches") or {})
     if dep.get("kind") == "android":
+        from ..core.library import analysis_from_dict
         from ..patches.base import pc_selection
 
-        return installed != set(pc_selection({p: {} for p in want}))
+        analysis = analysis_from_dict(g["analysis"]) if g.get("analysis") else None
+        return installed != set(pc_selection({p: {} for p in want}, analysis))
     from ..core.library import recipe_from_dict
     from ..patches.pcvr import game_args
 

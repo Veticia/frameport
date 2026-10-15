@@ -73,6 +73,7 @@ def oculus_model_checks(data: bytes) -> tuple[bytes, int]:
 
 class UnityOculusCheck(Patch):
     id = "frame.unity_oculus_check"
+    on_pc = True
     title = "Unity: start VR without Meta's system apps"
     description = ("Unity's built-in Oculus support (Unity 2017–2019) only starts VR when Android has Meta's "
                    "com.oculus.systemactivities package; without it the game runs as a 2D app (the Android home "

@@ -30,6 +30,7 @@ def engine_libs(ws, analysis) -> list[str]:
 
 class VulkanSanitize(Patch):
     id = "frame.vk_sanitize"
+    on_pc = "experimental"
     title = "Vulkan: drop invalid render-pass pointers"
     description = ("Some engines leave the pNext of unused Vulkan attachment references uninitialized. The Frame's "
                    "driver never reads it, but Lepton always loads Steam's Fossilize shader-cache layer, which follows "

@@ -167,13 +167,123 @@ def test_pc_selection_keeps_ovrport_and_apk_fixes_only():
     from frameport import pipeline
     from frameport.patches.base import pc_selection
 
-    patches = {"patch_oculus_unity": {}, "frame.adapter": {}, "frame.ovrstubs": {}, "frame.swapchain_limit": {},
-               "adapter.focus_hold": {"ms": 5000}, "frame.vk_sanitize": {}}
-    assert set(pc_selection(patches)) == {"patch_oculus_unity", "frame.ovrstubs", "frame.swapchain_limit"}
+    patches = {"patch_oculus_unity": {}, "frame.ovrstubs": {}, "frame.swapchain_limit": {}, "frame.vk_sanitize": {},
+               "frame.gl_shim": {}, "frame.sdl_clipboard": {}, "frame.a32_bridge": {}, "device.files": {},
+               "frame.hw_video_decode": {}, "frame.ovr_stable_user": {}, "frame.launcher": {}}
+    assert set(pc_selection(patches)) == {"patch_oculus_unity", "frame.ovrstubs", "frame.swapchain_limit",
+                                          "frame.vk_sanitize", "frame.ovr_stable_user", "frame.launcher"}
     r1 = {"patches": patches}
-    r2 = {"patches": dict(patches, **{"adapter.scale": {"value": 0.8}})}  # a Frame-only change
+    r2 = {"patches": dict(patches, **{"frame.gl_shim": {"x": 1}, "device.hide_navbar": {}})}  # Frame-only changes
     assert pipeline.pc_recipe_fingerprint(r1) == pipeline.pc_recipe_fingerprint(r2)
     assert pipeline.recipe_fingerprint(r1) != pipeline.recipe_fingerprint(r2)
+    r3 = {"patches": dict(patches, **{"frame.unity_text_input": {}})}  # an APK fix both builds get
+    assert pipeline.pc_recipe_fingerprint(r1) != pipeline.pc_recipe_fingerprint(r3)
+
+
+PC_FIXES = ["frame.ovr_stable_user", "frame.unreal_ovrp_entrypoints", "frame.avatar_stub", "frame.vrapi_stub",
+            "frame.metaxr_telemetry", "frame.oculusos", "frame.ovr_microphone", "frame.langpacks",
+            "frame.asset_files", "frame.asset_files_stub", "frame.ovr_trace", "frame.blazerush",
+            "frame.unity_oculus_check", "frame.unity_text_input", "frame.unreal_quest_precompile",
+            "frame.unreal_quest_keymap", "frame.unreal_thumb_touch", "frame.unreal_skip_obb_check",
+            "frame.unreal_skip_obb_delivery", "frame.nodebug", "frame.meta_permissions", "frame.launcher",
+            "frame.adapter", "frame.ovrplatformcompat", "frame.ovrstubs", "frame.swapchain_limit"]
+PC_EXPERIMENTAL = ["frame.vk_sanitize", "frame.vrapi_bridge", "frame.unity_tls_key_pool", "frame.eos_keychain_loop"]
+FRAME_ONLY = ["frame.gl_shim", "frame.unity_gl_shim", "frame.unreal_gl_shim", "frame.sdl_clipboard",
+              "frame.godot_clipboard", "frame.vivox_audio_route", "frame.a32_bridge", "frame.hw_video_decode",
+              "frame.zink_shader_fix", "frame.gl_multiview_fbo", "device.files", "device.hide_navbar",
+              "device.steam_gamepad", "device.text_input_window"]
+
+
+def test_pc_selection_patch_lists():
+    from frameport.patches import base
+
+    base.load_all()
+    for pid in PC_FIXES:
+        assert base.get(pid).on_pc is True, pid
+    for pid in PC_EXPERIMENTAL:
+        assert base.get(pid).on_pc == "experimental", pid
+    for pid in FRAME_ONLY:
+        assert not base.get(pid).on_pc, pid
+    patches = {pid: {} for pid in PC_FIXES + PC_EXPERIMENTAL + FRAME_ONLY}
+    sel = base.pc_selection(patches)
+    assert set(PC_FIXES + PC_EXPERIMENTAL) <= set(sel)
+    assert not set(FRAME_ONLY) & set(sel)
+    assert base.pc_selection(sel) == sel  # idempotent: the PC target records pc_selection of the PC recipe
+
+
+def test_pc_selection_adapter_settings():
+    from frameport.patches import base
+    from frameport.patches.frame.adapter import settings_text
+    from frameport.patches.settings import PC_DENY
+
+    patches = {"frame.adapter": {}, "adapter.scale": {"value": 0.8}, "adapter.haptic_fix": {"value": 1},
+               "adapter.pose_time_fix": {"value": 1}, "adapter.rect_clamp": {"value": 1},
+               "adapter.controller_fix": {"value": 0}, "adapter.sync_guard": {"value": 1},
+               "adapter.focus_hold": {"value": 1}, "adapter.focus_hold_ms": {"value": 2500.0},
+               "adapter.controller_models": {"value": 1}, "adapter.gl_hide_msrtt": {"value": 1}}
+    sel = base.pc_selection(patches)
+    for key in ("scale", "haptic_fix", "pose_time_fix", "rect_clamp", "controller_fix"):
+        assert f"adapter.{key}" in sel, key
+    for key in ("sync_guard", "focus_hold_ms", "controller_models", "gl_hide_msrtt"):
+        assert key in PC_DENY and f"adapter.{key}" not in sel, key
+    assert sel["adapter.focus_hold"] == {"value": 0}  # FrameBridge's built-in default is on: off on the PC
+    text = settings_text(sel).decode()
+    assert "scale=0.8\n" in text and "focus_hold=0\n" in text and "sync_guard" not in text
+    assert "controller_models" not in text and "focus_hold_ms" not in text
+    # no FrameBridge in the selection: no adapter settings forced
+    assert base.pc_selection({"adapter.scale": {"value": 0.8}}) == {"adapter.scale": {"value": 0.8}}
+
+
+def test_pc_only_telemetry_patch():
+    from frameport.core.models import Analysis
+    from frameport.patches import base
+
+    telemetry = "patch_disable_meta_xr_audio_telemetry"
+    def analysis(libs):
+        return Analysis(package="p", version="1", label="P", abis=["arm64-v8a"], engine="Unity", xr="OpenXR",
+                        graphics="Vulkan", direct_vrapi=False, libs=libs, launcher_activity=None,
+                        has_info_category=False, meta_permissions=[], uses_glad_gl=False, unity_msaa_levels=0,
+                        oculus_os_classes=False, is_overport_output=False, debuggable=False, extra={})
+
+    audio = analysis(["libmetaxraudio.so", "libOVRPlugin.so"])
+    plain = analysis(["libOVRPlugin.so"])
+    assert not base.get(telemetry).applies(audio)  # never in a Steam Frame recipe
+    assert telemetry in base.pc_selection({"patch_oculus_unity": {}}, audio)
+    assert telemetry not in base.pc_selection({"patch_oculus_unity": {}}, plain)
+    assert telemetry not in base.pc_selection({"patch_oculus_unity": {}})  # no analysis: only the recipe
+    sel = base.pc_selection({"patch_oculus_unity": {}}, audio)
+    assert base.pc_selection(sel) == sel  # kept when the PC target filters the PC recipe again
+
+
+def test_pc_build_extracts_native_libs(tmp_path):
+    from frameport import build
+    from frameport.apk import axml
+
+    class WS:
+        def __init__(self, manifest):
+            self.files = {"AndroidManifest.xml": manifest}
+
+        def read(self, name):
+            return self.files[name]
+
+        def put(self, name, data):
+            self.files[name] = data
+
+    manifest = _manifest(extract=False)
+    ws = WS(manifest)
+    assert build.extract_native_libs(ws)
+    assert axml.Axml(ws.files["AndroidManifest.xml"]).get_bool("application", "extractNativeLibs") is True
+    assert not build.extract_native_libs(ws)  # already on
+    ws = WS(_manifest(extract=None))  # no attribute: Android's default is to extract
+    assert not build.extract_native_libs(ws)
+
+
+def _manifest(extract):
+    from conftest import build_axml
+
+    attrs = [] if extract is None else [("extractNativeLibs", "bool", extract)]
+    return build_axml([("start", "manifest", [("package", "str", "com.example.game")]),
+                       ("start", "application", attrs), ("end", "application"), ("end", "manifest")])
 
 
 def test_pc_installable():
@@ -239,7 +349,7 @@ def test_install_into_axrb(tmp_path, monkeypatch, win):
     monkeypatch.setattr(axrb, "write_launcher", lambda **k: tmp_path / "FramePort/axrb/fp-axrb-run.ps1")
     monkeypatch.setattr(axrb, "adb", adb)
     monkeypatch.setattr(pc_android, "powershell_win", lambda: r"C:\Windows\powershell.exe")
-    recipe = Recipe("com.game.x", {"patch_oculus_unity": {}, "frame.adapter": {}, "frame.ovrstubs": {}})
+    recipe = Recipe("com.game.x", {"patch_oculus_unity": {}, "frame.gl_shim": {}, "frame.ovrstubs": {}})
     res = pc_android.install("com.game.x", "Game X", apk, data, recipe, Reporter(), record_dir=tmp_path / "rec",
                              appid=lambda exe, title: 0x80001234)
     assert res == {"ok": True, "appid": 0x80001234, "activity": "com.game.x/com.unity3d.player.UnityPlayerActivity",
@@ -291,7 +401,7 @@ def test_pc_outdated_for_android_follows_the_pc_build():
     from frameport.ui import components as C
 
     dep = {"kind": "android", "recipe": {"patches": ["frame.ovrstubs", "patch_oculus_unity"]}}
-    g = {"recipe": {"patches": {"patch_oculus_unity": {}, "frame.ovrstubs": {}, "frame.adapter": {}}}}
+    g = {"recipe": {"patches": {"patch_oculus_unity": {}, "frame.ovrstubs": {}, "frame.gl_shim": {}}}}
     assert not C.pc_outdated(g, dep)  # Frame-only patches don't matter on the PC
     g["recipe"]["patches"]["patch_oculus_unreal"] = {}
     assert C.pc_outdated(g, dep)

@@ -23,6 +23,7 @@ def ovr_importers(ws) -> list[str]:
 
 class OvrTrace(Patch):
     id = "frame.ovr_trace"
+    on_pc = True
     title = "Trace Meta platform requests (diagnostics)"
     description = ("Logs every Meta Platform SDK request the game makes (user, entitlement, cloud saves, ...) and the "
                    "messages that answer them, and every 10 s the requests that never got an answer (logcat tag "

@@ -78,7 +78,9 @@ class Patch:
     needs_vr: bool = True  # only matters for VR apps (hidden for Android apps without VR)
     # works on a 32-bit game through the a32 bridge (frame.a32_bridge); None = by category (works_on_a32)
     a32: bool | None = None
-    on_pc: bool = False  # also in the build for this PC (AXRB): a fix of the APK itself, not of the Frame/Lepton
+    # also in the build for this PC (AXRB): a fix of the APK itself, not of the Frame/Lepton; "experimental" = kept
+    # there too but not yet seen working in AXRB (pc_selection treats both alike)
+    on_pc: bool | str = False
     revision: int = 1  # bump when apply() writes something different: installed builds then show "Update on Frame"
     package_revisions: dict[str, int] = {}  # narrower updates to otherwise shared patches
 
@@ -101,6 +103,11 @@ class Patch:
         return True
 
     not_applicable_reason: str = ""
+
+    def pc_detect(self, analysis: Analysis) -> bool:
+        """True when the build for this PC (AXRB) needs the patch although the Steam Frame build doesn't (so it isn't
+        in the recipe, which both builds share): pc_selection adds it."""
+        return False
 
     def apply(self, ctx: ApkContext) -> bool:  # apk stage; returns True when something changed
         raise NotImplementedError
@@ -153,12 +160,25 @@ def works_on_a32(patch: Patch) -> bool:
     return patch.category not in ("overport", "frame")
 
 
-def pc_selection(patches: dict) -> dict:
-    """The part of a Quest recipe that goes into the build for this PC (AXRB): OVRPort's patches and the APK fixes
-    marked on_pc. Steam Frame fixes (FrameBridge, Lepton workarounds) stay out; AXRB has its own OpenXR runtime."""
+def pc_selection(patches: dict, analysis: Analysis | None = None) -> dict:
+    """The part of a Quest recipe that goes into the build for this PC (AXRB): OVRPort's patches, the APK fixes
+    marked on_pc, FrameBridge (frame.adapter) with its settings except the Frame-only ones (settings.PC_DENY), the
+    PC values of settings whose Frame default doesn't fit there (settings.PC_VALUES) and, given the analysis, the
+    PC-only patches the game needs (Patch.pc_detect). The Steam Frame runtime's and Lepton's workarounds stay out;
+    AXRB has its own Android and OpenXR runtime. Idempotent: a PC selection selects itself."""
     load_all()
-    return {pid: params for pid, params in patches.items()
-            if pid in REGISTRY and (REGISTRY[pid].category == "overport" or REGISTRY[pid].on_pc)}
+    out = {pid: params for pid, params in patches.items()
+           if pid in REGISTRY and (REGISTRY[pid].category == "overport" or REGISTRY[pid].on_pc)}
+    if analysis is not None:
+        for patch in all_patches():
+            if patch.id not in out and patch.pc_detect(analysis):
+                out[patch.id] = {}
+    if "frame.adapter" in out:
+        from .settings import PC_VALUES
+
+        for key, value in PC_VALUES.items():
+            out[f"adapter.{key}"] = {"value": value}
+    return out
 
 
 def all_patches() -> list[Patch]:

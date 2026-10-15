@@ -84,6 +84,7 @@ def guard_microphone(data: bytes) -> bytes | None:
 
 class OvrMicrophone(Patch):
     id = "frame.ovr_microphone"
+    on_pc = True
     title = "Fix crash when the game prepares the microphone"
     description = ("OVRPort's Meta platform library opens the microphone only when it's started, but answers a "
                    "game's question about the microphone buffer size from that not-yet-opened stream: games that ask "

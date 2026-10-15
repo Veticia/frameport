@@ -49,6 +49,7 @@ def missing_lookups(lookups, plugin_exports) -> list[str]:
 
 class UnrealOvrpEntrypoints(Patch):
     id = "frame.unreal_ovrp_entrypoints"
+    on_pc = True
     title = "Unreal: stand-ins for OVRPlugin functions OVRPort lacks"
     description = ("Unreal's Oculus module looks up every OVRPlugin function it was built against and starts no VR "
                    "when one is missing; OVRPort's OpenXR OVRPlugin lacks some old ones (for example ovrp_GetPTWNear, "

@@ -450,6 +450,19 @@ UI: dict[str, dict] = {
 # they don't work for 32-bit games on the bridge. surface_native: Batman's native video renderer hooks Vulkan
 # functions OVRPort's dispatcher doesn't know
 XRSHIM_SETTINGS = ("controller_models", "haptic_fix", "surface_native")
+# Settings left out of the build for this PC (AXRB, base.pc_selection); every other one rides along in
+# libframe_settings.so, since FrameBridge wraps OVRPort's loader the same way there (scale, haptic_fix, pose_time_fix,
+# rect_clamp, ...). Left out: workarounds for the Steam Frame's own runtime or headset (sync_guard: a race in the
+# Frame's vrclient.so; focus_hold: the Frame's flickering wear sensor; controller_models: models the agent converts
+# from the Frame's SteamVR at install) and settings read only by libraries the PC build doesn't get (the GL shim and
+# the Zink shader layer, which fix Mesa/Zink on the Frame). Leaving them out also keeps a change to them from marking
+# the PC build outdated. controller_fix stays: it is the game's choice (0 = hand tracking), and its Touch mapping of
+# /valve/ and generic controller profiles helps wherever SteamVR controllers show up.
+PC_DENY = frozenset({"sync_guard", "focus_hold", "focus_hold_ms", "controller_models", "zink_shader_fix",
+                     "zink_shader_dump", "gl_hide_msrtt", "gl_hide_multiview", "gl_int_attribs", "gl_highp_markers",
+                     "gl_mv_debug"})
+# PC values of settings whose built-in default is for the Frame (FrameBridge's focus_hold is on unless set to 0)
+PC_VALUES = {"focus_hold": 0}
 
 
 class AdapterSetting(Patch):
@@ -465,6 +478,7 @@ class AdapterSetting(Patch):
         self.default = default
         self.revision = REVISIONS.get(key, 1)
         self.a32 = key not in XRSHIM_SETTINGS
+        self.on_pc = key not in PC_DENY
 
     @property
     def summary(self) -> str:

@@ -51,6 +51,7 @@ def patch_metaxr_telemetry(data: bytes) -> bytes | None:
 
 class MetaXrTelemetry(Patch):
     id = "frame.metaxr_telemetry"
+    on_pc = True
     title = "Meta XR Audio: skip Quest telemetry class"
     description = ("Unreal builds of Meta XR Audio abort ('ClassNotFoundException com.oculus.os.AnalyticsEvent') on "
                    "non-Quest devices. Patches that one JNI FindClass call so the library continues (for example NOPE "
@@ -79,6 +80,7 @@ class MetaXrTelemetry(Patch):
 
 class OculusOsStubs(Patch):
     id = "frame.oculusos"
+    on_pc = True
     title = "Oculus OS telemetry class stubs"
     description = ("Adds no-op com.oculus.os.AnalyticsEvent / UnifiedTelemetryLogger classes for native code that "
                    "looks them up through the app class loader (for example Nano, NOPE Challenge).")

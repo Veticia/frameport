@@ -270,12 +270,12 @@ Removes a controller position adjustment, for games whose hands look misplaced.
 
 Stops Meta's audio library from reporting to Meta (only matters on PC emulators).
 
-- `patch_disable_meta_xr_audio_telemetry`
+- `patch_disable_meta_xr_audio_telemetry` · builds for this PC (AXRB) add it when needed
 - **Changes:** Changes the APK (during the OVRPort conversion).
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Source:** [patches/overport.py](../src/frameport/patches/overport.py)
 
-> Skips Meta XR Audio's telemetry under x86_64 ARM translation (emulators). Not needed on the Frame, which runs games natively.
+> Skips Meta XR Audio's telemetry under x86_64 ARM translation (emulators). Not needed on the Frame, which runs games natively; added by itself to builds for this PC (AXRB) of games with Meta XR Audio.
 
 ### <a id="patch_disable_space_warp"></a>Disable application space warp if used
 
@@ -507,7 +507,7 @@ Runs a 32-bit game (Gear VR, Oculus Go, early Quest) on the Frame, which only ru
 
 FramePort's layer between the game and the Steam Frame: fills in what the Frame lacks (controllers, room, passthrough). Needed for every converted game.
 
-- `frame.adapter` · on by default
+- `frame.adapter` · on by default · also in builds for this PC (AXRB)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** Required for every OpenXR/overport build on the Frame.
 - **Suggested by launch-test signatures:**
@@ -524,7 +524,7 @@ FramePort's layer between the game and the Steam Frame: fills in what the Frame 
 
 Lets the game find extra content it keeps next to its data (for example Star Wars Tales' seasons).
 
-- `frame.asset_files`
+- `frame.asset_files` · also in builds for this PC (AXRB)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** The game asks Meta's platform for asset files and its data has … content file(s) (*.pak) that OVRPort's loader doesn't report.
 - **Catalog games (1):** Star Wars: Tales from the Galaxy's Edge.
@@ -536,7 +536,7 @@ Lets the game find extra content it keeps next to its data (for example Star War
 
 Experimental bypass for a failed Meta asset-file check at startup. Reports an empty asset list and installed status without a file path; does not provide DLC. Experimental.
 
-- `frame.asset_files_stub` · experimental
+- `frame.asset_files_stub` · experimental · also in builds for this PC (AXRB)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Suggested by launch-test signatures:**
@@ -549,7 +549,7 @@ Experimental bypass for a failed Meta asset-file check at startup. Reports an em
 
 Lets games start that would stop at Meta's avatars (for example BlazeRush). No Meta avatars.
 
-- `frame.avatar_stub`
+- `frame.avatar_stub` · also in builds for this PC (AXRB)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Catalog games (1):** BlazeRush.
@@ -577,7 +577,7 @@ Stops bHaptics from asking for a Bluetooth permission the Frame doesn't have (th
 
 Makes BlazeRush's menus and controllers work without Meta's avatars, and lets its shader fixes take effect.
 
-- `frame.blazerush`
+- `frame.blazerush` · also in builds for this PC (AXRB)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Only for its game's build:** outside it the whole OVRPort run fails, so recipes only use it where it applies.
@@ -590,7 +590,7 @@ Makes BlazeRush's menus and controllers work without Meta's avatars, and lets it
 
 Stops Epic Online Services from retrying its login keychain forever (the game would never finish starting).
 
-- `frame.eos_keychain_loop` · also for 2D apps
+- `frame.eos_keychain_loop` · also for 2D apps · also in builds for this PC (AXRB, experimental)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Suggested by launch-test signatures:**
@@ -655,7 +655,7 @@ Plays the game's videos on the Frame's video hardware, so 4K and 8K video runs s
 
 Lets the game use language files already in its data instead of waiting for a download that never comes.
 
-- `frame.langpacks` · experimental
+- `frame.langpacks` · experimental · also in builds for this PC (AXRB)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Source:** [patches/frame/langpack.py](../src/frameport/patches/frame/langpack.py)
@@ -666,7 +666,7 @@ Lets the game use language files already in its data instead of waiting for a do
 
 Makes the game start from the Frame's Steam library.
 
-- `frame.launcher` · on by default · also for 2D apps
+- `frame.launcher` · on by default · also for 2D apps · also in builds for this PC (AXRB)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** Manifest uses category INFO only; Lepton needs LAUNCHER.
 - **Suggested (on):** Applied automatically if the manifest needs it.
@@ -704,7 +704,7 @@ Lets games with a verified older Lua engine get past a startup crash on the Fram
 
 Declares Meta's permissions some mixed-reality games ask for, so they don't stop.
 
-- `frame.meta_permissions`
+- `frame.meta_permissions` · also in builds for this PC (AXRB)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** Mixed-reality game that needs the room model: its 'use spatial data' permission must be granted (for example Demeter).
 - **Catalog games (2):** Arkio, Demeter.
@@ -716,7 +716,7 @@ Declares Meta's permissions some mixed-reality games ask for, so they don't stop
 
 Skips a Quest-only reporting step in Meta's audio library that crashes some games.
 
-- `frame.metaxr_telemetry` · on by default
+- `frame.metaxr_telemetry` · on by default · also in builds for this PC (AXRB)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** Meta XR Audio present; patched automatically if it has the telemetry lookup.
 - **Suggested by launch-test signatures:**
@@ -729,7 +729,7 @@ Skips a Quest-only reporting step in Meta's audio library that crashes some game
 
 Stops strict debugging checks that make some games quit.
 
-- `frame.nodebug` · also for 2D apps
+- `frame.nodebug` · also for 2D apps · also in builds for this PC (AXRB)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** Unreal Engine ….…: older UE4 makes JNI calls CheckJNI rejects (for example Time Stall aborted on GetStringUTFChars(NULL)).
 - **Suggested (on):** Unreal build of Meta XR Audio: its telemetry lookup leaves a pending JNI exception that CheckJNI turns into an abort (for example NOPE Challenge).
@@ -745,7 +745,7 @@ Stops strict debugging checks that make some games quit.
 
 Provides stand-ins for Quest system calls some games make at start.
 
-- `frame.oculusos`
+- `frame.oculusos` · also in builds for this PC (AXRB)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** The Unreal build of Meta XR Audio looks up com.oculus.os.AnalyticsEvent and aborts without it (for example NOPE Challenge).
 - **Suggested (on):** Several Meta SDK libraries look up com.oculus.os.AnalyticsEvent (…); games like this abort without the stub (for example Nano).
@@ -761,7 +761,7 @@ Provides stand-ins for Quest system calls some games make at start.
 
 Stops a crash a few seconds after the logo in games with voice chat.
 
-- `frame.ovr_microphone`
+- `frame.ovr_microphone` · also in builds for this PC (AXRB)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** The game uses Meta's microphone API (ovr_Microphone_GetOutputBufferMaxSize), which crashes in OVRPort's library before the microphone is started.
 - **Suggested by launch-test signatures:**
@@ -774,7 +774,7 @@ Stops a crash a few seconds after the logo in games with voice chat.
 
 Keeps your progress in games that file their saves under your Meta user.
 
-- `frame.ovr_stable_user` · on by default
+- `frame.ovr_stable_user` · on by default · also in builds for this PC (AXRB)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** The game uses Meta's platform library: OVRPort's version gives it a new user id at every start, which loses saves filed under that id.
 - **Source:** [patches/frame/ovr_stable_user.py](../src/frameport/patches/frame/ovr_stable_user.py)
@@ -785,7 +785,7 @@ Keeps your progress in games that file their saves under your Meta user.
 
 For troubleshooting: records the game's requests to Meta's online services.
 
-- `frame.ovr_trace` · experimental · also for 2D apps
+- `frame.ovr_trace` · experimental · also for 2D apps · also in builds for this PC (AXRB)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Source:** [patches/frame/ovr_trace.py](../src/frameport/patches/frame/ovr_trace.py)
@@ -796,7 +796,7 @@ For troubleshooting: records the game's requests to Meta's online services.
 
 Adds a small piece of Meta's platform library that some games need to start.
 
-- `frame.ovrplatformcompat` · on by default
+- `frame.ovrplatformcompat` · on by default · also in builds for this PC (AXRB)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** Applied automatically when the OVRPort build needs it.
 - **Suggested by launch-test signatures:**
@@ -809,7 +809,7 @@ Adds a small piece of Meta's platform library that some games need to start.
 
 Provides stand-ins for Meta store functions the game expects, so it doesn't crash at start.
 
-- `frame.ovrstubs` · on by default
+- `frame.ovrstubs` · on by default · also in builds for this PC (AXRB)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** Applied automatically when the OVRPort build needs it.
 - **Suggested by launch-test signatures:**
@@ -876,7 +876,7 @@ Opens the app straight in VR, skipping its flat launcher screen. Turn off to use
 
 Allows very large pictures (8K video, theaters) instead of quitting.
 
-- `frame.swapchain_limit` · on by default
+- `frame.swapchain_limit` · on by default · also in builds for this PC (AXRB)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** Video player (…): creates swapchains larger than 4096 px (8K video, theater textures), which OVRPort's dispatcher aborts on.
 - **Suggested (on):** Recommended for every game: OVRPort aborts on swapchains larger than 4096 px; the Frame's runtime handles them.
@@ -957,7 +957,7 @@ Stops a gray screen crash in some Unity games by skipping their overlay layers (
 
 Lets older Unity games start VR without Meta's system apps (they'd stay on a 2D screen).
 
-- `frame.unity_oculus_check` · revision 5
+- `frame.unity_oculus_check` · also in builds for this PC (AXRB) · revision 5
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** Unity with built-in Oculus support: it checks for Meta's system apps before starting VR, else it runs as a 2D app (for example Accounting+, BattleSisters).
 - **Catalog games (12):** Accounting+, Audica, BattleSisters, Cosmodread, End Space, Eye of the Temple, Jurassic World Aftermath Collection, Mini Motor Racing X and 4 more.
@@ -987,7 +987,7 @@ Keeps a smoothing setting off that the game turns on itself and that can freeze 
 
 Lets you type into this app's text fields on the Frame (they'd close at once).
 
-- `frame.unity_text_input` · also for 2D apps
+- `frame.unity_text_input` · also for 2D apps · also in builds for this PC (AXRB)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** Unity app with text fields (…): they close at once on the Frame because it has no system keyboard.
 - **Catalog games (85):** AgeOfJoy, AllInOneSports, Ancient_Dungeon, Arkio, Audica, AugmentedEmpire, Battlemarked, BattleSisters and 77 more.
@@ -999,7 +999,7 @@ Lets you type into this app's text fields on the Frame (they'd close at once).
 
 Lets Unity 6 games with many native libraries start when they run out of thread keys (they'd abort with "cannot create thread specific key"), for example Wander.
 
-- `frame.unity_tls_key_pool` · also for 2D apps
+- `frame.unity_tls_key_pool` · also for 2D apps · also in builds for this PC (AXRB, experimental)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Offered (off):** Unity 6 with …: turn on if the game aborts at start with "cannot create thread specific key" (for example Wander).
 - **Catalog games (1):** Wander.
@@ -1053,7 +1053,7 @@ Shows the full environment when its upper part is clipped but menu panels look c
 
 Lets older Unreal games start VR on the Frame (for example Star Wars Pinball VR).
 
-- `frame.unreal_ovrp_entrypoints`
+- `frame.unreal_ovrp_entrypoints` · also in builds for this PC (AXRB)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** Unreal looks up OVRPlugin function(s) OVRPort's OVRPlugin lacks: ……. Without them Unreal starts no VR.
 - **Catalog games (2):** Ghostbusters: Rise of the Ghost Lord, Star Wars Pinball VR.
@@ -1065,7 +1065,7 @@ Lets older Unreal games start VR on the Frame (for example Star Wars Pinball VR)
 
 Makes grip, trigger and touch controls reach the game's hands (it picked the empty Gear VR controls on the Frame, for example Vader Immortal).
 
-- `frame.unreal_quest_keymap`
+- `frame.unreal_quest_keymap` · also in builds for this PC (AXRB)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Catalog games (3):** Vader Immortal: Episode I, Vader Immortal: Episode II, Vader Immortal: Episode III.
@@ -1077,7 +1077,7 @@ Makes grip, trigger and touch controls reach the game's hands (it picked the emp
 
 Lets the game leave its loading screen: it waited for a Quest-only step that never starts on the Frame (for example Vader Immortal).
 
-- `frame.unreal_quest_precompile`
+- `frame.unreal_quest_precompile` · also in builds for this PC (AXRB)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Catalog games (3):** Vader Immortal: Episode I, Vader Immortal: Episode II, Vader Immortal: Episode III.
@@ -1089,7 +1089,7 @@ Lets the game leave its loading screen: it waited for a Quest-only step that nev
 
 Starts Unreal games without re-checking their data file (they'd seem to hang on an invisible check screen).
 
-- `frame.unreal_skip_obb_check` · also for 2D apps
+- `frame.unreal_skip_obb_check` · also for 2D apps · also in builds for this PC (AXRB)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** Unreal checks the OBB's contents before starting (bVerifyOBBOnStartUp); on the Frame a failed or slow check can't be seen and the game seems to hang.
 - **Catalog games (5):** Dance Central, Kill It With Fire VR, MacacoVR, Maestro, Ragnarock.
@@ -1103,7 +1103,7 @@ Starts Unreal games without re-checking their data file (they'd seem to hang on 
 
 Skips a separate data-file check when an Unreal game still hangs at startup with the content check off. Experimental; the game still needs its data.
 
-- `frame.unreal_skip_obb_delivery` · experimental · also for 2D apps
+- `frame.unreal_skip_obb_delivery` · experimental · also for 2D apps · also in builds for this PC (AXRB)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Catalog games (1):** Medal of Honor: Above and Beyond.
@@ -1131,7 +1131,7 @@ Lets the game finish loading when its separate loading splash stalls the render 
 
 Makes the hands' thumbs follow what your thumb touches (they always pointed up: the Frame doesn't sense a thumb hovering, for example Vader Immortal).
 
-- `frame.unreal_thumb_touch`
+- `frame.unreal_thumb_touch` · also in builds for this PC (AXRB)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Catalog games (7):** Phantom: Covert Ops, Robo Recall, Star Wars: Tales from the Galaxy's Edge, Time Stall, Vader Immortal: Episode I, Vader Immortal: Episode II, Vader Immortal: Episode III.
@@ -1169,7 +1169,7 @@ Lets games with Vivox voice chat start on the Frame (they'd crash on an Android 
 
 Cleans up graphics data that crashes some Unreal games on the Frame.
 
-- `frame.vk_sanitize` · on by default
+- `frame.vk_sanitize` · on by default · also in builds for this PC (AXRB, experimental)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** Own-engine game: applied when one of its libraries loads Vulkan by name (for example Roblox); keeps Lepton's Fossilize layer from crashing on uninitialized pointers.
 - **Suggested (on):** Unreal game: applied automatically when the engine loads Vulkan by name; keeps Lepton's Fossilize layer from crashing on uninitialized pointers (for example Deadpool VR).
@@ -1185,7 +1185,7 @@ Cleans up graphics data that crashes some Unreal games on the Frame.
 
 Lets games built on Meta's oldest VR interface run on the Frame.
 
-- `frame.vrapi_bridge` · experimental
+- `frame.vrapi_bridge` · experimental · also in builds for this PC (AXRB, experimental)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** The engine calls libvrapi.so directly; OVRPort can't translate it.
 - **Conflicts with:** [`frame.vrapi_stub`](#frame-vrapi_stub)
@@ -1201,7 +1201,7 @@ Lets games built on Meta's oldest VR interface run on the Frame.
 
 Stops Meta's old VR library from closing the game at start (for example Jurassic World Aftermath).
 
-- `frame.vrapi_stub`
+- `frame.vrapi_stub` · also in builds for this PC (AXRB)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Conflicts with:** [`frame.vrapi_bridge`](#frame-vrapi_bridge)
@@ -1232,7 +1232,7 @@ Settings of FrameBridge, FramePort's OpenXR layer inside every converted Quest g
 
 Moves where the pointer starts, forward or back.
 
-- `adapter.aim_forward`
+- `adapter.aim_forward` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1246,7 +1246,7 @@ Moves where the pointer starts, forward or back.
 
 If the pointer doesn't hit what you aim at, tilt it up or down.
 
-- `adapter.aim_pitch`
+- `adapter.aim_pitch` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1260,7 +1260,7 @@ If the pointer doesn't hit what you aim at, tilt it up or down.
 
 Turns the pointer left or right.
 
-- `adapter.aim_yaw`
+- `adapter.aim_yaw` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1274,7 +1274,7 @@ Turns the pointer left or right.
 
 Turn off only for games you play with your hands instead of controllers.
 
-- `adapter.controller_fix`
+- `adapter.controller_fix` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested (on), value `0`:** Hand tracking is required by the game: pass hands through instead of reporting Touch controllers (for example Silhouette).
 - **Options:**
@@ -1306,7 +1306,7 @@ For games that show the headset's own controllers. Takes effect after a reinstal
 
 Keeps games running that use a 360° cube layer the Frame lacks (for example Budget Cuts Ultimate). Leave it on.
 
-- `adapter.cube_standin`
+- `adapter.cube_standin` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1320,7 +1320,7 @@ Keeps games running that use a 360° cube layer the Frame lacks (for example Bud
 
 The Frame can't show curved panels; this shows them as gently bent strips.
 
-- `adapter.cylinder_strips`
+- `adapter.cylinder_strips` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1334,7 +1334,7 @@ The Frame can't show curved panels; this shows them as gently bent strips.
 
 Video players' virtual theaters and 360° videos would otherwise stay black.
 
-- `adapter.equirect_emul`
+- `adapter.equirect_emul` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested (on), value `1`:** The game draws 360° layers (for example a video player's theater or 360° videos), which the Frame's runtime can't show: show them as panels around you.
 - **Options:**
@@ -1351,7 +1351,7 @@ Video players' virtual theaters and 360° videos would otherwise stay black.
 
 Higher keeps more detail but uses more memory.
 
-- `adapter.equirect_face`
+- `adapter.equirect_face` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1365,7 +1365,7 @@ Higher keeps more detail but uses more memory.
 
 Only if 360° pictures show wrongly.
 
-- `adapter.equirect_flip`
+- `adapter.equirect_flip` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1379,7 +1379,7 @@ Only if 360° pictures show wrongly.
 
 Must be at least the video's own frame rate.
 
-- `adapter.equirect_fps`
+- `adapter.equirect_fps` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1393,7 +1393,7 @@ Must be at least the video's own frame rate.
 
 Higher is sharper but needs more power.
 
-- `adapter.equirect_res`
+- `adapter.equirect_res` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1407,7 +1407,7 @@ Higher is sharper but needs more power.
 
 Shows 3D 360° pictures flat if they look doubled.
 
-- `adapter.equirect_stereo`
+- `adapter.equirect_stereo` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1421,7 +1421,7 @@ Shows 3D 360° pictures flat if they look doubled.
 
 Logs details when one eye looks wrong. No effect on the game.
 
-- `adapter.eye_debug`
+- `adapter.eye_debug` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1435,7 +1435,7 @@ Logs details when one eye looks wrong. No effect on the game.
 
 For games whose fades to black don't show, so you see the level loading (for example Batman: Arkham Shadow).
 
-- `adapter.fade_quad`
+- `adapter.fade_quad` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1450,7 +1450,7 @@ For games whose fades to black don't show, so you see the level loading (for exa
 
 Saves a few UI panels before and after FrameBridge turns them upright, for testing without the headset.
 
-- `adapter.flip_dump`
+- `adapter.flip_dump` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1464,7 +1464,7 @@ Saves a few UI panels before and after FrameBridge turns them upright, for testi
 
 Turns menus and text the right way up.
 
-- `adapter.flip_emul`
+- `adapter.flip_emul` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1478,7 +1478,7 @@ Turns menus and text the right way up.
 
 Older way to turn upside-down panels; prefer Fix upside-down menus.
 
-- `adapter.flip_quads`
+- `adapter.flip_quads` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1524,7 +1524,7 @@ Longer for headsets that briefly think they're off your head.
 
 Hides a Quest-only way of saving GPU power that the Frame lacks. Leave it on.
 
-- `adapter.foveation_fix`
+- `adapter.foveation_fix` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1538,7 +1538,7 @@ Hides a Quest-only way of saving GPU power that the Frame lacks. Leave it on.
 
 For OpenGL ES games whose memory use keeps growing (e.g. Vader Immortal).
 
-- `adapter.gl_error_clear`
+- `adapter.gl_error_clear` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1627,7 +1627,7 @@ Logs details when flat panels stay black. No effect on the game.
 
 For games that freeze the Frame when a controller vibrates (for example Lucky's Tale). Needs a rebuild.
 
-- `adapter.haptic_fix` · revision 2
+- `adapter.haptic_fix` · also in builds for this PC (AXRB) · revision 2
 - **Changes:** Game setting, stored in the build: needs a rebuild.
 - **Suggested (on), value `1`:** Meta's OVRPlugin vibrates controllers through OVRPort's loader, which turns some vibrations into gigabyte allocations that freeze the Frame (for example Lucky's Tale, BattleSisters): vibrations are converted before they reach it.
 - **Options:**
@@ -1642,7 +1642,7 @@ For games that freeze the Frame when a controller vibrates (for example Lucky's 
 
 Turn it down if controller vibrations are too strong.
 
-- `adapter.haptic_scale`
+- `adapter.haptic_scale` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1656,7 +1656,7 @@ Turn it down if controller vibrations are too strong.
 
 For games whose picture flickers or smears (for example Into The Radius 2).
 
-- `adapter.hide_space_warp`
+- `adapter.hide_space_warp` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Offered (off), value `1`:** Unreal Engine 5 game with Meta's space warp: turn on if the picture flickers or smears (for example Into The Radius 2).
 - **Options:**
@@ -1673,7 +1673,7 @@ For games whose picture flickers or smears (for example Into The Radius 2).
 
 Logs details when buttons do nothing or the wrong thing. No effect on the game.
 
-- `adapter.input_diag`
+- `adapter.input_diag` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1687,7 +1687,7 @@ Logs details when buttons do nothing or the wrong thing. No effect on the game.
 
 Logs details for troubleshooting. No effect on the game.
 
-- `adapter.layer_debug`
+- `adapter.layer_debug` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1701,7 +1701,7 @@ Logs details for troubleshooting. No effect on the game.
 
 Skips picture layers the Frame would refuse. Leave it on.
 
-- `adapter.layer_fix`
+- `adapter.layer_fix` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1715,7 +1715,7 @@ Skips picture layers the Frame would refuse. Leave it on.
 
 Experimental. Leave it off unless asked to test it.
 
-- `adapter.mutable_fix`
+- `adapter.mutable_fix` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1729,7 +1729,7 @@ Experimental. Leave it off unless asked to test it.
 
 For older Unity games that freeze at the first scene change (for example Sniper Elite VR). Can make loading screens stutter.
 
-- `adapter.ovrp_begin_gate`
+- `adapter.ovrp_begin_gate` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1744,7 +1744,7 @@ For older Unity games that freeze at the first scene change (for example Sniper 
 
 For older Unity games whose hands trail the controllers (for example Sniper Elite VR). In others the hands lag.
 
-- `adapter.ovrp_hold_physics`
+- `adapter.ovrp_hold_physics` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1759,7 +1759,7 @@ For older Unity games whose hands trail the controllers (for example Sniper Elit
 
 Shows the Frame's cameras where the game expects passthrough.
 
-- `adapter.passthrough_emul`
+- `adapter.passthrough_emul` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1775,7 +1775,7 @@ Shows the Frame's cameras where the game expects passthrough.
 
 For games that judder or shimmer while you hold your head still (for example I Am Cat).
 
-- `adapter.pose_consistency` · revision 2
+- `adapter.pose_consistency` · also in builds for this PC (AXRB) · revision 2
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1790,7 +1790,7 @@ For games that judder or shimmer while you hold your head still (for example I A
 
 Logs how game poses line up with the Frame's clock. No effect on the game.
 
-- `adapter.pose_debug`
+- `adapter.pose_debug` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1804,7 +1804,7 @@ Logs how game poses line up with the Frame's clock. No effect on the game.
 
 For games whose hands trail the controllers when you move them (for example BattleSisters).
 
-- `adapter.pose_time_fix`
+- `adapter.pose_time_fix` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested (on), value `1`:** Unity's built-in Oculus support reads controller poses through OVRPlugin at its monotonic "now", seconds in the past on the Frame: they are located at the right time (for example BattleSisters, Sniper Elite VR).
 - **Suggested (on), value `1`:** Unreal 4's Oculus input of this OVRPlugin generation asks for controller poses at OVRPlugin's own clock, which is behind the Frame's: they are located at the right time (for example Vader Immortal).
@@ -1820,7 +1820,7 @@ For games whose hands trail the controllers when you move them (for example Batt
 
 For apps that only know Quest 3/Pro controllers: without it they get no buttons.
 
-- `adapter.profile_remap`
+- `adapter.profile_remap` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1834,7 +1834,7 @@ For apps that only know Quest 3/Pro controllers: without it they get no buttons.
 
 For games whose hands' thumbs never move when you touch the buttons or thumbstick (for example Vader Immortal).
 
-- `adapter.proximity_emul`
+- `adapter.proximity_emul` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1848,7 +1848,7 @@ For games whose hands' thumbs never move when you touch the buttons or thumbstic
 
 Stops games from hanging when their eye picture is a little too big (for example PowerWash Simulator). Leave it on.
 
-- `adapter.rect_clamp`
+- `adapter.rect_clamp` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1862,7 +1862,7 @@ Stops games from hanging when their eye picture is a little too big (for example
 
 How often the picture updates. Higher is smoother if the game can keep up.
 
-- `adapter.refresh_rate`
+- `adapter.refresh_rate` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1877,7 +1877,7 @@ How often the picture updates. Higher is smoother if the game can keep up.
 
 For games where one eye flickers or jitters. Costs some speed.
 
-- `adapter.release_wait`
+- `adapter.release_wait` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1891,7 +1891,7 @@ For games where one eye flickers or jitters. Costs some speed.
 
 Re-creates the game's play space after the first frames. For testing.
 
-- `adapter.respace_kick`
+- `adapter.respace_kick` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1905,7 +1905,7 @@ Re-creates the game's play space after the first frames. For testing.
 
 Higher looks sharper but needs more power; lower runs smoother. 1.0× is the game's own.
 
-- `adapter.scale`
+- `adapter.scale` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1920,7 +1920,7 @@ Higher looks sharper but needs more power; lower runs smoother. 1.0× is the gam
 
 0 = the size of your play area.
 
-- `adapter.scene_depth`
+- `adapter.scene_depth` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1934,7 +1934,7 @@ Higher looks sharper but needs more power; lower runs smoother. 1.0× is the gam
 
 Mixed-reality games that build their level from your room get a simple room with walls.
 
-- `adapter.scene_emul`
+- `adapter.scene_emul` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested (on), value `1`:** Mixed-reality game that builds its level from the room model: emulate a guardian-sized room (for example Demeter).
 - **Suggested (on), value `1`:** The game asks Meta's system for your room layout (scene), which the Frame doesn't have: emulate a room from the play area (for example VR HOT's room setup).
@@ -1952,7 +1952,7 @@ Mixed-reality games that build their level from your room get a simple room with
 
 Ceiling height of the pretend room.
 
-- `adapter.scene_height`
+- `adapter.scene_height` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1966,7 +1966,7 @@ Ceiling height of the pretend room.
 
 0 = the size of your play area.
 
-- `adapter.scene_width`
+- `adapter.scene_width` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1980,7 +1980,7 @@ Ceiling height of the pretend room.
 
 Saves what the game draws every few seconds, for testing without the headset.
 
-- `adapter.snapshot`
+- `adapter.snapshot` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -1994,7 +1994,7 @@ Saves what the game draws every few seconds, for testing without the headset.
 
 For games whose menus or screens jump to wherever you look.
 
-- `adapter.stable_local`
+- `adapter.stable_local` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -2009,7 +2009,7 @@ For games whose menus or screens jump to wherever you look.
 
 Diagnostics: removes layer color fades. Some fades no longer show.
 
-- `adapter.strip_color_bias`
+- `adapter.strip_color_bias` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -2023,7 +2023,7 @@ Diagnostics: removes layer color fades. Some fades no longer show.
 
 Removes depth information from the game's layers. For testing.
 
-- `adapter.strip_depth`
+- `adapter.strip_depth` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -2037,7 +2037,7 @@ Removes depth information from the game's layers. For testing.
 
 Shows videos that games play on a flat panel (for example an intro video).
 
-- `adapter.surface_emul`
+- `adapter.surface_emul` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -2051,7 +2051,7 @@ Shows videos that games play on a flat panel (for example an intro video).
 
 Shows Batman: Arkham Shadow's cutscenes; set by that game's recipe.
 
-- `adapter.surface_native` · revision 4
+- `adapter.surface_native` · also in builds for this PC (AXRB) · revision 4
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -2066,7 +2066,7 @@ Shows Batman: Arkham Shadow's cutscenes; set by that game's recipe.
 
 Shows each eye's picture to the other eye. For testing.
 
-- `adapter.swap_eyes`
+- `adapter.swap_eyes` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -2080,7 +2080,7 @@ Shows each eye's picture to the other eye. For testing.
 
 Lets OpenGL ES games start when the Frame refuses their picture format. Leave it on.
 
-- `adapter.swapchain_fix`
+- `adapter.swapchain_fix` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -2113,7 +2113,7 @@ For games that crash right after you return to them (for example after the Steam
 
 For Unreal Engine 5 games that crash on the Frame (for example Metro Awakening).
 
-- `adapter.vk_hide_fdm`
+- `adapter.vk_hide_fdm` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -2131,7 +2131,7 @@ For Unreal Engine 5 games that crash on the Frame (for example Metro Awakening).
 
 For Vulkan games whose models flicker or vanish while you look at them (for example Into The Radius 2). Needs a rebuild.
 
-- `adapter.vk_query_slots` · revision 3
+- `adapter.vk_query_slots` · also in builds for this PC (AXRB) · revision 3
 - **Changes:** Game setting, stored in the build: needs a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -2145,7 +2145,7 @@ For Vulkan games whose models flicker or vanish while you look at them (for exam
 
 Saves the game's shaders to find one that hangs the GPU. No effect on the game.
 
-- `adapter.vk_shader_dump`
+- `adapter.vk_shader_dump` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -2161,7 +2161,7 @@ Saves the game's shaders to find one that hangs the GPU. No effect on the game.
 
 Corrects specific shaders that hang the game on the Frame. Comes from a game's recipe.
 
-- `adapter.vk_shader_fix` · revision 2
+- `adapter.vk_shader_fix` · also in builds for this PC (AXRB) · revision 2
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -2176,7 +2176,7 @@ Corrects specific shaders that hang the game on the Frame. Comes from a game's r
 
 For Unreal games whose models flicker or show through walls and windows on the Frame (for example Into The Radius 2). Needs a rebuild.
 
-- `adapter.vk_spec_fixes` · revision 2
+- `adapter.vk_spec_fixes` · also in builds for this PC (AXRB) · revision 2
 - **Changes:** Game setting, stored in the build: needs a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
@@ -2193,7 +2193,7 @@ For Unreal games whose models flicker or show through walls and windows on the F
 
 Logs Vulkan mistakes the game makes. Needs a special test build.
 
-- `adapter.vk_validation`
+- `adapter.vk_validation` · also in builds for this PC (AXRB)
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**

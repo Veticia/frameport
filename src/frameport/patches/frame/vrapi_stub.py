@@ -17,6 +17,7 @@ VRAPI = "libvrapi.so"
 
 class VrApiStub(Patch):
     id = "frame.vrapi_stub"
+    on_pc = True
     title = "Quiet Meta's VrApi loader (OpenXR games)"
     description = ("Some OpenXR games still ship Meta's VrApi loader and call it a few times without starting VrApi "
                    "(for example Jurassic World Aftermath); Meta's loader then stops the game (\"vrapi_SetPropertyInt "

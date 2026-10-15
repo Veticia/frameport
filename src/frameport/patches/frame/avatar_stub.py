@@ -15,6 +15,7 @@ AVATAR = "libovravatarloader.so"
 
 class AvatarStub(Patch):
     id = "frame.avatar_stub"
+    on_pc = True
     title = "Skip Meta avatars"
     description = ("Meta's avatar library needs Meta's Horizon app, which the Frame doesn't have; it then stops the "
                    "game at start (\"Failed to launch SystemActivities\", for example BlazeRush). Replaces it with a "

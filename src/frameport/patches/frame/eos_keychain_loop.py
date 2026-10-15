@@ -26,6 +26,7 @@ def patch_dex(dex: Dex) -> list[str]:
 
 class EosKeychainLoop(Patch):
     id = "frame.eos_keychain_loop"
+    on_pc = "experimental"
     title = "Epic Online Services: stop the keychain retry loop"
     description = ("Epic Online Services (EOS) keeps its login keychain in the app's settings storage. When it can't "
                    "write there, it resets the keychain and tries again without end (for example Beyond Sandbox: a "

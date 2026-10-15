@@ -91,7 +91,47 @@ installed 1.0.x, and whether AXRB's own launcher shows FramePort-set-up runtimes
 **Build decision: FramePort hands AXRB an OVRPort-only build** (the recipe's OVRPort patches, no Steam Frame fixes,
 signed with the game's FramePort key). The original APK crashes; FramePort's Frame fixes (FrameBridge adapter, Lepton
 and Frame-runtime workarounds) target the Frame. The recipe's alternate (no-ForceQuit) build is used when the recipe
-says so.
+says so. (Since 2026-10-15 the PC build also carries the runtime-independent APK fixes and FrameBridge, see below.)
+
+## Which patches reach the build for this PC
+
+One recipe serves both builds; `patches/base.pc_selection(patches, analysis)` picks the PC part (used by
+`build.build(pc=True)`, `pipeline.pc_recipe_fingerprint`, the PC deployment record and `ui/components.pc_outdated`).
+`docs/PATCHES.md` marks each kept patch "also in builds for this PC (AXRB)".
+
+- **All of OVRPort's patches** (category `overport`).
+- **APK fixes that don't depend on Lepton or the Frame's runtime** (`Patch.on_pc = True`): they fix the game's own
+  code or its Meta libraries, which misbehave the same way in AXRB's Android (no Meta services, not a Quest device
+  model, no Horizon app): `frame.ovrplatformcompat`, `frame.ovrstubs`, `frame.swapchain_limit` (OVRPort's
+  dispatcher), `frame.ovr_stable_user`, `frame.unreal_ovrp_entrypoints`, `frame.avatar_stub`, `frame.vrapi_stub`,
+  `frame.metaxr_telemetry`, `frame.oculusos`, `frame.ovr_microphone`, `frame.langpacks`, `frame.asset_files`,
+  `frame.asset_files_stub`, `frame.ovr_trace`, `frame.blazerush`, `frame.unity_oculus_check` (with its ovrpshim),
+  `frame.unity_text_input`, `frame.unreal_quest_precompile`, `frame.unreal_quest_keymap`,
+  `frame.unreal_thumb_touch`, `frame.unreal_skip_obb_check`, `frame.unreal_skip_obb_delivery`, `frame.nodebug`,
+  `frame.meta_permissions`, `frame.launcher`.
+- **Experimental on the PC** (`on_pc = "experimental"`, kept but not yet seen working in AXRB): `frame.vk_sanitize`
+  (the Vulkan shim; gfxstream / the host driver instead of Lepton's Fossilize), `frame.vrapi_bridge` (VrApi → OpenXR
+  through OVRPort's loader, so AXRB's runtime; the **GL shim stays off**: it fixes Mesa/Zink GLSL strictness, and
+  the bridge doesn't need it — only `frame.gl_shim` requires the bridge, not the other way round),
+  `frame.unity_tls_key_pool`, `frame.eos_keychain_loop`.
+- **FrameBridge** (`frame.adapter`) with its settings in `lib/<abi>/libframe_settings.so`: it wraps OVRPort's loader
+  the same way in AXRB (scale, haptic_fix, pose_time_fix, rect_clamp, profile_remap, ...). Left out
+  (`settings.PC_DENY`): `sync_guard` (a race in the Frame's vrclient.so), `focus_hold` / `focus_hold_ms` (the
+  Frame's flickering wear sensor; FrameBridge's built-in default is on, so the PC build writes `focus_hold=0`,
+  `settings.PC_VALUES`), `controller_models` (models the agent converts from the Frame's SteamVR at install) and the
+  settings only the GL shim / Zink shader layer read (`gl_*`, `zink_*`). `controller_fix` stays: it is the game's
+  choice (0 = hand tracking) and its Touch mapping of `/valve/` and generic profiles is runtime-independent.
+  FrameBridge finds `libframe_settings.so` next to its own path (dladdr); on the Frame the agent also passes the
+  settings as files, in AXRB the library is the only source, so the PC build turns `extractNativeLibs` on
+  (`build.extract_native_libs`; apps with `extractNativeLibs="false"` would map their libraries from base.apk).
+  Without OVRPort (a 32-bit recipe) the PC build drops FrameBridge: there is no loader to wrap.
+- **PC-only:** OVRPort's `patch_disable_meta_xr_audio_telemetry` (for x86_64 ARM translation, which AXRB is) is
+  never in a Steam Frame recipe (`applies()` is False); `pc_selection` adds it, given the analysis, to games with
+  Meta XR Audio (`Patch.pc_detect`; AXRB's own profile turns it on for North Star).
+- **Off on the PC:** Lepton/Android 11 workarounds (clipboard, Vivox audio route, start activity, ...), the Zink/Mesa
+  GL shims and shader layer, pac_hints/luajit, hardware video decoding, every `device.*` option, the 32-bit bridge.
+- TODO: `device.files` (files written into the game's storage at install) could be reproduced with `adb push` in
+  `targets/pc_android.py`.
 
 ### FramePort end to end (same day, headless, this branch)
 

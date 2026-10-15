@@ -56,7 +56,7 @@ OVERPORT_PATCHES = [
      "builds (the stable CLI lists it but can't apply it)."),
     ("patch_disable_meta_xr_audio_telemetry", "Disable Meta XR Audio telemetry", False,
      "Skips Meta XR Audio's telemetry under x86_64 ARM translation (emulators). Not needed on the Frame, which runs "
-     "games natively."),
+     "games natively; added by itself to builds for this PC (AXRB) of games with Meta XR Audio."),
     ("patch_ac_nexus_no_appsw_72", "AC Nexus: no AppSW at 72 Hz", False,
      "Assassin's Creed Nexus (build 207706 only): turns off application space warp and runs at 72 Hz."),
     ("patch_ac_nexus_no_appsw_90", "AC Nexus: no AppSW at 90 Hz", False,
@@ -70,6 +70,8 @@ AC_NEXUS_BUILD = "MAIN.450412.207706.final"  # OVRPort's AC Nexus patches check 
 # patches that fail the whole overport run when used outside their game/build: a catalog recipe only gets them where
 # applies() is true (recommend/engine.py)
 STRICT = {"patch_ac_nexus_no_appsw_72", "patch_ac_nexus_no_appsw_90", "patch_vrapi_openxr"}
+# patches only builds for this PC (AXRB) get, added by base.pc_selection when the game needs them (pc_detect)
+PC_ADDED = {"patch_disable_meta_xr_audio_telemetry"}
 DEFAULT_OVERPORT = [pid for pid, _, default, _ in OVERPORT_PATCHES if default]
 
 
@@ -81,6 +83,7 @@ class OverportPatch(Patch):
         self.id, self.title, self.default_on, self.description = pid, title, default, detail
         self.conflicts = CONFLICTS.get(pid, ())
         self.strict = pid in STRICT
+        self.pc_added = pid in PC_ADDED
 
     def detect(self, analysis: Analysis) -> Suggestion | None:
         from . import applicability as ap
@@ -121,6 +124,13 @@ class OverportPatch(Patch):
         }
         rule = rules.get(self.id)
         return rule(analysis) if rule else True
+
+    def pc_detect(self, analysis: Analysis) -> bool:
+        """The build for this PC: AXRB runs the game's arm64 code through translation on x86_64, where OVRPort's
+        telemetry patch belongs (the Frame recipe never has it: applies() is False there)."""
+        from . import applicability as ap
+
+        return self.pc_added and bool(ap.meta_audio_libs(analysis))
 
 
 STRINGS_URL = "https://raw.githubusercontent.com/ovrport/app/HEAD/composeApp/src/commonMain/composeResources/values/strings.xml"

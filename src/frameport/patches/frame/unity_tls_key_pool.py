@@ -24,6 +24,7 @@ def heavy_native_libs(a) -> list[str]:
 
 class UnityTlsKeyPool(Patch):
     id = "frame.unity_tls_key_pool"
+    on_pc = "experimental"
     title = "Unity: share thread keys (games that run out of them)"
     description = (
         "Android gives a process 128 thread keys (pthread keys, per-thread storage slots). Unity 6 takes about 40, "
