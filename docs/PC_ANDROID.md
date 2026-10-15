@@ -58,7 +58,8 @@ folder) and picks per game:
   aren't empty + AXRB's direct files complete. Requirements: ≥ 6 GB RAM, `vulkan-1.dll` (no hypervisor, no GPU
   vendor gate).
 - **Direct install** (no adb): the PC build is copied to `%LOCALAPPDATA%\FramePort\axrb\games\<pkg>\<pkg>.apk`
-  (FramePort removes its converted copies after an install), the launch activity comes from the APK's manifest
+  (FramePort removes its converted copies after an install; `FRAMEPORT_AXRB_LAUNCHER_DIR` moves FramePort's `axrb`
+  folder, for isolated `FRAMEPORT_HOME` runs), the launch activity comes from the APK's manifest
   (`axml.launcher_activity`, `pkg/fully.qualified.Class`), the data files become AXRB's content list `assets.txt`
   (`Android/obb/<pkg>/<file>\t<Windows path>`, read-only mounts at the original place; WSL-only folders are copied
   next to the APK). App data and saves: `<runtime>\direct\data\data\<pkg>` and `direct\sdcard\Android\data\<pkg>`.

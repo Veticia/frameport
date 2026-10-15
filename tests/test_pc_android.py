@@ -463,8 +463,17 @@ def fake_direct_app(local: Path, files: dict | None = None, version="2.0.0") -> 
 @pytest.fixture
 def no_axrb_env(monkeypatch):
     for name in ("FRAMEPORT_AXRB_DIR", "FRAMEPORT_AXRB_RUNTIME", "FRAMEPORT_AXRB_DIRECT_DIR",
-                 "FRAMEPORT_AXRB_DIRECT_RUNTIME"):
+                 "FRAMEPORT_AXRB_DIRECT_RUNTIME", "FRAMEPORT_AXRB_LAUNCHER_DIR"):
         monkeypatch.delenv(name, raising=False)
+
+
+def test_launcher_dir_can_be_moved(tmp_path, monkeypatch, no_axrb_env):
+    """Isolated runs (FRAMEPORT_HOME in WSL) keep launchers and direct-mode APKs out of the real app data folder."""
+    monkeypatch.setattr(axrb, "local_appdata", lambda: tmp_path / "Local")
+    assert axrb.launcher_dir() == tmp_path / "Local/FramePort/axrb"
+    monkeypatch.setenv("FRAMEPORT_AXRB_LAUNCHER_DIR", str(tmp_path / "iso"))
+    assert axrb.launcher_dir() == tmp_path / "iso"
+    assert axrb.game_dir("com.example.game") == tmp_path / "iso/games/com.example.game"
 
 
 def test_both_installs_are_found(tmp_path, monkeypatch, win, no_axrb_env):
