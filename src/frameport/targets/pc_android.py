@@ -27,7 +27,7 @@ from pathlib import Path
 from ..core import winhost
 from ..core.events import Reporter
 from ..core.models import Recipe, data_manifest
-from ..tools import axrb
+from ..tools import axrb, xr_sim
 
 KIND = "android"
 OBB_ROOT = "/sdcard/Android/obb"
@@ -355,10 +355,12 @@ def game_logs(backend: str | None = None) -> dict[str, str]:
     return out
 
 
-def launch_test(dep: dict, reporter: Reporter, seconds: int = 45, triage=None):
-    """Start the game through FramePort's launcher (= AXRB's run script), watch it, stop it again."""
+def launch_test(dep: dict, reporter: Reporter, seconds: int = 45, triage=None, extra_env: dict | None = None):
+    """Start the game through FramePort's launcher (= AXRB's run script), watch its Android process, stop it again.
+    extra_env: environment for the launcher's processes; default = the simulated headset's while one runs
+    (tools/xr_sim.py, `frameport test --to pc --sim`)."""
     if dep_backend(dep) == axrb.DIRECT:
-        return _launch_test_direct(dep, reporter, seconds, triage)
+        return _launch_test_direct(dep, reporter, seconds, triage, extra_env)
     reporter.stage("Launch test (this PC, AXRB)")
     package = dep["package"]
     if axrb.emulator_online() and _pid(package):
@@ -368,7 +370,9 @@ def launch_test(dep: dict, reporter: Reporter, seconds: int = 45, triage=None):
     log.unlink(missing_ok=True)
     before = time.time()
     q = axrb._ps_quote
-    pid = axrb.spawn_detached(axrb.logged(
+    # --- xr-sim hook (tools/xr_sim.py): env + SteamVR-registration shim before the launcher call
+    sim = xr_sim.launcher_prefix(xr_sim.active_env() if extra_env is None else extra_env)
+    pid = axrb.spawn_detached(sim + axrb.logged(
         f"& {q(dep['launcher_win'])} -Package {q(package)} -Activity {q(dep['activity'])} "
         f"-GameName {q(dep['title'])} -CaptureGuestLog " + " ".join(dep.get("flags") or ()),
         winhost.to_windows(log)))
@@ -414,7 +418,7 @@ def direct_state(out_text: str, launcher_running: bool) -> str | None:
     return None if launcher_running else "NEVER_STARTED"
 
 
-def _launch_test_direct(dep: dict, reporter: Reporter, seconds: int, triage):
+def _launch_test_direct(dep: dict, reporter: Reporter, seconds: int, triage, extra_env: dict | None = None):
     reporter.stage("Launch test (this PC, AXRB direct mode)")
     inst = axrb.find(axrb.DIRECT)
     if not inst:
@@ -427,7 +431,8 @@ def _launch_test_direct(dep: dict, reporter: Reporter, seconds: int, triage):
     out = logs / "game" / "direct.out"
     before = time.time()
     q = axrb._ps_quote
-    pid = axrb.spawn_detached(axrb.logged(
+    sim = xr_sim.launcher_prefix(xr_sim.active_env() if extra_env is None else extra_env)
+    pid = axrb.spawn_detached(sim + axrb.logged(
         f"& {q(dep['launcher_win'])} -Package {q(package)} -Activity {q(dep['activity'])} "
         f"-GameName {q(dep['title'])} " + " ".join(dep.get("flags") or ()), winhost.to_windows(log)))
     state, deadline, watch_end = "NEVER_STARTED", time.time() + 300, None  # ART's first start is slow (no JIT)

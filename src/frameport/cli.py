@@ -515,18 +515,25 @@ def test(package: Optional[str] = typer.Argument(None), all_: bool = typer.Optio
          seconds: int = typer.Option(45, help="how long the game runs before it's stopped"),
          to: str = typer.Option("frame", help="frame, or pc (games installed on this PC)"),
          axrb_backend: Optional[str] = typer.Option(None, help="with --to pc: check that Quest games are installed "
-                                                    "for this AXRB backend (direct or emulator)")):
+                                                    "for this AXRB backend (direct or emulator)"),
+         sim: bool = typer.Option(False, "--sim", help="with --to pc: use Monado's simulated headset instead of the "
+                                  "PC's OpenXR runtime (no headset needed; also env FRAMEPORT_PC_XR_SIM=1)")):
     """Headless launch test on the Frame (or this PC) and log triage."""
+    from .tools import xr_sim
+
+    if sim and to != "pc":
+        raise typer.BadParameter("--sim only works with --to pc")
     target = _target(frame, to=to)
     _set_axrb_backend(target, axrb_backend)
     installed = {g["package"] for g in target.installed()}
-    for pkg in _pkgs(package, all_):
-        if pkg not in installed:
-            typer.echo(f"{pkg}: not installed on {target.label}", err=True)
-            continue
-        s = pipeline.test_game(pkg, target, printing_reporter(False), seconds)
-        typer.echo(f"{pkg}: {s['state']} ({s['verdict']}) furthest: {s['milestone']}"
-                   + (f"; suggestions: {', '.join(s['suggestions'])}" if s["suggestions"] else ""))
+    with xr_sim.running(to == "pc" and xr_sim.enabled(sim), reporter=printing_reporter(False)):
+        for pkg in _pkgs(package, all_):
+            if pkg not in installed:
+                typer.echo(f"{pkg}: not installed on {target.label}", err=True)
+                continue
+            s = pipeline.test_game(pkg, target, printing_reporter(False), seconds)
+            typer.echo(f"{pkg}: {s['state']} ({s['verdict']}) furthest: {s['milestone']}"
+                       + (f"; suggestions: {', '.join(s['suggestions'])}" if s["suggestions"] else ""))
 
 
 @app.command()
