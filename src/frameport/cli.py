@@ -1049,7 +1049,7 @@ def fex_settings(app_name: str = typer.Argument(..., metavar="APP"),
         if not sep or not key:
             raise typer.BadParameter("use key=value (true/false, numbers, null, or JSON for fex)")
         try:
-            updates[key] = json.loads(raw)
+            updates[key] = raw if key == "cores" and raw != "null" else json.loads(raw)
         except ValueError:
             updates[key] = raw  # taskset's CPU list, e.g. cores=4-7
     t = _fex_target(frame)

@@ -104,8 +104,10 @@ static int store(void *addr, size_t len, int via_munmap, int prot)
     if (free_slot < 0) return 0;
     cache[free_slot] = (struct entry){ addr, len, prot, via_munmap, 1 };
     kept_total += len; stores++;
-    if (debug) fprintf(stderr, "fp_mem: keep %p+%zx (%s, kept %zu MB in total; stores %lu, hits %lu, partial %lu, drops %lu)\n",
-                       addr, len, via_munmap ? "munmap" : "release", kept_total >> 20, stores, hits, partial, drops);
+    if (debug) fprintf(stderr, "fp_mem: keep %p+%zx (%s, kept %zu MB in total; stores %lu, hits %lu, partial %lu, drops %lu; "
+                       "zero calls %lu, bytes %zu, failures %lu)\n",
+                       addr, len, via_munmap ? "munmap" : "release", kept_total >> 20, stores, hits, partial, drops,
+                       zero_calls, zero_bytes, zero_failures);
     return 1;
 }
 

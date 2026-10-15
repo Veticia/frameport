@@ -10,7 +10,6 @@ import hashlib
 import json
 import math
 import os
-from pathlib import Path
 import re
 import shlex
 import shutil
@@ -18,6 +17,7 @@ import signal
 import struct
 import subprocess
 import time
+from pathlib import Path
 
 CORE = None
 FEX_KEYS = {"FEX_TSOENABLED", "FEX_VECTORTSOENABLED", "FEX_MEMCPYSETTSOENABLED", "FEX_MULTIBLOCK",
@@ -179,6 +179,8 @@ def perf_prepare(args):
     exports.update({k: str(s["fex"].get(k, "0" if "TSO" in k else "1" if k == "FEX_MULTIBLOCK" else "0"))
                     for k in FEX_KEYS})
     shell = "\n".join(f"export {k}={shlex.quote(v)}" for k, v in exports.items())
+    if s["ntsync"]:
+        shell += "\nunset PROTON_NO_NTSYNC"
     return {"shell": shell, "settings": s}
 
 
@@ -186,11 +188,12 @@ def launcher_env(app, info):
     # stdout is an isolated helper's JSON, then a tiny decoder emits only validated exports. Failure aborts launch:
     # continuing with an old config would give misleading experimental results (and could enable stale fp_mem).
     arg = shlex.quote(json.dumps({"app": app_name(app)}))
+    decode = 'import json,sys; print(json.load(sys.stdin)["result"]["shell"])'
     return [f'FP_PERF=$(python3 -I "$R/artifacts/fexrift.py" perf_prepare {arg}) || exit 1',
-            'eval "$(printf \'%s\' "$FP_PERF" | python3 -I -c \'import json,sys; print(json.load(sys.stdin)["result"]["shell"])\')"']
+            f'eval "$(printf \'%s\' "$FP_PERF" | python3 -I -c {shlex.quote(decode)})"']
 
 
-# OpenVR IVRCompositor_027 Compositor_FrameTiming, including its 80-byte TrackedDevicePose_t. Keeping the tail
+# OpenVR IVRCompositor_022 Compositor_FrameTiming, including its 80-byte TrackedDevicePose_t. Keeping the tail
 # prevents GetFrameTimings overwriting a truncated ctypes structure. Versions are pinned, never probed by index.
 class FrameTiming(C.Structure):
     _fields_ = [(n, C.c_uint32) for n in ("size", "index", "presents", "mis_presents", "dropped", "reprojection")]
@@ -206,7 +209,7 @@ class VR:
     def __init__(self):
         self.core, self.method, self.settings = CORE.vr_settings()
         try:
-            self.compositor = self.interface(b"IVRCompositor_027")
+            self.compositor = self.interface(b"IVRCompositor_022")
             self.system = self.interface(b"IVRSystem_022")
         except BaseException:
             self.close()
@@ -227,7 +230,7 @@ class VR:
         err = C.c_int()
         value = self.method(self.settings, 7, C.c_float, C.c_char_p, C.c_char_p, C.POINTER(C.c_int))(
             b"power", b"turnOffScreensTimeout", C.byref(err))
-        if err.value or not math.isfinite(value) or value < 0:
+        if err.value or not math.isfinite(value) or value <= 0:
             raise ValueError("cannot read screen timeout; benchmark refused")
         return value
 
@@ -238,6 +241,9 @@ class VR:
         n = self.method(self.compositor, 9, C.c_uint32, C.POINTER(FrameTiming), C.c_uint32)(rows, 128)
         return [{"index": r.index, "presents": r.presents, "gpu_ms": r.gpu_ms,
                  "cpu_ms": r.client_interval, "system_time": r.system_time} for r in rows[:min(n, 128)]]
+
+    def scene_pid(self):
+        return self.method(self.compositor, 22, C.c_uint32)()  # GetCurrentSceneFocusProcess
 
     def close(self):
         self.method(self.core, 1, None)()
@@ -302,9 +308,10 @@ def processes(proc="/proc"):
 def busy_processes(rows):
     # Do not print cmdlines: another stream may be handling an Oculus browser sign-in.
     return [pid for pid, (comm, cmd) in rows.items() if
-            (re.search(r"(?i)(\.exe(?: |$)|(?:^|/)(?:proton|wine(?:64)?(?:-preloader)?)(?: |$)|lepton-steamlaunch-)", cmd)
-             or (comm == "reaper" and "SteamLaunch AppId=250820" not in cmd)
-             or comm in ("wineserver", "wineserver.arm64", "FEXInterpreter", "FEXLoader", "pressure-vessel"))]
+            (re.search(r"(?i)(\.exe(?: |$)|(?:^|/)(?:proton|wine(?:64)?(?:-preloader)?)(?: |$)|lepton-steamlaunch-)",
+                       cmd)
+             or (comm == "reaper" and not re.search(r"\bAppId=250820\b", cmd))
+             or comm.startswith("wineserver") or comm in ("FEXInterpreter", "FEXLoader", "pressure-vessel"))]
 
 
 def recent_steam_input(steam, now=None):
@@ -345,10 +352,11 @@ def bench_run(args, launcher, vr):
     seconds = args.get("seconds", 120)
     if type(seconds) is not int or not 1 <= seconds <= 120:
         raise ValueError("seconds must be an integer in 1..120")
-    if busy_processes(processes()) or recent_steam_input(CORE.STEAM) or vr.activity() not in (0, 3, 4):
+    if busy_processes(processes()) or recent_steam_input(CORE.STEAM) or vr.activity() != 3:
         raise ValueError("benchmark refused: game, Wine, container, HMD activity or recent Steam input")
     screen = vr.screen_timeout()  # no setting is changed until both safety checks and this read succeed
     child, old_handler = None, None
+    settings = settings_get(args)["settings"]
     frames, waits, gpu, gpu_seconds = {}, collections.Counter(), 0, 0.0
     started = time.monotonic()
 
@@ -366,7 +374,7 @@ def bench_run(args, launcher, vr):
         before, previous = {}, time.monotonic()
         deadline = started + seconds
         while time.monotonic() < deadline:
-            if vr.activity() in (1, 2) or recent_steam_input(CORE.STEAM):
+            if vr.activity() != 3 or recent_steam_input(CORE.STEAM):
                 raise ValueError("benchmark stopped: owner interaction")
             if child.poll() is not None:
                 raise ValueError("benchmark launcher exited before the sampling window ended; inspect launch.log")
@@ -375,13 +383,14 @@ def bench_run(args, launcher, vr):
             pids = [p for p, (_, cmd) in rows.items() if args["exe"].lower() in cmd.lower()]
             after, w = process_sample(pids)
             now = time.monotonic()
-            if before and after:
+            if before.keys() & after.keys():
                 gpu += gpu_delta(before, after)
                 gpu_seconds += now - previous
             before, previous = after, now
             waits.update(w)
+            focus = vr.scene_pid()
             for r in vr.timings():
-                if pids and r["index"] not in initial:
+                if focus in pids and r["index"] not in initial:
                     frames[r["index"]] = r  # ring revisits update presents, not another frame
             time.sleep(min(0.5, max(0, deadline - time.monotonic())))
     finally:
@@ -399,12 +408,17 @@ def bench_run(args, launcher, vr):
                         signal.signal(signal.SIGTERM, old_handler)
     records = list(frames.values())
     duration = max(0.001, time.monotonic() - started)
+    times = [r["system_time"] for r in records]
+    span = max(times) - min(times) if len(times) > 1 else 0
     return {"app": args["app"], "seconds": seconds, "elapsed_s": round(duration, 3), "frames": len(records),
+            "valid": len(records) >= 2 and span > 0, "sample_span_s": round(span, 3),
+            "fps": round((len(records) - 1) / span, 2) if span > 0 else None,
             "hitches": sum(r["presents"] >= 3 for r in records),
+            "hitches_per_20s": round(20 * sum(r["presents"] >= 3 for r in records) / span, 2) if span > 0 else None,
             "game_gpu_busy_pct": round(100 * gpu / (gpu_seconds * 1e9), 2) if gpu_seconds else None,
             "render_gpu_ms": round(sum(r["gpu_ms"] for r in records) / len(records), 3) if records else None,
             "client_interval_ms": round(sum(r["cpu_ms"] for r in records) / len(records), 3) if records else None,
-            "thread_wchan_samples": dict(waits), "settings": settings_get(args)["settings"]}
+            "thread_wchan_samples": dict(waits), "settings": settings}
 
 
 def bench(args):

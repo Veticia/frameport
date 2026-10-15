@@ -3,10 +3,10 @@ import ctypes
 import importlib.util
 import json
 import os
-from pathlib import Path
 import shutil
 import struct
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -92,7 +92,7 @@ def test_eye_scale_changes_only_instruction_and_padding(perf):
         assert struct.unpack_from("<f", out, 0x1229c)[0] == scale
         assert out[0x122ab:0x122af] == bytes.fromhex("f30f1025")
         assert 0x12eb3 + struct.unpack_from("<i", out, 0x122af)[0] == 0x12e9c
-        assert all(a == b for i, (a, b) in enumerate(zip(d, out))
+        assert all(a == b for i, (a, b) in enumerate(zip(d, out, strict=True))
                    if not (0x1229c <= i < 0x122a0 or 0x122af <= i < 0x122b3))
     bad = bytearray(d)
     bad[0x1229c] = 0x90
@@ -185,6 +185,9 @@ class FakeVR:
     def timings(self):
         return []
 
+    def scene_pid(self):
+        return 42
+
 
 def fake_bench(perf, monkeypatch):
     core, p = perf
@@ -233,7 +236,7 @@ def test_bench_restores_even_on_failure(perf, monkeypatch, failure):
     assert any(e[0] == "stop" for e in events)
 
 
-@pytest.mark.parametrize("activity,seconds", [(1, 1), (2, 1), (-1, 1), (3, 0), (3, 121), (3, True)])
+@pytest.mark.parametrize("activity,seconds", [(0, 1), (1, 1), (2, 1), (4, 1), (-1, 1), (3, 0), (3, 121), (3, True)])
 def test_bench_guard_no_side_effects(perf, monkeypatch, activity, seconds):
     p, _, events = fake_bench(perf, monkeypatch)
     vr = FakeVR()
@@ -255,9 +258,11 @@ def test_bench_summary_deduplicates_ring_frames(perf, monkeypatch):
     monkeypatch.setattr(p.time, "sleep", lambda s: clock.__setitem__(0, clock[0] + s))
     monkeypatch.setattr(p.subprocess, "Popen", lambda *a, **kw: SimpleNamespace(poll=lambda: None))
     vr = FakeVR()
-    vr.timings = lambda: ([{"index": 3, "presents": 3, "gpu_ms": 8, "cpu_ms": 10}] if count[0] > 1 else [])
+    record = {"index": 3, "presents": 3, "gpu_ms": 8, "cpu_ms": 10, "system_time": 1.0}
+    vr.timings = lambda: [record] if count[0] > 1 else []
     summary = p.bench_run({"app": "test", "seconds": 2, "exe": "game.exe"}, "/fake/launch.sh", vr)
     assert summary["frames"] == summary["hitches"] == 1
+    assert summary["valid"] is False and summary["fps"] is None
     assert summary["game_gpu_busy_pct"] == 100.0
     assert summary["render_gpu_ms"] == 8
     assert events[-1] == ("power", "turnOffScreensTimeout", "f", 300.0)
@@ -341,3 +346,60 @@ def test_fp_mem_fake_syscalls(tmp_path, value, zero):
     if value is not None:
         env["FP_MEM_ZERO"] = value
     subprocess.run([str(binary), str(zero)], check=True, capture_output=True, text=True, env=env)
+
+
+def test_cli_settings_and_bench_routing(monkeypatch):
+    from typer.testing import CliRunner
+
+    from frameport import cli
+
+    calls = []
+    target = SimpleNamespace(frame=SimpleNamespace(agent=lambda name, **args: calls.append((name, args)) or {}))
+    monkeypatch.setattr(cli, "_fex_target", lambda frame: target)
+    monkeypatch.setattr(cli, "_update_hint", lambda: None)
+    runner = CliRunner()
+    result = runner.invoke(cli.app, ["fex", "settings", "test-app", "cores=7", "ntsync=false", "eye_scale=1.25",
+                                     'fex={"FEX_X87REDUCEDPRECISION":1}', "fp_mem_zero=null"])
+    assert result.exit_code == 0, result.output
+    assert calls[-1] == ("fex_settings", {"app": "test-app", "values": {
+        "cores": "7", "ntsync": False, "eye_scale": 1.25, "fex": {"FEX_X87REDUCEDPRECISION": 1},
+        "fp_mem_zero": None}})
+    assert runner.invoke(cli.app, ["fex", "settings", "test-app"]).exit_code == 0
+    assert calls[-1] == ("fex_settings", {"app": "test-app"})
+    assert runner.invoke(cli.app, ["fex", "settings", "test-app", "cores=null"]).exit_code == 0
+    assert calls[-1] == ("fex_settings", {"app": "test-app", "values": {"cores": None}})
+    result = runner.invoke(cli.app, ["fex", "bench", "test-app", "--seconds", "3"])
+    assert result.exit_code == 0 and result.output.count("\n") == 1
+    assert calls[-1] == ("fex_bench", {"app": "test-app", "seconds": 3, "timeout": 43})
+    count = len(calls)
+    assert runner.invoke(cli.app, ["fex", "bench", "test-app", "--seconds", "121"]).exit_code == 2
+    assert runner.invoke(cli.app, ["fex", "settings", "test-app", "broken"]).exit_code == 2
+    assert len(calls) == count
+
+
+def test_agent_perf_commands_use_installed_launcher(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    spec = importlib.util.spec_from_file_location("perf_agent", ROOT / "agent/frameport_agent.py")
+    agent = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(agent)
+    anchor = Path(agent.ANCHORS) / "rift.test"
+    anchor.mkdir(parents=True)
+    (anchor / "deployment.json").write_text(json.dumps({"kind": "frame_fex", "app": "test-app"}))
+    calls = []
+    monkeypatch.setattr(agent, "fex_helper", lambda command, args, timeout: calls.append((command, args, timeout)))
+    monkeypatch.setattr(agent, "game_running", lambda: False)
+    agent.cmd_fex_settings({"app": "test-app", "values": {"ntsync": False}})
+    assert calls[-1] == ("settings_set", {"app": "test-app", "ntsync": False}, 60)
+    agent.cmd_fex_settings({"app": "test-app"})
+    assert calls[-1] == ("settings_get", {"app": "test-app"}, 60)
+    agent.cmd_fex_bench({"app": "test-app", "seconds": 5})
+    assert calls[-1] == ("bench", {"app": "test-app", "seconds": 5, "launcher": str(anchor / "launch.sh")}, 35)
+    count = len(calls)
+    with pytest.raises(agent.AgentError):
+        agent.cmd_fex_bench({"app": "test-app", "seconds": 121})
+    with pytest.raises(agent.AgentError):
+        agent.cmd_fex_settings({"app": "test-app", "values": {"app": "other"}})
+    monkeypatch.setattr(agent, "game_running", lambda: True)
+    with pytest.raises(agent.AgentError, match="running"):
+        agent.cmd_fex_bench({"app": "test-app"})
+    assert len(calls) == count
