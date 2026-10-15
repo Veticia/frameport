@@ -102,7 +102,8 @@ def register(core):
         for k, v in info.get("env", {}).items():
             if not re.fullmatch(r"[A-Za-z_][A-Za-z_0-9]*", k) or not isinstance(v, str):
                 raise ValueError("invalid FEX profile environment")
-        if info.get("dxvk"):
+        # with the perf extension loaded, perf_prepare writes the game's one dxvk.conf (profile lines + its settings)
+        if info.get("dxvk") and "perf_prepare" not in core.COMMANDS:
             lines += ["printf '%s\\n' " + " ".join(shlex.quote(line) for line in info["dxvk"]) + ' > "$A/dxvk.conf"',
                       'export DXVK_CONFIG_FILE="$A/dxvk.conf"']
         return lines

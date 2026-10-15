@@ -91,7 +91,7 @@ def test_launcher_routes_and_config_are_scoped_to_anchor(fx, tmp_path, route):
     assert ("export PROTON_USE_WINED3D=1" in text) == (route == "opengl")
     assert 'export DXVK_CONFIG_FILE="$A/dxvk.conf"' in text and ' > "$A/dxvk.conf"' in text
     assert "ReviveInjector.exe" not in text
-    assert 'taskset -c 4-7 "$G/proton" run ' in text
+    assert 'taskset -c "$FP_CORES" "$G/proton" run ' in text and "FP_CORES=4-7" in text
 
 
 def test_32bit_and_vkd3d_layout_report(fx, tmp_path, monkeypatch):

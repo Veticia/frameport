@@ -161,7 +161,11 @@ def perf_prepare(args):
     app = app_name(args["app"])
     s = settings_get({"app": app})["settings"]
     config = os.path.join(CORE.ROOT, "settings", app + ".dxvk.conf")
-    CORE.put_text(config, "\n".join([
+    os.makedirs(os.path.dirname(config), exist_ok=True)   # first launch of a game nobody changed settings for
+    managed = ("d3d11.disableMsaa", "dxgi.syncInterval", "dxgi.maxFrameLatency")   # these settings win
+    profile = [str(line) for line in args.get("dxvk", []) if "\n" not in str(line)
+               and str(line).split("=", 1)[0].strip() not in managed]
+    CORE.put_text(config, "\n".join(profile + [
         "d3d11.disableMsaa = " + str(s["dxvk_disable_msaa"]),
         "dxgi.syncInterval = " + str(s["dxgi_sync_interval"]),
         "dxgi.maxFrameLatency = " + str(s["dxgi_max_frame_latency"]), ""]))
@@ -187,7 +191,9 @@ def perf_prepare(args):
 def launcher_env(app, info):
     # stdout is an isolated helper's JSON, then a tiny decoder emits only validated exports. Failure aborts launch:
     # continuing with an old config would give misleading experimental results (and could enable stale fp_mem).
-    arg = shlex.quote(json.dumps({"app": app_name(app)}))
+    # the compat profile's dxvk.conf lines (stream C) go into the same per-game config as these settings
+    dxvk = [str(line) for line in info.get("dxvk", []) if "\n" not in str(line) and "\r" not in str(line)]
+    arg = shlex.quote(json.dumps({"app": app_name(app), "dxvk": dxvk}))
     decode = 'import json,sys; print(json.load(sys.stdin)["result"]["shell"])'
     return [f'FP_PERF=$(python3 -I "$R/artifacts/fexrift.py" perf_prepare {arg}) || exit 1',
             f'eval "$(printf \'%s\' "$FP_PERF" | python3 -I -c {shlex.quote(decode)})"']

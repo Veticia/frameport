@@ -403,3 +403,20 @@ def test_agent_perf_commands_use_installed_launcher(monkeypatch, tmp_path):
     with pytest.raises(agent.AgentError, match="running"):
         agent.cmd_fex_bench({"app": "test-app"})
     assert len(calls) == count
+
+
+def test_profile_dxvk_lines_share_the_one_config(perf, tmp_path):
+    """The compat profile's dxvk.conf lines and these settings end up in one per-game config; settings win."""
+    core, p = perf
+    app = "oculus-first-contact"
+    folder = Path(p.scale_folder(1.5))
+    folder.mkdir(parents=True)
+    (folder / "LibRevive64.dll").touch()
+    p.perf_prepare({"app": app, "dxvk": ["dxgi.maxFrameRate = 72", "d3d11.disableMsaa = True", "bad\nline"]})
+    text = (Path(core.ROOT) / "settings" / (app + ".dxvk.conf")).read_text()
+    assert "dxgi.maxFrameRate = 72" in text and "bad" not in text
+    assert text.count("d3d11.disableMsaa") == 1 and "d3d11.disableMsaa = False" in text
+    anchor = tmp_path / "anchor"
+    anchor.mkdir()
+    core.write_launcher(app, dict(core.GAMES[app], dxvk=["dxgi.maxFrameRate = 72"]), str(anchor))
+    assert "dxgi.maxFrameRate = 72" in (anchor / "launch.sh").read_text()

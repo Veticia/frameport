@@ -356,7 +356,8 @@ def test_temporary_windows_handler_exact_tree_restore(tmp_path, monkeypatch, exi
         with urlhandler.temporary_oculus_handler("memory-only callback"):
             assert tree == {"temporary": "memory-only callback"}
             raise RuntimeError("simulate interruption")
-    assert tree == (old if exists else None) and not list(tmp_path.iterdir())
+    # only the handler's own files (another test's background thread may create folders in the data dir meanwhile)
+    assert tree == (old if exists else None) and not list(tmp_path.glob("oculus-handler*"))
 
 
 @pytest.mark.parametrize("exists", [True, False])
