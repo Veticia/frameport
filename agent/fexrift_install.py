@@ -30,7 +30,7 @@ def relative(value):
 
 def skipped(name):
     name = name.replace("\\", "/").rsplit("/", 1)[-1].lower()
-    return (name.endswith((".7z", ".ag")) or bool(re.search(r"\.7z\.0\d*$", name))
+    return (name.endswith((".7z", ".ag")) or bool(re.search(r"\.7z\.0", name))
             or name in ("data.bin", "agrepackinstaller.exe", "vd.bat"))
 
 
@@ -77,7 +77,10 @@ def register(core):
 
     def save_record(app, record):
         os.makedirs(os.path.dirname(record_path(app)), exist_ok=True)
-        core.put_text(record_path(app), json.dumps(record, indent=1))
+        path = record_path(app)
+        with open(path + ".tmp", "w") as f:
+            json.dump(record, f, indent=1)
+        os.replace(path + ".tmp", path)
 
     def layout(app, dest):
         app = canonical(app)
@@ -130,8 +133,12 @@ def register(core):
         for rel, st in files.items():
             path = confined(os.path.join(loc["game_dir"], rel), loc["game_dir"])
             confined(path + ".part", loc["game_dir"])
-            if old.get("files", {}).get(rel) != st and os.path.isfile(path + ".part"):
-                os.unlink(path + ".part")            # never append new source bytes to an older source's prefix
+            if old.get("files", {}).get(rel) != st:
+                # Delete completed bytes too: if this new attempt is cancelled before uploading them, the next
+                # prepare must not mistake the old same-size file for a completed transfer of the new source.
+                for stale in (path, path + ".part"):
+                    if os.path.isfile(stale):
+                        os.unlink(stale)
             if (old.get("files", {}).get(rel) == st and os.path.isfile(path)
                     and os.path.getsize(path) == st["size"]):
                 existing[rel] = st["size"]
@@ -253,7 +260,8 @@ def register(core):
                  for f in os.listdir(os.path.dirname(record_path(app))) if f.endswith(".json") and f != app + ".json"]
         if rec.get("dest") and not any(p.get("library_guid") == rec["library_guid"] for p in peers):
             registry_library(rec, remove=True)
-        shutil.rmtree(rec["game_dir"])
+        if os.path.isdir(rec["game_dir"]):
+            shutil.rmtree(rec["game_dir"])
         for suffix in (".json", ".json.mini"):
             path = os.path.join(rec["library"], "Manifests", app + suffix)
             if os.path.isfile(path):
@@ -319,17 +327,29 @@ def register(core):
                         proc.kill()
         return {"runtime_state": state, "reused_server": not started}
 
+    original_manifest = core.manifest_launch
     original_info = core.game_info
+
+    def manifest_launch(app):
+        rec = read_record(app)
+        if not rec.get("registered"):
+            return original_manifest(app)
+        rec = validated_record(app)
+        manifest = core.read_json(os.path.join(rec["library"], "Manifests", app + ".json")) or {}
+        if not manifest.get("launchFile"):
+            raise ValueError("local-copy Meta manifest is missing; register the copy again")
+        return {"exe": relative(manifest["launchFile"]), "args": rec["args"], "title": rec["title"],
+                "game_dir": rec["game_dir"], "args_argv": True}
 
     def game_info(app):
         rec = read_record(app)
         if not rec.get("registered"):
             return original_info(app)
-        rec = validated_record(app)
         info = dict(core.GAMES.get(app) or {})
-        info.update({k: rec[k] for k in ("exe", "args", "title", "game_dir")})
+        info.update(manifest_launch(app))
         return info, app in core.GAMES
 
+    core.manifest_launch = manifest_launch
     core.game_info = game_info
     core.COMMANDS.update(prepare_local=prepare, register_local=register_local, unregister_local=unregister_local,
                          local_info=local_info, runtime_state=runtime_state)

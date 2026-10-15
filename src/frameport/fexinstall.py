@@ -16,7 +16,7 @@ from .core.events import Reporter
 
 def skipped_file(name: str) -> bool:
     name = name.replace("\\", "/").rsplit("/", 1)[-1].lower()
-    return (name.endswith((".7z", ".ag")) or bool(re.search(r"\.7z\.0\d*$", name))
+    return (name.endswith((".7z", ".ag")) or bool(re.search(r"\.7z\.0", name))
             or name in ("data.bin", "agrepackinstaller.exe", "vd.bat"))
 
 
@@ -211,6 +211,8 @@ def install(frame, reporter: Reporter, *, from_library: str | None = None, folde
         if items:
             installer.upload_files(xfer, items, prep["game_dir"], reporter, max(need, 1))
     reporter.check_cancel()
+    if inventory(info["folder"])[0] != info["files"]:
+        raise RuntimeError("source files changed during upload; retry with a stable game folder")
     reporter.stage("Hash and register the game on the Frame")
     metadata = {k: v for k, v in info.items() if k not in ("folder", "files")}
     frame.agent("fex_register_local", timeout=7200, **metadata)

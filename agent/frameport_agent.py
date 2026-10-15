@@ -7926,7 +7926,8 @@ FEX_HELPER = os.path.join(FEX_ARTIFACTS, "fexrift.py")
 def fex_helper(command, args=None, timeout=900):
     if not os.path.isfile(FEX_HELPER):
         raise AgentError("the files for Rift games on the Frame aren't here yet (run the setup first)")
-    p = run([sys.executable, "-I", FEX_HELPER, command, json.dumps(args or {})], timeout=timeout)
+    # Game inventories can exceed Linux's per-argument limit; the helper already accepts JSON on stdin.
+    p = run([sys.executable, "-I", FEX_HELPER, command], input=json.dumps(args or {}), timeout=timeout)
     try:
         out = json.loads(p.stdout.strip().splitlines()[-1])
     except (IndexError, ValueError):

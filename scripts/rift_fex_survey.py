@@ -18,7 +18,6 @@ import json
 import re
 import struct
 import sys
-import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,8 +44,17 @@ ANTICHEAT_FILES = ("easyanticheat", "battleye", "beclient", "eac_launcher")
 
 # Shared pak/ini reader (also used by the local-copy installer).
 from frameport.analysis.unreal_pak import (  # noqa: E402, F401
-    PAK_MAGIC, PAK_UE, Reader, entry_header_size, legacy_entry, encoded_entry, pak_entries, pak_read,
-    CONFIG_KEYS, parse_engine_ini, unreal_config,
+    CONFIG_KEYS,
+    PAK_MAGIC,
+    PAK_UE,
+    Reader,
+    encoded_entry,
+    entry_header_size,
+    legacy_entry,
+    pak_entries,
+    pak_read,
+    parse_engine_ini,
+    unreal_config,
 )
 
 RHI_NAMES = {"DefaultGraphicsRHI_DX11": "d3d11", "DefaultGraphicsRHI_DX12": "d3d12",

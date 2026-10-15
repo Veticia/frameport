@@ -827,10 +827,14 @@ def write_launcher(app, info, anchor):
     env = "".join(f"export {k}={shlex.quote(v)}\n" for k, v in info.get("env", {}).items())
     env += "".join(f"{line}\n" for hook in LAUNCHER_ENV_HOOKS for line in hook(app, info))
     vr = json.dumps({"section": f"steam.app.{GAME_ID}", "key": "motionSmoothingOverride", "kind": "i", "value": 2})
+    # Legacy profiles contain shell-quoted fragments; local-copy registrations supply an already parsed argv list.
+    args = info.get("args", [])
+    if not info.get("args_argv"):
+        args = shlex.split(" ".join(args))
     text = LAUNCHER.format(title=re.sub(r"[\\\"$`\n]", "", info["title"]), root_q=shlex.quote(ROOT),
                            anchor_q=shlex.quote(anchor), steam_q=shlex.quote(STEAM), gid=GAME_ID, game_env=env,
                            vrsetting=vr, gamedir_q=shlex.quote(os.path.dirname(exe)), exe_q=shlex.quote(exe),
-                           args=" ".join(shlex.quote(a) for a in shlex.split(" ".join(info.get("args", [])))))
+                           args=" ".join(shlex.quote(a) for a in args))
     put_text(os.path.join(anchor, "launch.sh"), text, 0o755)
     return exe
 

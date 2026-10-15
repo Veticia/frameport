@@ -2,6 +2,7 @@
 import hashlib
 import importlib.util
 import json
+import os
 import shutil
 import struct
 import types
@@ -72,6 +73,7 @@ def register(fx, info):
 
 
 @pytest.mark.parametrize("name", ["Crack.7z", "crack.7z.001", "CRACK.7Z.01", "Data.bin", "AGRepackInstaller.exe",
+                                  "crack.7z.001.bak",
                                   "VD.bat", "Game.exe.AG", "x/Original.dll.ag"])
 def test_skipped(name):
     assert fexinstall.skipped_file(name)
@@ -165,8 +167,12 @@ def test_manifest_fixture_shape_and_local_registration(fx, game):
     assert inf["args"] == ["-a", "two words"]
     fx.write_launcher("demo", inf, str(game))
     assert prep["game_dir"] + "/Game" in (game / "launch.sh").read_text()
+    assert "-a 'two words'" in (game / "launch.sh").read_text()
     assert fx.reg_calls[0][0][:2] == ("regedit", "/S")
     assert "DefaultLibrary" in (Path(fx.ROOT) / "local-library.reg").read_text()
+    (mdir / "demo.json").unlink()
+    with pytest.raises(ValueError, match="manifest is missing"):
+        fx.game_info("demo")
 
 
 def test_chunk_hashes(fx, tmp_path):
@@ -204,10 +210,14 @@ def test_resume_changed_source_and_foreign_collision(fx, game):
     assert len(resumed["existing"]) == 3
     part = Path(prep["game_dir"]) / "content.bin.part"
     part.write_bytes(b"old partial")
-    (game / "content.bin").write_bytes(b"new")
+    (game / "content.bin").write_bytes(b"new!\0" * 20)  # same size; a cancelled retry must not retain the old bytes
+    new_time = info["files"]["content.bin"]["mtime_ns"] + 1000000000
+    os.utime(game / "content.bin", ns=(new_time, new_time))
     args["files"] = fexinstall.inventory(game)[0]
     resumed = fx.COMMANDS["prepare_local"](args)
     assert "content.bin" not in resumed["existing"] and not part.exists()
+    resumed = fx.COMMANDS["prepare_local"](args)
+    assert "content.bin" not in resumed["existing"]
     with pytest.raises(ValueError, match="another package"):
         fx.COMMANDS["prepare_local"](dict(args, package="rift.other"))
     del args["files"]["content.bin"]
@@ -330,3 +340,59 @@ def test_no_space_cancel_and_unverified_before_upload(monkeypatch, game):
     reporter.cancelled.set()
     with pytest.raises(Cancelled):
         fexinstall.install(frame, reporter, from_library="rift.demo", force_unverified=True)
+
+
+@pytest.mark.parametrize("state", ["ready", "install_available"])
+def test_runtime_state_uses_only_new_lines_and_reuses_server(fx, monkeypatch, state):
+    probe = fx.COMMANDS["runtime_state"]
+    sub = probe.__globals__["subprocess"]
+    log = Path(fx.USER_DIR) / "AppData/Local/Oculus/Service_123.txt"
+    log.parent.mkdir(parents=True)
+    log.write_text("demo state: ready\n")  # old state must not be used
+    calls = []
+    def run(argv, **kwargs):
+        calls.append(argv)
+        with log.open("a") as f:
+            f.write(f"demo state: {state}\n")
+        return types.SimpleNamespace(returncode=0)
+    monkeypatch.setattr(sub, "run", run)
+    result = probe({"app": "demo"})
+    assert result == {"runtime_state": state, "reused_server": True}
+    assert len(calls) == 1 and calls[0][0] == "pgrep"  # never stop a runtime we didn't start
+
+
+def test_runtime_state_starts_and_stops_own_server(fx, monkeypatch):
+    probe = fx.COMMANDS["runtime_state"]
+    sub = probe.__globals__["subprocess"]
+    log = Path(fx.USER_DIR) / "AppData/Local/Oculus/OVRServer.log"
+    log.parent.mkdir(parents=True)
+    calls = []
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return types.SimpleNamespace(returncode=1)
+    def start(argv, **kwargs):
+        calls.append(argv)
+        assert kwargs["stdout"] == sub.DEVNULL and kwargs["stderr"] == sub.DEVNULL
+        log.write_text("demo state: ready\n")
+        return types.SimpleNamespace(poll=lambda: None, wait=lambda **kw: None)
+    monkeypatch.setattr(sub, "run", run)
+    monkeypatch.setattr(sub, "Popen", start)
+    monkeypatch.setattr(fx, "wine_env", lambda: {})
+    result = probe({"app": "demo"})
+    assert result == {"runtime_state": "ready", "reused_server": False}
+    assert calls[-1][-1] == "-k"
+
+
+def test_large_inventory_sent_to_helper_on_stdin(monkeypatch, tmp_path):
+    agent = load(ROOT / "agent/frameport_agent.py")
+    helper = tmp_path / "fexrift.py"
+    helper.touch()
+    monkeypatch.setattr(agent, "FEX_HELPER", str(helper))
+    received = []
+    def run(argv, **kwargs):
+        received.append((argv, kwargs))
+        return types.SimpleNamespace(stdout='{"ok":true,"result":{}}')
+    monkeypatch.setattr(agent, "run", run)
+    agent.fex_helper("prepare_local", {"files": {"x": "x" * 200000}})
+    assert received[0][0][-1] == "prepare_local"
+    assert len(received[0][1]["input"]) > 200000
