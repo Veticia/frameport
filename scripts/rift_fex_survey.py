@@ -33,6 +33,7 @@ def load_fexrift():
     spec = importlib.util.spec_from_file_location("fexrift_helper", ROOT / "agent" / "fexrift.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
+    mod.load_extensions()
     return mod
 
 
@@ -446,13 +447,24 @@ def graphics_route(r: dict) -> str:
 
 def suggested_profile(r: dict) -> dict:
     status = {"likely OK": "likely", "blocked": "blocked"}.get(r["verdict"][0], "untested")
-    return {"title": r["title"],
+    profile = {"title": r["title"],
             "match": {"executables": [{"name": Path(r["exe"]).name, "size": r["exe_size"]}]},
             "status": status, "graphics": graphics_route(r), "env": {}, "ime_patch": None,
             "fp_mem": "candidate" if "candidate" in r.get("large_block_alloc", "") else "off",
             "bigcache_mb": 256, "dxvk": [],
             "notes": r["verdict"][1] + ("; Media Foundation videos need a playback test" if
                                        r.get("runtime", {}).get("media_foundation") else "")}
+    if r.get("vr") == ["OpenVR"]:
+        profile["revive"] = False
+    if r.get("folder"):
+        info = {"exe": r["exe"], "game_dir": r["folder"]}
+        for hook in FX.GAME_INFO_HOOKS:
+            hook("", info)
+        # Keep an existing build-matched direct-OpenVR choice (e.g. Unity that also contains inert LibOVR strings)
+        # when generating pasteable data. Do not propagate guesses from the folder/title or a bundled crack.
+        if info.get("revive") is False:
+            profile["revive"] = False
+    return profile
 
 
 def verdict(r: dict) -> tuple[str, str]:

@@ -137,6 +137,7 @@ def test_ready_to_paste_profile_and_cache_hint(sv):
     assert p["status"] == "likely" and p["fp_mem"] == "candidate" and p["env"] == {}
     assert "args" not in p  # preserve Meta's manifest arguments when pasted into the profile catalog
     assert "Media Foundation" in p["notes"]
+    assert sv.suggested_profile(dict(r, vr=["OpenVR"]))["revive"] is False
     assert sv.suggested_profile(dict(r, verdict=("blocked", "anti-cheat")))["status"] == "blocked"
 
 

@@ -230,7 +230,8 @@ data and needs a paired Frame first. Never set `FRAMEPORT_WINDOWS_DATA`.
    ReviveInjector failure. Do not dump entire Meta log files: they may carry sign-in data. A Librarian completion
    line alone must not diagnose a hang. After completion, confirm persistence using `pgrep -f '[O]VRLibrarian.exe'`;
    only if it remains alive, record the safe diagnostic `OVRLibrarian still running` alongside the completion
-   marker. The combined trace matches `fex-librarian-stuck`. Stop only that process after completion with
+   marker. The launcher now emits the fixed combined marker itself if Librarian persists after cleanup and
+   completion is present; it never mirrors the log. The combined trace matches `fex-librarian-stuck`. Stop only that process after completion with
    `pkill -9 -f '[O]VRLibrarian.exe'`; the normal launcher already does this. For an unowned title, accept Meta's
    Missing entitlement result and stop that game test.
 
@@ -253,3 +254,23 @@ PY
 Do not delete the shared prefix to undo a profile: it holds Meta's runtime and the owner's login/saves. Game dumps
 are never modified. Re-running install reapplies the anchored IME fix; to compare launches, restore after install
 and before Play.
+
+## Validation in this worktree
+
+- Offline survey completed for all 19 folders with no per-game errors. Every surveyed executable matched exactly
+  its intended committed profile through the compatibility hook. Ten profiles are likely, nine untested; the
+  separate First Contact profile stays verified. No selected or alternate candidate exe was 32-bit. No static
+  anti-cheat marker was found; this does not rule out runtime-loaded middleware.
+- Focused FEX/survey/triage tests: **96 passed, 1 skipped**. Ruff passed for the new extension, survey and their tests.
+- `uv run python scripts/patch_docs.py` was run; `--check` passes and generated patch docs needed no committed change.
+- Final whole-suite run: **1,646 passed, 43 skipped, 11 failed, 16 setup errors**. All 27 unsuccessful cases failed
+  at local `socket()` creation with `PermissionError: [Errno 1] Operation not permitted`. They are existing local
+  HTTP/pairing/stream tests in `test_deeplink`, `test_devkit`, `test_install_links_extra`, `test_livestream`,
+  `test_setup_url`, and `test_ui_state`. They need a runner allowing loopback sockets; no application or test code
+  was changed to hide this restriction. Re-run the full suite there before integration.
+- The prebuilt virtual environment was used with `UV_CACHE_DIR=/tmp/frameport-rift-uv UV_NO_SYNC=1` because the default
+  uv cache is read-only and offline metadata resolution cannot install hatchling. For example:
+  `UV_CACHE_DIR=/tmp/frameport-rift-uv UV_NO_SYNC=1 uv run pytest -q`.
+- No device or external network access was attempted. D3D12, guest OpenGL acceleration, WoW64 and gameplay remain
+  device questions; the steps above specify the evidence needed. The GE script and Unreal source-history checkout
+  were unavailable locally; Robo Recall's actual Core DLL supplies direct evidence for the IME fix instead.

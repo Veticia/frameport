@@ -811,6 +811,12 @@ for i in $(seq 1 45); do
         pgrep -f "[O]VRLibrarian.exe" >/dev/null && break
 done
 sleep 3; pkill -9 -f "[O]VRLibrarian.exe"; sleep 10
+# Compatibility triage needs persistence after completion, not just the healthy completion line. Print a fixed
+# marker only: never mirror Meta logs, which can contain sign-in data.
+if pgrep -f "[O]VRLibrarian.exe" >/dev/null &&
+   tail -n 3 "$L/OVRLibrarian.log" 2>/dev/null | grep -qi "Service invocation completed"; then
+    echo "FramePort FEX: OVRLibrarian still running after Service invocation completed"
+fi
 ( while sleep 5; do pkill -9 -f "[O]VRLibrarian.exe"; done ) & LK=$!
 python3 -I "$R/artifacts/fexrift.py" hidewin & HW=$!
 # Steam's reaper gone (Exit game) -> end the game
@@ -837,7 +843,7 @@ def write_launcher(app, info, anchor):
 
 
 def game_info(app):
-    """(info, verified): GAMES' entry over the manifest's exe/arguments/name."""
+    """(info, verified): manifest launch data enriched by matching game profiles."""
     info = dict(manifest_launch(app) or {})
     known = GAMES.get(app) or {}
     legacy = app in GAMES and "match" not in known
@@ -854,8 +860,8 @@ def game_info(app):
 
 
 def cmd_install(args):
-    """Install a game Meta's app downloaded (now in the prefix) for Steam: fixes + launcher in its anchor. A game
-    that isn't in GAMES needs force_unverified (its static checks come back either way)."""
+    """Install a game Meta's app downloaded: fixes + launcher in its anchor. Likely profiles warn, untested games
+    need force_unverified, and blocked profiles are refused before edits. Static checks describe the build."""
     app, anchor = args["app"], args["anchor"]
     info, verified = game_info(app)
     game_dir = info.get("game_dir") or os.path.join(META_DIR, "Software", "Software", app)
