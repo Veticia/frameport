@@ -1,6 +1,7 @@
 """Offline sign-in tests. Fake credentials must never reach files, logs, or Wine/SSH argv."""
 import copy
 import importlib.util
+import io
 import json
 import queue
 import shutil
@@ -31,6 +32,7 @@ def ext(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setattr("os.getuid", lambda: 1000, raising=False)   # Frame-only API; tests also run on Windows.
     artifacts = tmp_path / "artifacts"
     artifacts.mkdir()
     for name in ("fexrift.py", "fexrift_games.json", "fexrift_login.py"):
@@ -188,6 +190,13 @@ def test_missing_pe_has_actionable_error(ext):
         ext.start({})
 
 
+def test_desktop_handler_exec_uses_the_existing_desktop_quoting_rules(ext):
+    agent = load(ROOT / "agent/frameport_agent.py", "login_quoting_agent")
+    helper = '/tmp/login $d "quoted" \\50%/fp-oculus-callback'
+    entry = ext.desktop_entry(helper)
+    assert f"Exec={agent.desktop_exec_arg(helper)} %u\n" in entry
+
+
 def test_cleanup_keeps_sessions_and_retries_after_failure(ext, monkeypatch):
     path = ext.folder() / "restore.json"
     path.write_text(json.dumps({"browser": None, "files": {}}))
@@ -223,6 +232,93 @@ def test_stop_does_not_signal_a_reused_pid(ext, monkeypatch):
     monkeypatch.setattr(ext, "process_tick", lambda pid: "other start time")
     monkeypatch.setattr(ext.os, "kill", lambda *a: pytest.fail("must not signal an unrelated process"))
     assert ext.stop_launcher() is None
+
+
+@pytest.mark.skipif(sys.platform == "win32" or not shutil.which("bash"), reason="needs bash")
+def test_generated_launcher_shell_syntax(ext):
+    script = ext.folder() / "launch.sh"
+    script.write_text(ext.launcher())
+    result = ext.subprocess.run(["bash", "-n", str(script)], capture_output=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_broker_expiry_restores_registration(ext, monkeypatch):
+    events = []
+
+    class Socket:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def bind(self, path):
+            Path(path).touch()
+
+        def listen(self, count):
+            pass
+
+        def settimeout(self, timeout):
+            pass
+
+    ticks = iter([0, 2])
+    monkeypatch.setattr(ext.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(ext.socket, "socket", lambda *a: Socket())
+    monkeypatch.setattr(ext, "restore", lambda: events.append("restored"))
+    assert ext.broker({"timeout": 1, "via_pc": True})["stopped"]
+    assert events == ["restored"] and not (ext.folder() / "broker.sock").exists()
+
+
+def test_pc_protocol_callback_posts_into_memory_and_restores(monkeypatch, tmp_path):
+    events, commands, handlers = [], [], []
+
+    class Server:
+        def __init__(self, address, handler):
+            self.server_address = ("127.0.0.1", 12345)
+            handlers.append(handler)
+
+        def serve_forever(self):
+            pass
+
+        def shutdown(self):
+            events.append("shutdown")
+
+        def server_close(self):
+            events.append("closed")
+
+    @contextmanager
+    def registration(command):
+        commands.append(command)
+        events.append("registered")
+        try:
+            yield
+        finally:
+            events.append("restored")
+
+    def urlopen(req, **kw):
+        handler = handlers[0].__new__(handlers[0])
+        handler.path = req.selector
+        handler.headers = {"Content-Length": str(len(req.data))}
+        handler.rfile = io.BytesIO(req.data)
+        handler.send_response = lambda code: events.append(code)
+        handler.end_headers = lambda: None
+        handler.do_POST()
+        return SimpleNamespace(close=lambda: None)
+
+    monkeypatch.setattr(fexlogin, "ThreadingHTTPServer", Server)
+    monkeypatch.setattr(urlhandler, "platform_kind", lambda: "linux")
+    monkeypatch.setattr(urlhandler, "temporary_oculus_handler", registration)
+    monkeypatch.setattr(fexlogin, "user_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(fexlogin.urllib.request, "urlopen", urlopen)
+    with fexlogin.pc_callback() as inbox:
+        # Run the generated Python protocol helper, retaining its real HTTP request construction.
+        script = next(tmp_path.rglob("callback.py"))
+        monkeypatch.setattr(sys, "argv", [str(script), CALLBACK])
+        exec(compile(script.read_text(), str(script), "exec"), {})
+        assert inbox.get_nowait() == CALLBACK and commands[0].endswith(" %u")
+        assert_no_credentials(tmp_path)
+    assert events == ["registered", 204, "restored", "shutdown", "closed"]
+    assert not list(tmp_path.iterdir())
 
 
 @pytest.mark.parametrize("exists", [True, False])

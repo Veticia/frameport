@@ -121,7 +121,7 @@ def pc_callback():
                         s = str(s).replace("%", "%%")
                         for c in ("\\", '"', "`", "$"):
                             s = s.replace(c, "\\" + c)
-                        return '"' + s + '"'
+                        return '"' + s.replace("\\", "\\\\") + '"'   # Desktop string-value layer
                     command = f"{dq(sys.executable)} -I {dq(script)} %u"
             with urlhandler.temporary_oculus_handler(command):
                 yield inbox

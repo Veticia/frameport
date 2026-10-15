@@ -71,7 +71,7 @@ UV_CACHE_DIR=/tmp/frameport-uv-cache uv run --offline ruff check agent/fexrift_l
 UV_CACHE_DIR=/tmp/frameport-uv-cache uv run --offline pytest -q
 ```
 
-The focused suite passed (52 passed, 1 skipped); lint passed. The full suite ran: **1,646 passed, 43 skipped,
+The focused suite passed (56 passed, 1 skipped); lint passed. The full suite rerun completed: **1,651 passed, 43 skipped,
 11 failed, 16 errors**. Every failure/error was `PermissionError: [Errno 1] Operation not permitted` from existing
 local HTTP/pairing/live-stream socket tests: this sandbox prohibits socket creation/binding. No other stream's files
 or tests were changed to hide those failures. Run the whole suite on a host permitting loopback sockets before
@@ -91,7 +91,7 @@ Close any Rift game first: sign-in uses the same Wine prefix and stopping it end
    from pathlib import Path
    root = Path("artifacts/fexrift")
    sums = root / "SHA256SUMS"
-   lines = [s for s in sums.read_text().splitlines() if s.split()[-1].lstrip("*") != "fp_pipesend.exe"]
+   lines = [s for s in sums.read_text().splitlines() if s.strip() and s.split()[-1].lstrip("*") != "fp_pipesend.exe"]
    lines.append(hashlib.sha256((root / "fp_pipesend.exe").read_bytes()).hexdigest() + "  fp_pipesend.exe")
    sums.write_text("\n".join(lines) + "\n")
    PY

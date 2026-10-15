@@ -109,6 +109,7 @@ def desktop_entry(helper):
     escaped = str(helper).replace("%", "%%")
     for c in ("\\", '"', "`", "$"):
         escaped = escaped.replace(c, "\\" + c)
+    escaped = re.sub(r"[\r\n\t]", " ", escaped.replace("\\", "\\\\"))   # Desktop string-value layer
     return ('[Desktop Entry]\nType=Application\nName=Meta sign-in (FramePort)\n'
             f'Exec="{escaped}" %u\nNoDisplay=true\nTerminal=false\nMimeType=x-scheme-handler/oculus;\n')
 
