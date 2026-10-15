@@ -28,7 +28,8 @@ if [ ! -f "$B/obj/include/config.h" ]; then
   [ -f "$B/obj/include/config.h" ] || { echo "configure did not produce include/config.h (see $B/obj/configure.log)"; exit 1; }
 fi
 cd "$B/ws"
-CF="-c -O2 -g -pipe -fno-strict-aliasing -D__WINESRC__ -D_GNU_SOURCE -DFP_EMULATED_X86_64 -I. -I$B/obj/include -I$SRC/include -I$SRC/server"
+# -ffile-prefix-map: the artifact is committed to a public repo, keep the build folders out of its assert paths
+CF="-c -O2 -g -pipe -fno-strict-aliasing -D__WINESRC__ -D_GNU_SOURCE -DFP_EMULATED_X86_64 -ffile-prefix-map=$SRC=wine -ffile-prefix-map=$B=build -I. -I$B/obj/include -I$SRC/include -I$SRC/server"
 for s in $(grep -oE "^\s+[a-z_0-9]+\.c" "$SRC/server/Makefile.in" | tr -d "\t "); do
   extra=()
   case $s in
