@@ -204,6 +204,27 @@ def test_cleanup_keeps_sessions_and_retries_after_failure(ext, monkeypatch):
     assert ext.stop({})["signed_in"] and (sessions / "fake").read_bytes() == b"test session"
 
 
+def test_stop_signals_launcher_before_wine_and_registry(ext, monkeypatch):
+    (ext.folder() / "launch.pid").write_text("12345 98765")
+    (ext.folder() / "restore.json").write_text(json.dumps({"browser": None, "files": {}}))
+    events = []
+    ticks = iter(["98765", None])
+    monkeypatch.setattr(ext, "process_tick", lambda pid: next(ticks))
+    monkeypatch.setattr(ext.os, "kill", lambda pid, sig: events.append("launcher"))
+    monkeypatch.setattr(ext.CORE, "wineserver_kill", lambda: events.append("wine"))
+    monkeypatch.setattr(ext.CORE, "wine", lambda *a, **kw: events.append("registry"))
+    ext.restore()
+    assert events == ["launcher", "wine", "registry"]
+    assert not (ext.folder() / "launch.pid").exists()
+
+
+def test_stop_does_not_signal_a_reused_pid(ext, monkeypatch):
+    (ext.folder() / "launch.pid").write_text("12345 98765")
+    monkeypatch.setattr(ext, "process_tick", lambda pid: "other start time")
+    monkeypatch.setattr(ext.os, "kill", lambda *a: pytest.fail("must not signal an unrelated process"))
+    assert ext.stop_launcher() is None
+
+
 @pytest.mark.parametrize("exists", [True, False])
 @pytest.mark.parametrize("kind", ["windows", "wsl"])
 def test_temporary_windows_handler_exact_tree_restore(tmp_path, monkeypatch, exists, kind):

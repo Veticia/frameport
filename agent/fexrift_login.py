@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shlex
+import signal
 import socket
 import subprocess
 import sys
@@ -136,10 +137,18 @@ def launcher():
 exec >/dev/null 2>&1
 exec 9>{q(str(folder() / '.launch.lock'))}; flock -n 9 || exit 0
 {exports}{display}unset LD_PRELOAD STEAM_COMPAT_INSTALL_PATH STEAM_COMPAT_LIBRARY_PATHS PROTON_LOG PROTON_LOG_DIR
+python3 -I {q(str(Path(CORE.HERE) / 'fexrift.py'))} login_ping '{{}}' || exit 0
 G={q(CORE.GEF)}
 L="$WINEPREFIX/drive_c/users/steamuser/AppData/Local/Oculus"
-cleanup() {{ kill $LK 2>/dev/null; "$G/files/bin/wineserver" -k; }}
+cleanup() {{
+    kill $LK 2>/dev/null
+    "$G/files/bin/wineserver" -k
+    rm -f {q(str(folder() / 'launch.pid'))}
+}}
 trap cleanup EXIT
+trap 'exit 0' TERM INT HUP
+# The start tick prevents --stop from signalling a reused PID after an interrupted launcher.
+printf '%s %s\\n' "$$" "$(awk '{{print $22}}' /proc/$$/stat)" > {q(str(folder() / 'launch.pid'))}
 cd {q(str(Path(CORE.META_DIR) / 'Support/oculus-runtime'))}
 "$G/files/bin/wine" ./OVRServer_x64.exe </dev/null &
 for i in $(seq 1 45); do
@@ -263,7 +272,16 @@ def restore():
     if saved is None:
         return
     # Keep the restore record until every step succeeds: --stop can repair an interrupted cleanup.
+    launcher_pid = stop_launcher()
     CORE.wineserver_kill()
+    if launcher_pid:
+        for _ in range(100):
+            if process_tick(launcher_pid[0]) != launcher_pid[1]:
+                break
+            time.sleep(.1)
+        else:
+            raise CORE.FexError("Meta sign-in launcher is still stopping; retry fex login --stop")
+    (folder() / "launch.pid").unlink(missing_ok=True)
     old = saved.get("browser")
     if old:
         CORE.wine("reg", "add", REGKEY, "/v", "Browsers", "/t", old[0], "/d", old[1], "/f")
@@ -271,6 +289,29 @@ def restore():
         CORE.wine("reg", "delete", REGKEY, "/v", "Browsers", "/f", check=False)
     restore_files(saved["files"])
     path.unlink()
+
+
+def stop_launcher():
+    # Killing Wine alone while launch.sh is waiting for OVRLibrarian lets it start Client.exe *after* cleanup.
+    # Signal the owning shell too; its pending TERM exits the startup loop as soon as the current sleep ends.
+    path = folder() / "launch.pid"
+    try:
+        pid, tick = path.read_text().split()
+        pid = int(pid)
+        if pid <= 1:
+            return
+        if process_tick(pid) == tick:
+            os.kill(pid, signal.SIGTERM)
+            return pid, tick
+    except (OSError, ValueError, IndexError):
+        pass
+
+
+def process_tick(pid):
+    try:
+        return Path(f"/proc/{pid}/stat").read_text().rpartition(")")[2].split()[19]
+    except (OSError, IndexError):
+        return None
 
 
 def stop(args):
@@ -354,4 +395,5 @@ def register(core):
     global CORE
     CORE = core
     core.COMMANDS.update(login_start=start, login_status=status, login_stop=stop, login_broker=broker,
+                         login_ping=lambda args: request({"op": "ping"}),
                          login_callback=lambda args: request({"op": "callback", "url": args.get("url")}))
