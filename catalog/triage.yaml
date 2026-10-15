@@ -597,6 +597,71 @@ signatures:
     severity: fatal
     diagnosis: The game crashed in Android's ARM translation (libndk_translation), which runs Quest games' arm64 code on the PC's x86 CPU (known for some Unity games, AXRB issue #9). Nothing to patch in the game; AXRB plans another translator.
     suggest: []
+  # AXRB's direct mode (axrb-direct.exe, no emulator): direct.log lines are "<s> <tid> E/<tag>: ..." from the runner
+  # and "E/<tag>(<tid>): ..." from the game's Android log; direct.out has AppProcess's AXRB_AOSP_* lines
+  - id: axrb-direct-incomplete
+    kind: axrb
+    pattern: 'Direct mode installation is incomplete|Direct mode is missing |AXRB Direct is incomplete|Preparing the AOSP application failed'
+    severity: fatal
+    diagnosis: AXRB's direct mode is missing part of itself or of its Android system root, so the game was never started. Reinstall AXRB-Emulatorless (or rebuild the local build FRAMEPORT_AXRB_DIRECT_DIR points at), then `frameport pc install-axrb --backend direct` sets the system root up again.
+    suggest: []
+  - id: axrb-direct-no-vulkan
+    kind: axrb
+    pattern: 'vulkan-1\.dll is not installed|E/vulkan: \S+ is not available on the host'
+    severity: fatal
+    diagnosis: AXRB's direct mode found no usable Vulkan driver on this PC (or the driver lacks a function the game calls). Install the graphics card's current driver.
+    suggest: []
+  - id: axrb-direct-no-gles
+    kind: axrb
+    pattern: 'eglInitialize\b.*(?:fail|0x3008)|Failed to initiali[sz]e EGL|Unable to initiali[sz]e (?:EGL|the OpenGL)|EGL_BAD_DISPLAY'
+    severity: fatal
+    diagnosis: The game draws with OpenGL ES, and AXRB's direct mode only has a Vulkan renderer. Install it for AXRB's emulator instead (the "AXRB mode on this PC" option, pc.axrb_backend backend=emulator, or `frameport install <game> --to pc --axrb-backend emulator`).
+    suggest: []
+  - id: axrb-direct-unhandled-instruction
+    kind: axrb
+    pattern: 'fatal signal 4 \(SIGILL\)|unhandled synchronous signal 4 '
+    severity: fatal
+    diagnosis: AXRB's direct mode met an arm64 instruction its translator can't run (Dynarmic, or Digitalis when chosen) and the game stopped. That's AXRB's side - report it to AXRB with the diagnostics (direct.log has the instruction's address); the other translator (pc.axrb_backend translator=digitalis / dynarmic) or AXRB's emulator may get further.
+    suggest: []
+    report: true
+  - id: axrb-direct-guest-crash
+    kind: axrb
+    pattern: 'E/cpu: thread \d+ \(.*\): fatal signal (?:6|7|11) '
+    severity: fatal
+    diagnosis: The game's own arm64 code crashed in AXRB's direct mode (a SIGSEGV/SIGBUS/SIGABRT; direct.log has the backtrace by library). Often a missing Android service or a translation bug rather than the game; try the other translator (pc.axrb_backend translator=digitalis) or AXRB's emulator, and report it to AXRB with the diagnostics.
+    suggest: []
+    report: true
+  - id: axrb-direct-host-fault
+    kind: axrb
+    pattern: 'E/host-fault: |E/fatal: '
+    severity: fatal
+    diagnosis: axrb-direct.exe itself crashed (its translator or Linux/Binder layer, not the game). That's AXRB's side - report it to AXRB with the diagnostics.
+    suggest: []
+    report: true
+  - id: axrb-direct-java-crash
+    kind: axrb
+    pattern: 'E/app: the application crashed|FATAL EXCEPTION: |Runtime aborting|JNI DETECTED ERROR IN APPLICATION'
+    severity: fatal
+    diagnosis: The game's Java side (or Android's ART runtime under it) ended with an uncaught exception or an abort in AXRB's direct mode. direct.log / direct.err have the stack; a framework service AXRB's direct mode doesn't provide yet (Meta/Play services, account, DRM) is the usual cause.
+    suggest: []
+  - id: axrb-direct-missing-function
+    kind: axrb
+    pattern: 'guest called unknown host function|unimplemented JNI function|call to unregistered host function'
+    severity: error
+    diagnosis: The game called an Android/JNI function AXRB's direct mode doesn't implement yet; it may fail right after. Report it to AXRB with the diagnostics.
+    suggest: []
+  - id: axrb-direct-unsupported-syscall
+    kind: axrb
+    pattern: 'W/syscall: unimplemented syscall|W/binder: unsupported (?:command|ioctl|object type)|execve\(.*\) refused: one process image only'
+    severity: warning
+    diagnosis: The game asked for a Linux system call or Binder feature (or a second process) AXRB's direct mode doesn't provide. Often harmless; when the game then fails, it's the first thing to report to AXRB.
+    suggest: []
+  - id: axrb-direct-slow-stop
+    kind: axrb
+    pattern: 'the game did not close within 25 seconds'
+    severity: info
+    diagnosis: The game didn't finish its activity shutdown when the session ended, so AXRB stopped it; anything it hadn't saved yet may be lost.
+    suggest: []
 # Launch tests run without a worn headset. Some parts give up on tracking after a while and end the VR session; what
 # the game does after that (often a crash in the GPU driver while its renderer tears down) never happens in the
 # headset. In a launch test that already had paced frames before such a line, a later exit or crash still passes,
@@ -606,8 +671,11 @@ headless_end:
     pattern: 'EnterVrMode: no tracked head pose before deadline'
 milestones:  # progress markers, in order; the furthest one reached is reported
   - {id: axrb-host, kind: axrb, pattern: 'AXRB TCP: listening', label: AXRB bridge started}
+  - {id: axrb-direct-art, kind: axrb, pattern: '(?m)^AXRB_AOSP_BOOTSTRAP', label: Android runtime (ART) started (direct mode)}
+  - {id: axrb-direct-activity, kind: axrb, pattern: '(?m)^AXRB_AOSP_ACTIVITY_CREATED ', label: Game activity created (direct mode)}
   - {id: axrb-runtime, kind: axrb, pattern: 'AXRB\.PoseClient|Got runtime: package: com\.axrb\.openxrruntime', label: AXRB's OpenXR runtime loaded}
   - {id: axrb-instance, kind: axrb, pattern: 'xrCreateInstance\(\) succeeded|LoaderInstance::CreateInstance succeeded', label: OpenXR instance created}
+  - {id: axrb-direct-vulkan, kind: axrb, pattern: '(?m)I/vulkan: vkCreateDevice\(.*\) = 0$', label: Vulkan device created on the PC's GPU (direct mode)}
   - {id: axrb-frames, kind: axrb, pattern: 'AXRB\.Perf end-frame', label: Submitting frames}
   - {id: pcvr-launch, kind: pcvr, pattern: 'FramePort: launching|Launched injector with', label: Launcher started}
   - {id: pcvr-oculus-hmd, kind: pcvr, pattern: 'FramePort oculushmd: OculusHMDConnected event ready', label: Oculus headset event provided}

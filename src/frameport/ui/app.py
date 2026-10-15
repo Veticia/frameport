@@ -1297,7 +1297,7 @@ class FramePortApp:
             from ..tools import axrb
 
             try:
-                ready = bool(axrb.app_dir()) and axrb.setup_state()["ready"]
+                ready = axrb.ready()  # either backend set up: AXRB was already agreed to
             except Exception:  # noqa: BLE001 - unknown: ask
                 ready = False
             if ready:

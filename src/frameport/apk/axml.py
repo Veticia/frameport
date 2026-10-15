@@ -361,6 +361,25 @@ def component_filters(manifest: bytes) -> list[tuple[str, str, list[tuple[str, i
     return out
 
 
+def launcher_activity(manifest: bytes) -> str | None:
+    """"<package>/<fully qualified class>" of the activity Android's launcher starts (MAIN + LAUNCHER; an alias
+    names its targetActivity), what `cmd package resolve-activity --brief` answers; None when there is none."""
+    x = Axml(manifest)
+    names = x.strings()
+    package = next((x.attr_str(el, "package") for el in x.elements() if el.name == "manifest"), None)
+    targets = {x.attr_str(el, "name"): x.attr_str(el, "targetActivity")
+               for el in x.elements() if el.name == "activity-alias"}
+    if not package:
+        return None
+    for el, name, items in component_filters(manifest):
+        found = {names[i] for _, _, i in items if i < len(names)}
+        if el in ("activity", "activity-alias") and name and MAIN in found and LAUNCHER in found:
+            cls = (targets.get(name) or name) if el == "activity-alias" else name
+            cls = package + cls if cls.startswith(".") else cls if "." in cls else f"{package}.{cls}"
+            return f"{package}/{cls}"
+    return None
+
+
 def vr_activity(manifest: bytes) -> str | None:
     """The activity with Meta's VR category when it isn't the launcher activity (a 2D launcher that starts the VR
     part, e.g. WiiCompiled's LauncherActivity -> QuestActivity)."""

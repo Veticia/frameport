@@ -11,6 +11,69 @@ Source-Available License 1.0, which allows running it and interoperating through
 Status: **experimental**. AXRB is young (v1.0.4, 2026-10-06) and many games still fail in it; Steam Frame
 controllers don't work in AXRB yet (AXRB issue #20).
 
+## Two backends: the emulator (1.0.4) and direct mode (2.x, "AXRB-Emulatorless")
+
+AXRB's main branch (2026-10-15, launcher 2.0.0) became **AXRB-Emulatorless**: a separate program (own installer,
+app id `org.axrb.emulatorless`, `%LOCALAPPDATA%\Programs\axrb-emulatorless-launcher`, runtime
+`%LOCALAPPDATA%\AXRB-Emulatorless Runtime`, profile `%APPDATA%\AXRB-Emulatorless`) whose **direct mode** runs the
+game without an emulator: `axrb-direct.exe` translates the game's arm64 code (Dynarmic JIT; Digitalis optional) and
+runs the real AOSP ART + framework from Google's Android 16 arm64 system image, with its own Linux syscall/Binder
+layer; Vulkan goes to the Windows driver, frames and tracking through the same `axrb-host-bridge.exe`. **Vulkan only:**
+its EGL is a stub, there is no GLES renderer. Both programs can be installed side by side; FramePort keeps one
+`axrb.Install` record per backend (`backend`, `version`, app folder, AXRB's root = `resources\runtime`, runtime
+folder) and picks per game:
+
+- **Choice** (`targets/pc_android.choose_backend`): `--axrb-backend direct|emulator` on `frameport install --to pc`,
+  else the recipe's `pc.axrb_backend` (device category, `on_pc`: part of the PC build's selection, no-op on the
+  Frame), else **direct for `graphics` Vulkan, emulator for GLES / unknown**. `deployment.json` records `backend`
+  and the launcher `flags`; installs from before have none (= emulator). Switching leaves the other backend's copy
+  and saves alone.
+- **Per-game options** (`pc.axrb_backend` params → `run_direct_game.ps1` switches): `translator` (`dynarmic` =
+  AXRB's default, `digitalis`), `precompose` (`-PrecomposeProjectionLayers`, also for the emulator's
+  `run_windows_game.ps1`; also taken from AXRB's own `core/game-compatibility.json` profile for the game, e.g. The
+  Climb 2), `legacy_oculus_driver` / `quest_identity` / `controllers_only` (for unconverted store APKs with older
+  Oculus loaders; off by default and never taken from AXRB's profiles: FramePort always hands AXRB an OVRPort build;
+  `controllers_only` only works with the legacy driver, as `prepare_art_session.py` requires).
+- **Install/upgrade** (`tools/axrb.install`): `releases/latest` when it has the backend's installer
+  (`AXRB-Setup-*.exe` / `AXRB-Emulatorless-Setup-*.exe`, SHA256SUMS checked, `/S`), else the known-good release
+  (`KNOWN_GOOD = {"emulator": "1.0.4"}`, `releases/tags/v1.0.4`). An install older than the known-good one is
+  upgraded on use; `frameport pc install-axrb --backend … --update` upgrades to the release on offer. No 2.x release
+  is published yet: **`FRAMEPORT_AXRB_DIRECT_DIR`** names a local build (AXRB's source tree after
+  `scripts\build\build_direct.ps1` + the host build, its `out\direct`, or a folder laid out like the installed
+  `resources\runtime`): it needs the files of AXRB's `core/direct-runtime-files.cjs` (`out\direct\axrb-direct.exe`,
+  `art\axrb-bootstrap.dex`, `art\lib64\*`, `guest\lib64\*`, `guest\axrb-systemdriver.apk`) plus
+  `scripts\run\run_direct_game.ps1`, `scripts\run\stop_game.ps1`, `scripts\paths.ps1`,
+  `direct\tools\make_sysroot.py`, `direct\tools\prepare_art_session.py`, `out\host\bin\Release\axrb-host-bridge.exe`
+  (+ `openxr_loader.dll`, `out\gpu\Release` for the GPU-share layer) and ideally `tools\python` (else Python from
+  PATH). A local build is set up but never replaced. `FRAMEPORT_AXRB_DIRECT_RUNTIME` overrides the runtime folder
+  (default: the launcher's `library.json` `settings.managedDirectory`, else `%LOCALAPPDATA%\AXRB-Emulatorless Runtime`).
+- **Direct setup** (`axrb.setup_direct`, what `core/direct.mjs ensureDirectSystem` does): the pinned image
+  (`arm64-v8a-36_r02.zip`, 810,736,863 bytes, SHA-1 `62ad6714…`; values read from the installed `core/direct.mjs`,
+  only `dl.google.com`) into its own empty folder, AXRB's `make_sysroot.py <zip> <runtime>\direct\sysroot.new --art`
+  with AXRB's embedded Python, receipt `.axrb-sysroot.json` `{"digest","format"}`, rename to `sysroot`, archive
+  deleted; `license-acceptance.json` like AXRB's DirectSetup. Ready = receipt matches + the key files exist and
+  aren't empty + AXRB's direct files complete. Requirements: ≥ 6 GB RAM, `vulkan-1.dll` (no hypervisor, no GPU
+  vendor gate).
+- **Direct install** (no adb): the PC build is copied to `%LOCALAPPDATA%\FramePort\axrb\games\<pkg>\<pkg>.apk`
+  (FramePort removes its converted copies after an install), the launch activity comes from the APK's manifest
+  (`axml.launcher_activity`, `pkg/fully.qualified.Class`), the data files become AXRB's content list `assets.txt`
+  (`Android/obb/<pkg>/<file>\t<Windows path>`, read-only mounts at the original place; WSL-only folders are copied
+  next to the APK). App data and saves: `<runtime>\direct\data\data\<pkg>` and `direct\sdcard\Android\data\<pkg>`.
+- **Play**: Steam shortcut → `%LOCALAPPDATA%\FramePort\axrb\fp-axrb-direct.ps1 -Package … -Activity … [flags]` →
+  sets `AXRB_DATA_HOME=<runtime>\output` (as AXRB's launcher does) → AXRB's `run_direct_game.ps1 -Apk -Package
+  -Activity -GameName -Executable <root>\out\direct\axrb-direct.exe -DataDirectory <runtime>\direct -Sysroot
+  <runtime>\direct\sysroot [-AssetList] -Translator …`. Exit 4 = host lost.
+- **Launch test**: watches `direct.out` for `AXRB_AOSP_ACTIVITY_CREATED` / `AXRB_AOSP_LIFECYCLE` (5 min for ART's
+  interpreted first start), runs, then stops through AXRB's `stop_game.ps1 -ParentPid` (closes the bridge window;
+  the run script lets the game pause/stop/save). Logs `<runtime>\output\logs\game\{direct.out, direct.err,
+  direct.log, host.err, host.log, session.json}` (diagnostics: `axrb/direct/*`); triage signatures
+  `axrb-direct-*` and milestones ART started → activity created → OpenXR → Vulkan device (`catalog/triage.yaml`).
+
+**Untested** (written 2026-10-15 from AXRB's source at 5b3dba19; no Windows run, no AXRB 2.x build yet): every
+direct-mode step on a real PC (silent install of the 2.x NSIS installer, `make_sysroot.py` through WSL interop, the
+launcher script, the launch test's markers and stop, the triage patterns against real logs), the upgrade of an
+installed 1.0.x, and whether AXRB's own launcher shows FramePort-set-up runtimes as ready.
+
 ## Spike results (2026-10-10, Windows 11 26200, i7-14700K, RTX 4080 SUPER, 64 GB; headless)
 
 | Step | Result |

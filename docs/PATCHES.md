@@ -2,7 +2,7 @@
 
 # Patches
 
-Every patch and game setting FramePort knows: 169 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
+Every patch and game setting FramePort knows: 170 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
 
 Each entry says what the patch does, whether it changes the APK or only the install, when FramePort suggests it, its options, the catalog games whose recipe names it and the launch-test signatures that suggest it. Patches that are on by default are on for every game, so the catalog rarely names them.
 
@@ -13,7 +13,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 - [Patches from OVRPort](#group-overport) (25)
 - [Steam Frame patches](#group-frame) (55)
 - [Game settings](#group-adapter) (68)
-- [Files and settings on the Frame](#group-device) (8)
+- [Files and settings on the Frame](#group-device) (9)
 - [PC VR (Proton and Revive)](#group-pcvr) (13)
 
 ## Index
@@ -176,6 +176,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Extra Lepton settings](#device-lepton_env) | `device.lepton_env` | Files and settings on the Frame | 3 |
 | [Controllers as a gamepad (Steam Input)](#device-steam_gamepad) | `device.steam_gamepad` | Files and settings on the Frame |  |
 | [Show the app's Android window (for typing)](#device-text_input_window) | `device.text_input_window` | Files and settings on the Frame | 88 |
+| [AXRB mode on this PC](#pc-axrb_backend) | `pc.axrb_backend` | Files and settings on the Frame |  |
 | [Launch options (SteamVR or OpenXR)](#pcvr-launch_args) | `pcvr.launch_args` | PC VR (Proton and Revive) | 2 |
 | [Provide the Oculus runtime from Revive (Frame)](#pcvr-libovr_redirect) | `pcvr.libovr_redirect` | PC VR (Proton and Revive) |  |
 | [No Unreal crash reporter](#pcvr-no_crash_reporter) | `pcvr.no_crash_reporter` | PC VR (Proton and Revive) |  |
@@ -2338,6 +2339,24 @@ Lets typing reach this app from Steam's on-screen keyboard or your PC's keyboard
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
 
 > Lepton runs VR apps headless: their Android window is never shown, so it never gets keyboard focus and no key press (Steam's on-screen keyboard, a USB/Bluetooth keyboard, Type on Frame) reaches the app's text fields. With Lepton's lepton-show-flatscreen marker the window is shown (behind the VR view, which keeps working) and Steam's keyboard opens for a selected text field. Steam lists the shown window as "Gamescope" (the Frame's compositor). Pairs with "Make Unity text fields work without a system keyboard".
+
+### <a id="pc-axrb_backend"></a>AXRB mode on this PC
+
+For this PC only: run the game in AXRB's direct mode (no Android emulator) or in AXRB's Android emulator. Automatic uses direct mode for Vulkan games.
+
+- `pc.axrb_backend`
+- **Changes:** Install only: written on the Frame when the game is installed; the APK isn't changed.
+- **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
+- **Options:**
+  - `backend`: str, default empty — direct or emulator (empty = automatic)
+  - `translator`: str, default empty — dynarmic or digitalis (direct mode; empty = AXRB's default)
+  - `precompose`: bool, default `False` — AXRB composes projection layers itself
+  - `legacy_oculus_driver`: bool, default `False` — direct mode: provide com.oculus.systemdriver
+  - `quest_identity`: bool, default `False` — direct mode: report a Quest 3 device
+  - `controllers_only`: bool, default `False` — direct mode: hide hand tracking (needs legacy_oculus_driver)
+- **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
+
+> Only for installs on this PC (AXRB): which AXRB runs the game. Automatic picks AXRB's direct mode (AXRB-Emulatorless: the game's arm64 code runs in one Windows process, no Android emulator) for Vulkan games and the Android emulator for OpenGL ES games, since direct mode has no OpenGL ES renderer yet. The other parameters are direct mode's per-game options (AXRB's run_direct_game.ps1): translator (dynarmic, AXRB's default, or digitalis), precompose (AXRB composes the game's projection layers itself; also used by the emulator), and legacy_oculus_driver / quest_identity / controllers_only for unconverted APKs with older Oculus loaders (controllers_only needs legacy_oculus_driver). The Steam Frame ignores this.
 
 ## <a id="group-pcvr"></a>PC VR (Proton and Revive)
 
