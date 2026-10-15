@@ -11,6 +11,8 @@
  *   Reused memory is NOT zeroed (Windows guarantees zeroed commits), so this is only for games that overwrite
  *   the whole block; any other use of a kept range drops it first (fresh zero pages).
  *   Kept regions keep their protection (they are not touched while kept), so keeping and reusing is nearly free.
+ * FP_MEM_ZERO=1: MADV_DONTNEED the reused part before returning it (lazy kernel zero-fill). Unlike the default
+ *   unzeroed cache this preserves anonymous zero-page semantics; it trades the saved page faults for correctness.
  * FP_THP=1: MADV_HUGEPAGE on large writable anonymous regions (only helps while 2 MB pages are free).
  * FP_MEM_DEBUG=1: log to stderr. */
 #define _GNU_SOURCE
@@ -19,12 +21,13 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/mman.h>
 #include <sys/types.h>
 
 #define MAX_SLOTS 16
 static size_t cache_min, cache_max = (size_t)6144 << 20, thp_min = (size_t)32 << 20;
-static int debug, thp, slots = 12;
+static int debug, thp, zero, slots = 12;
 static int (*real_mprotect)(void *, size_t, int);
 static int (*real_munmap)(void *, size_t);
 static void *(*real_mmap)(void *, size_t, int, int, int, off_t);
@@ -32,7 +35,8 @@ static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 struct entry { char *addr; size_t len; int prot, via_munmap, used; };
 static struct entry cache[MAX_SLOTS];
 static size_t kept_total;
-static unsigned long hits, partial, stores, drops;
+static unsigned long hits, partial, stores, drops, zero_calls, zero_failures;
+static size_t zero_bytes;
 
 static void resolve(void)
 {
@@ -47,6 +51,7 @@ __attribute__((constructor)) static void fp_mem_init(void)
     resolve();
     debug = getenv("FP_MEM_DEBUG") != NULL;
     thp = getenv("FP_THP") != NULL;
+    zero = (e = getenv("FP_MEM_ZERO")) && !strcmp(e, "1");
     if ((e = getenv("FP_BIGCACHE_MB")) && atol(e) > 0) cache_min = (size_t)atol(e) << 20;
     if ((e = getenv("FP_BIGCACHE_MAX_MB")) && atol(e) > 0) cache_max = (size_t)atol(e) << 20;
     if ((e = getenv("FP_BIGCACHE_SLOTS")) && atoi(e) > 0) slots = atoi(e) > MAX_SLOTS ? MAX_SLOTS : atoi(e);
@@ -99,9 +104,25 @@ static int store(void *addr, size_t len, int via_munmap, int prot)
     if (free_slot < 0) return 0;
     cache[free_slot] = (struct entry){ addr, len, prot, via_munmap, 1 };
     kept_total += len; stores++;
-    if (debug) fprintf(stderr, "fp_mem: keep %p+%zx (%s, kept %zu MB in total; stores %lu, hits %lu, partial %lu, drops %lu)\n",
-                       addr, len, via_munmap ? "munmap" : "release", kept_total >> 20, stores, hits, partial, drops);
+    if (debug) fprintf(stderr, "fp_mem: keep %p+%zx (%s, kept %zu MB in total; stores %lu, hits %lu, partial %lu, drops %lu; "
+                       "zero calls %lu, bytes %zu, failures %lu)\n",
+                       addr, len, via_munmap ? "munmap" : "release", kept_total >> 20, stores, hits, partial, drops,
+                       zero_calls, zero_bytes, zero_failures);
     return 1;
+}
+
+/* lock held: discard only the part about to be reused, including a short request's kept prefix. On failure the
+ * caller falls through to overlap eviction + a real mmap: ZERO must never hand stale contents to the guest. */
+static int zero_reused(void *addr, size_t len)
+{
+    if (!zero) return 0;
+    zero_calls++;
+    int r = madvise(addr, len, MADV_DONTNEED);
+    if (r) zero_failures++;
+    else zero_bytes += len;
+    if (debug) fprintf(stderr, "fp_mem: zero calls %lu, bytes %zu, failures %lu\n",
+                       zero_calls, zero_bytes, zero_failures);
+    return r;
 }
 
 /* protection of a region before it is released: unknown here, so assume read/write (Wine's committed views) */
@@ -117,6 +138,7 @@ void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off)
             if (!c->used || (char *)addr != c->addr || fd != -1 || !(flags & MAP_ANONYMOUS) || !(prot & PROT_WRITE)) continue;
             if (len <= c->len) {
                 if (prot != c->prot && real_mprotect(addr, len, prot)) break;
+                if (zero_reused(addr, len)) break;
                 if (len < c->len) { release_range(c, c->addr + len, c->len - len); partial++; }
                 kept_total -= c->len; c->used = 0; hits++;
                 if (debug) fprintf(stderr, "fp_mem: reuse %p+%zx of %zx\n", addr, len, c->len);
@@ -126,7 +148,11 @@ void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off)
             /* longer: map the extra part fresh behind the kept one */
             void *t = real_mmap(c->addr + c->len, len - c->len, prot, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
             if (t == (void *)(c->addr + c->len)) {
-                if (prot != c->prot) real_mprotect(c->addr, c->len, prot);
+                int protect_failed = prot != c->prot && real_mprotect(c->addr, c->len, prot);
+                if ((zero && protect_failed) || zero_reused(c->addr, c->len)) {
+                    real_munmap(t, len - c->len);
+                    break;
+                }
                 kept_total -= c->len; c->used = 0; hits++; partial++;
                 if (debug) fprintf(stderr, "fp_mem: reuse %p+%zx of %zx (+ fresh tail)\n", addr, len, c->len);
                 pthread_mutex_unlock(&lock);

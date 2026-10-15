@@ -785,6 +785,9 @@ unset LD_PRELOAD
 # speed (native/fexwine/README.md): native arm64 wineserver + ntsync, FEX without x86 memory ordering, Vulkan thunk
 export FP_NATIVE_WSERVER=1 FP_VKTHUNK=1 FEX_TSOENABLED=0 FEX_VECTORTSOENABLED=0 FEX_MEMCPYSETTSOENABLED=0
 export FEX_MULTIBLOCK=1 FEX_PROFILESTATS=0
+# Default taskset -c 4-7; launch-time perf extension overrides these defaults before any Wine process starts.
+FP_CORES=4-7; FP_REVIVE_DIR="$R/revive"
+FP_MOTION_SMOOTHING={vrsetting_q}
 {game_env}if [[ -z "${{DISPLAY:-}}" ]]; then
     steam_pid=$(pgrep -x steam | head -n1 || true)
     [[ -n "$steam_pid" ]] && while IFS= read -r -d '' kv; do case "$kv" in
@@ -797,7 +800,7 @@ cleanup() {{
     echo "end $(date +%s)" >>"$A/plays.log" 2>/dev/null || true
 }}
 trap cleanup EXIT
-python3 -I "$R/artifacts/fexrift.py" vrsetting '{vrsetting}' || true
+python3 -I "$R/artifacts/fexrift.py" vrsetting "$FP_MOTION_SMOOTHING" || true
 "$G/files/bin/wineserver" -k 2>/dev/null; sleep 1
 echo "FramePort: starting Meta's runtime"
 L="$WINEPREFIX/drive_c/users/steamuser/AppData/Local/Oculus"
@@ -823,7 +826,7 @@ python3 -I "$R/artifacts/fexrift.py" hidewin & HW=$!
 ( pp=$PPID; while sleep 2; do kill -0 "$pp" 2>/dev/null || {{ "$G/files/bin/wineserver" -k; break; }}; done ) & WD=$!
 echo "FramePort: starting {title}"
 cd {gamedir_q}
-taskset -c 4-7 "$G/proton" run {injector}{exe_q} {args}
+taskset -c "$FP_CORES" "$G/proton" run {injector}{exe_q} {args}
 """
 
 
@@ -839,8 +842,9 @@ def write_launcher(app, info, anchor):
         args = shlex.split(" ".join(args))
     text = LAUNCHER.format(title=re.sub(r"[\\\"$`\n]", "", info["title"]), root_q=shlex.quote(ROOT),
                            anchor_q=shlex.quote(anchor), steam_q=shlex.quote(STEAM), gid=GAME_ID, game_env=env,
-                           vrsetting=vr, gamedir_q=shlex.quote(os.path.dirname(exe)), exe_q=shlex.quote(exe),
-                           injector='"$R/revive/ReviveInjector.exe" ' if info.get("revive", True) else "",
+                           vrsetting_q=shlex.quote(vr), gamedir_q=shlex.quote(os.path.dirname(exe)),
+                           exe_q=shlex.quote(exe),
+                           injector='"$FP_REVIVE_DIR/ReviveInjector.exe" ' if info.get("revive", True) else "",
                            args=" ".join(shlex.quote(a) for a in args))
     put_text(os.path.join(anchor, "launch.sh"), text, 0o755)
     return exe

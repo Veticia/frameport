@@ -1067,5 +1067,37 @@ def fex_install(app_name: Optional[str] = typer.Argument(None, metavar="APP",
     typer.echo(json.dumps(res, indent=1))
 
 
+# ---------------------------------------------------------------------- FEX launch-time settings / bounded bench
+@fex_app.command("settings")
+def fex_settings(app_name: str = typer.Argument(..., metavar="APP"),
+                 values: Optional[list[str]] = typer.Argument(None, metavar="KEY=VALUE"),
+                 frame: Optional[str] = typer.Option(None, help=FRAME_HELP)):
+    """Read per-game performance settings, or override them for the next launch (JSON values; null resets a key)."""
+    updates = {}
+    for item in values or []:
+        key, sep, raw = item.partition("=")
+        if not sep or not key:
+            raise typer.BadParameter("use key=value (true/false, numbers, null, or JSON for fex)")
+        try:
+            updates[key] = raw if key == "cores" and raw != "null" else json.loads(raw)
+        except ValueError:
+            updates[key] = raw  # taskset's CPU list, e.g. cores=4-7
+    t = _fex_target(frame)
+    args = {"app": app_name}
+    if values:
+        args["values"] = updates
+    typer.echo(json.dumps(t.frame.agent("fex_settings", **args), indent=1))
+
+
+@fex_app.command("bench")
+def fex_bench(app_name: str = typer.Argument("oculus-first-contact", metavar="APP"),
+              seconds: int = typer.Option(120, min=1, max=120, help="total launch and sampling window (seconds)"),
+              frame: Optional[str] = typer.Option(None, help=FRAME_HELP)):
+    """One bounded headless performance run on an idle Frame; stops the game and restores display power settings."""
+    t = _fex_target(frame)
+    typer.echo(json.dumps(t.frame.agent("fex_bench", app=app_name, seconds=seconds, timeout=seconds + 40),
+                          separators=(",", ":")))
+
+
 if __name__ == "__main__":  # pragma: no cover
     main()
