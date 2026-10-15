@@ -1019,7 +1019,11 @@ def direct_launcher_text(inst: Install) -> str:
 
 
 def launcher_dir() -> Path:
-    """%LOCALAPPDATA%\\FramePort\\axrb: FramePort's launcher scripts and the direct-mode games' APKs (local path)."""
+    """%LOCALAPPDATA%\\FramePort\\axrb: FramePort's launcher scripts and the direct-mode games' APKs (local path).
+    FRAMEPORT_AXRB_LAUNCHER_DIR moves it (tests and isolated FRAMEPORT_HOME runs: the default is the real app data
+    folder's, and Windows must be able to run what is in it, so a WSL-only FRAMEPORT_HOME can't hold it)."""
+    if os.environ.get("FRAMEPORT_AXRB_LAUNCHER_DIR"):
+        return Path(os.environ["FRAMEPORT_AXRB_LAUNCHER_DIR"])
     local = local_appdata()
     if not local:
         raise AxrbError("Windows' local app data folder was not found")
