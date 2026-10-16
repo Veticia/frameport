@@ -94,6 +94,16 @@ def patch_revive(src: Path, dest: Path) -> Path:
     return dest
 
 
+def sync_helpers(frame, reporter: Reporter) -> None:
+    """Re-upload fexrift.py, its extension modules and per-game data (small) before work that runs them: only setup
+    uploaded them, so a fixed helper on the PC never reached a Frame set up earlier."""
+    from .install import installer
+
+    items = [(p, rel, p.stat().st_size) for p, rel in artifact_files() if rel.startswith("fexrift")]
+    installer.upload_files(frame, items, frame.agent("fex_prepare")["artifacts"], reporter,
+                           max(sum(i[2] for i in items), 1))
+
+
 def setup(frame, reporter: Reporter, wait: float = 3600) -> dict:
     """Upload fexrift.py, its binaries and the patched Revive, then run the setup on the Frame and follow it."""
     from .install import installer
@@ -217,6 +227,7 @@ def install(frame, reporter: Reporter, app: str = "oculus-first-contact", msaa: 
     pkg = package_for(app)
     title = GAMES.get(app, {}).get("title")
     reporter.stage(f"Install {title or app}")
+    sync_helpers(frame, reporter)
     res = frame.agent("fex_install", package=pkg, app=app, title=title, msaa=msaa,
                       force_unverified=force_unverified)
     for k, v in (res.get("fixes") or {}).items():

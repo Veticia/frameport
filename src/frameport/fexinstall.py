@@ -199,6 +199,7 @@ def install(frame, reporter: Reporter, *, from_library: str | None = None, folde
         reporter.log(f"Skipped repack leftover: {rel}")
     reporter.check("Meta app ID", True, f"{info['app_id']} ({info['app_id_source']})")
     reporter.check_cancel()
+    fexrift.sync_helpers(frame, reporter)
     prep = frame.agent("fex_prepare_local", app=info["app"], package=info["package"], dest=dest,
                        files=info["files"])
     items = [(info["folder"] / rel, rel, st["size"]) for rel, st in info["files"].items()

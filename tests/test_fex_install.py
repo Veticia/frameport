@@ -294,6 +294,8 @@ def test_cli_and_real_orchestration_with_fake_transfer(monkeypatch, game):
     class Frame:
         def agent(self, cmd, **kwargs):
             calls.append((cmd, kwargs))
+            if cmd == "fex_prepare":
+                return {"artifacts": "/frame/artifacts"}
             if cmd == "fex_prepare_local":
                 return {"game_dir": "/prefix/game", "existing": {"content.bin": 100}, "free_bytes": 20 << 30}
             if cmd == "fex_install":
@@ -312,17 +314,20 @@ def test_cli_and_real_orchestration_with_fake_transfer(monkeypatch, game):
     result = CliRunner().invoke(cli.app, ["fex", "install", "--from-library", "rift.demo", "--force-unverified",
                                            "--no-steam", "--runtime-check"])
     assert result.exit_code == 0, result.output
-    assert [c[0] for c in calls] == ["fex_prepare_local", "fex_register_local", "fex_install", "fex_runtime_state"]
-    assert transfers[0][0] == "fast link"
-    assert "content.bin" not in [r for _, r, _ in transfers[0][1]]
-    assert calls[1][1]["app_id"] == "1184903171584429"
+    assert [c[0] for c in calls] == ["fex_prepare", "fex_prepare_local", "fex_register_local", "fex_install",
+                                     "fex_runtime_state"]
+    # first upload: the helper scripts (a fixed helper must reach a Frame set up earlier), then the game
+    assert transfers[0][2] == "/frame/artifacts" and {r for _, r, _ in transfers[0][1]} >= {"fexrift.py"}
+    assert transfers[1][0] == "fast link"
+    assert "content.bin" not in [r for _, r, _ in transfers[1][1]]
+    assert calls[2][1]["app_id"] == "1184903171584429"
     calls.clear()
     monkeypatch.setattr(fexinstall.rift, "analyze", lambda _: types.SimpleNamespace(
         extra={"exe": "Game/Game.exe", "exe_confirmed": True}))
     result = CliRunner().invoke(cli.app, ["fex", "install", "--folder", str(game), "--title", "Local demo",
                                            "--force-unverified", "--no-steam", "--dest", "/mnt/card"])
     assert result.exit_code == 0, result.output
-    assert calls[0][1]["dest"] == "/mnt/card" and calls[0][1]["app"] == "local-demo"
+    assert calls[1][1]["dest"] == "/mnt/card" and calls[1][1]["app"] == "local-demo"
     result = CliRunner().invoke(cli.app, ["fex", "install", "--folder", str(game), "--from-library", "rift.demo"])
     assert result.exit_code != 0
 
@@ -331,7 +336,10 @@ def test_no_space_cancel_and_unverified_before_upload(monkeypatch, game):
     from frameport.core import library
     monkeypatch.setenv("FRAMEPORT_EXPERIMENTAL_FEX", "1")
     monkeypatch.setattr(library, "load", lambda: {"games": {"rift.demo": entry(game)}})
-    frame = types.SimpleNamespace(agent=lambda *a, **kw: {"game_dir": "/game", "existing": {}, "free_bytes": 0})
+    from frameport.install import installer
+    monkeypatch.setattr(installer, "upload_files", lambda *args: None)
+    frame = types.SimpleNamespace(agent=lambda *a, **kw: {"game_dir": "/game", "existing": {}, "free_bytes": 0,
+                                                          "artifacts": "/frame/artifacts"})
     with pytest.raises(ValueError, match="unverified"):
         fexinstall.install(frame, Reporter(), from_library="rift.demo")
     with pytest.raises(RuntimeError, match="not enough space"):
