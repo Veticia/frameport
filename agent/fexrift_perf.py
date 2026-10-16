@@ -384,8 +384,12 @@ def bench_run(args, launcher, vr):
         before, previous = {}, time.monotonic()
         deadline = started + seconds
         while time.monotonic() < deadline:
-            if vr.activity() != 3 or recent_steam_input(CORE.STEAM):
-                raise ValueError("benchmark stopped: owner interaction")
+            # Before the launch the headset must be in standby (3); the game itself then wakes the compositor
+            # (activity leaves standby), so during the run only real use stops it: 1 = user interaction (worn or
+            # moved), or new controller input.
+            level = vr.activity()
+            if level == 1 or recent_steam_input(CORE.STEAM):
+                raise ValueError(f"benchmark stopped: owner interaction (activity {level})")
             if child.poll() is not None:
                 raise ValueError("benchmark launcher exited before the sampling window ended; inspect launch.log")
             rows = processes()
