@@ -39,7 +39,8 @@ def _apk(tmp_path, *, key="com.epicgames.ue4.GameActivity.bSupportsVulkan", valu
 @pytest.mark.parametrize("key", ["com.epicgames.ue4.GameActivity.bSupportsVulkan",
                                  "com.epicgames.unreal.GameActivity.bSupportsVulkan"])
 @pytest.mark.parametrize("engine_lib", ["libUE4.so", "libUnreal.so"])
-def test_unreal_vulkan_build_is_vulkan(tmp_path, key, engine_lib):
+def test_unreal_vulkan_build_is_vulkan(tmp_path, monkeypatch, key, engine_lib):
+    monkeypatch.setattr(pc_android, "direct_obtainable", lambda: True)  # direct mode installed or released
     a = detect.analyze(_apk(tmp_path, key=key, engine_lib=engine_lib), deep=False)
     assert a.engine == "Unreal"
     assert a.graphics == "Vulkan (Unreal bSupportsVulkan)"
