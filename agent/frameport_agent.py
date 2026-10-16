@@ -30,6 +30,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import struct
 import subprocess
 import sys
@@ -1131,20 +1132,27 @@ def library_mode(args=None):
 def cmd_library_mode(args):
     mode = library_mode(args)
     _write_json(LIBRARY_MODE_FILE, {"mode": mode})
-    if mode == "off":
-        with open(STATUS_FILE + ".lock", "w") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
+    os.makedirs(os.path.dirname(STATUS_FILE), exist_ok=True)
+    with open(STATUS_FILE + ".lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if mode == "off":
             pending = pending_library()
             pending["packages"] = []
             _write_json(PENDING_FILE, pending)
+        drop_library_hooks_if_idle()
     return {"mode": mode}
 
 
 def pending_library():
     try:
-        return json.load(open(PENDING_FILE))
+        pending = json.load(open(PENDING_FILE))
     except (OSError, ValueError):
-        return {"packages": [], "remove": []}
+        pending = {}
+    if not isinstance(pending, dict):
+        pending = {}
+    pending["packages"] = [p for p in pending.get("packages") or [] if isinstance(p, str)]
+    pending["remove"] = [r for r in pending.get("remove") or [] if isinstance(r, dict)]
+    return pending
 
 
 def queue_library(packages, remove):
@@ -1168,20 +1176,78 @@ def _queue_library(packages, remove):
     return result
 
 
+LIBRARY_HOOK_DIR = os.path.join(HOME, ".config/systemd/user/steam.service.d")
+LIBRARY_HOOK = os.path.join(LIBRARY_HOOK_DIR, "frameport-library.conf")
+TIMEOUT_BIN = "/usr/bin/timeout"  # coreutils; present on SteamOS (checked on the Frame, 2026-10-16)
+SYSTEMD_RUN_BIN = "/usr/bin/systemd-run"
+LIBRARY_HOOK_SECONDS = 20  # steam.service's start timeout is 90 s: a stuck hook must never get near it
+LIBRARY_VERIFY_UNIT = "frameport-library-verify"
+
+
+def _unit_quote(value):
+    """One argument of a systemd Exec= line: quoted, with the specifier (%) and variable ($) characters escaped."""
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%").replace("$", "$$") + '"'
+
+
+def library_hooks_text(python=None, agent=None, timeout_bin=None):
+    """steam.service drop-in for the `later` mode. Both hooks start with '-' (a failure never fails Steam's start)
+    and run under timeout(1) (systemd's '-' ignores exit codes, not a hook that hangs until the unit's start
+    timeout), so a missing interpreter/agent (exit 127/2) or a hang can't keep Steam from starting. The
+    pre-start hook rewrites shortcuts.vdf before Steam reads it; the post-start check (it waits for Steam and may
+    register devkit entries) runs as its own transient unit, so Steam's start never waits for it."""
+    python = python or sys.executable
+    agent = agent or os.path.abspath(__file__)
+    timeout_bin = TIMEOUT_BIN if timeout_bin is None else timeout_bin
+    wrap = f"{timeout_bin} -k 5 {LIBRARY_HOOK_SECONDS} " if timeout_bin else ""
+    command = _unit_quote(python) + " " + _unit_quote(agent)
+    return ("# Written by FramePort (Steam library: \"later\"); removed again when nothing waits for Steam's start.\n"
+            "[Service]\n"
+            f"ExecStartPre=-{wrap}{command} library_pending\n"
+            f"ExecStartPost=-{wrap}{SYSTEMD_RUN_BIN} --user --collect --quiet --no-block "
+            f"--unit={LIBRARY_VERIFY_UNIT} --property=RuntimeMaxSec=300 {command} library_pending_verify\n")
+
+
 def ensure_library_hooks():
-    """SteamOS runs Steam as a user service. Apply AFTER its exit writes and BEFORE its next start.
-    Keep the journal until the post-start verification succeeds, including across reboots/crashes.
-    """
-    folder = os.path.join(HOME, ".config/systemd/user/steam.service.d")
-    os.makedirs(folder, exist_ok=True)
-    def quote(value):
-        return '"' + value.replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%') + '"'
-    command = quote(sys.executable) + " " + quote(os.path.abspath(__file__))
-    with open(os.path.join(folder, "frameport-library.conf"), "w") as f:
-        f.write("[Service]\nExecStartPre=-" + command + " library_pending\n"
-                "ExecStartPost=-" + command + " library_pending_verify\n")
+    """SteamOS runs Steam as the user unit steam.service (Type=simple, Restart=always, TimeoutStartSec 90 s).
+    Apply AFTER its exit writes and BEFORE its next start; keep the journal until the post-start verification
+    succeeds, including across reboots/crashes."""
+    text = library_hooks_text(timeout_bin=TIMEOUT_BIN if os.access(TIMEOUT_BIN, os.X_OK) else "")
+    try:
+        if open(LIBRARY_HOOK).read() == text:
+            return
+    except OSError:
+        pass
+    os.makedirs(LIBRARY_HOOK_DIR, exist_ok=True)
+    with open(LIBRARY_HOOK + ".tmp", "w") as f:
+        f.write(text)
+    os.replace(LIBRARY_HOOK + ".tmp", LIBRARY_HOOK)
     if run(["systemctl", "--user", "daemon-reload"]).returncode:
         raise AgentError("Could not enable Steam library startup hooks")
+
+
+def remove_library_hooks():
+    """Remove the steam.service drop-in (mode switched away from `later` with nothing pending, purge).
+    Returns whether there was one."""
+    if not os.path.exists(LIBRARY_HOOK):
+        return False
+    try:
+        os.remove(LIBRARY_HOOK)
+    except FileNotFoundError:
+        return False
+    try:
+        os.rmdir(LIBRARY_HOOK_DIR)  # only when empty: the user's own drop-ins (extra_args.conf) stay
+    except OSError:
+        pass
+    run(["systemctl", "--user", "daemon-reload"])
+    return True
+
+
+def drop_library_hooks_if_idle():
+    """The drop-in only stays while the `later` mode is on or something still waits for Steam's next start."""
+    pending = pending_library()
+    if library_mode() != "later" and not pending["packages"] and not pending["remove"]:
+        return remove_library_hooks()
+    return False
 
 
 def cmd_library_pending(args):
@@ -1193,6 +1259,8 @@ def cmd_library_pending(args):
             return {"worker_active": True}  # that worker writes before start and verifies afterward
         pending = pending_library()
         result = {"added": [], "errors": []}
+        if not pending["packages"] and not pending["remove"]:
+            return result  # every Steam start runs this: leave shortcuts.vdf alone when nothing waits
         # An uninstall queued after an install wins; never resurrect a deleted deployment.
         packages = [p for p in pending["packages"] if deployment(p)]
         for user in steam_users():
@@ -1215,11 +1283,15 @@ def cmd_library_pending_verify(args):
         packages = [p for p in pending["packages"] if deployment(p)]
         result = {"state": "done", "added": [], "errors": list(pending.get("errors", []))}
         if not packages and not pending["remove"]:
+            if pending["packages"]:  # only uninstalled games were left
+                _write_json(PENDING_FILE, {"packages": [], "remove": []})
+            drop_library_hooks_if_idle()
             return result
         for pkg in shortcuts_lost(library_users(), packages):
             add_devkit_entry(pkg, result)
         if not result["errors"]:
             _write_json(PENDING_FILE, {"packages": [], "remove": []})
+            drop_library_hooks_if_idle()
         _write_json(STATUS_FILE, result)
         return result
 
@@ -1449,6 +1521,7 @@ def _shortcuts_worker(payload):
         run(["systemctl", "--user", "start", "steam.service"])
     if result["state"] == "done" and not result["errors"]:
         _write_json(PENDING_FILE, {"packages": [], "remove": []})
+        drop_library_hooks_if_idle()
     try:
         os.remove(RESTART_REQUEST_FILE)
     except OSError:
@@ -1968,8 +2041,9 @@ def cmd_launch(args):
     if mode == "off" or (mode == "later" and pkg in pending_library()["packages"]):
         # Detached from SSH/FramePort. The launcher keeps Lepton/Proton's environment; SteamVR must be running.
         unit = f"frameport-play-{dep['appid']}"
-        if game_is_running(dep):
-            raise AgentError("the game is already running")
+        if game_is_running(dep) or run(["systemctl", "--user", "is-active", "--quiet", unit]).returncode == 0:
+            raise AgentError("the game is already running")  # (or its launcher is still starting it)
+        run(["systemctl", "--user", "reset-failed", unit])  # a failed earlier start would block the unit name
         p = run(["systemd-run", "--user", "--collect", "--quiet", f"--unit={unit}",
                  os.path.join(ANCHORS, pkg, "launch.sh")])
         if p.returncode:
@@ -6748,11 +6822,11 @@ def purge_worker(payload):
                 result["removed"].append(VR_OVERLAY_UNIT_PATH)
         except Exception as exc:  # noqa: BLE001
             result["errors"].append(f"overlay autostart service: {exc}")
-        hook = os.path.join(HOME, ".config/systemd/user/steam.service.d/frameport-library.conf")
-        if os.path.exists(hook):
-            os.remove(hook)
-            user_systemctl("daemon-reload")
-            result["removed"].append(hook)
+        try:
+            if remove_library_hooks():
+                result["removed"].append(LIBRARY_HOOK)
+        except Exception as exc:  # noqa: BLE001
+            result["errors"].append(f"Steam library hook: {exc}")
         try:
             service = stop_steam()
         except AgentError as exc:
@@ -8149,6 +8223,8 @@ def main():
     if len(sys.argv) != 2 or sys.argv[1] not in COMMANDS:
         print(json.dumps({"ok": False, "error": f"usage: frameport_agent.py <{'|'.join(sorted(COMMANDS))}>"}))
         return 2
+    if sys.argv[1] == "library_pending" and hasattr(signal, "alarm"):
+        signal.alarm(LIBRARY_HOOK_SECONDS + 5)  # Steam's ExecStartPre: own deadline too, should timeout(1) be missing
     raw = sys.stdin.read() if not sys.stdin.isatty() else ""
     try:
         args = json.loads(raw) if raw.strip() else {}

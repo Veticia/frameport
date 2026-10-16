@@ -434,7 +434,16 @@ is open. Closed/crashed GUIs expire; the existing twelve-hour hold limit still a
 `~/.config/systemd/user/steam.service.d/frameport-library.conf` reapplies the journal in ExecStartPre, after the
 previous session has exited. ExecStartPost verifies the entries and uses the existing live devkit fallback if Steam
 removed them. The journal is cleared only after success, and survives agent/app exit and reboot. The hooks share the
-shortcut worker lock; an active worker performs its own write/verification instead. Purge removes the drop-in.
+shortcut worker lock; an active worker performs its own write/verification instead. Both hook lines start with
+`-` and run under `/usr/bin/timeout -k 5 20` (present on SteamOS; `-` ignores exit codes, including 127 for a missing
+interpreter or agent, but not a hook that hangs until the unit's 90 s start timeout); ExecStartPre also has its own
+SIGALRM deadline. ExecStartPost only starts the verification as the transient unit `frameport-library-verify`
+(`--no-block`, RuntimeMaxSec 300), so Steam's start never waits for its Steam/devkit waits. The pre hook leaves
+shortcuts.vdf alone when nothing is pending. The drop-in is removed (and the user manager reloaded) as soon as the
+mode isn't `later` and nothing is pending, and by purge; an otherwise empty `steam.service.d` goes with it.
+SteamOS 0.3.0 facts (checked 2026-10-16): Steam is the static user unit `/usr/lib/systemd/user/steam.service`
+(Type=simple, Restart=always, TimeoutStartSec 90 s, its own `-` ExecStartPre lines; `extra_args.conf` drop-ins are
+Valve's documented way to extend it), systemd 257; no user drop-ins exist by default.
 This automatic application targets SteamOS's `steam.service`; if Steam is started outside that service, use
 FramePort's Restart Steam now action to apply the journal safely.
 

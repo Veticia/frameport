@@ -2144,7 +2144,8 @@ def test_off_skips_shortcuts_and_play_uses_direct_launcher(monkeypatch, tmp_path
     calls = []
     monkeypatch.setattr(a, "deployment", lambda _: {"title": "X", "appid": 123})
     monkeypatch.setattr(a, "game_is_running", lambda _: False)
-    monkeypatch.setattr(a, "run", lambda cmd, **kw: calls.append(cmd) or SimpleNamespace(returncode=0))
+    monkeypatch.setattr(a, "run", lambda cmd, **kw: calls.append(cmd)
+                        or SimpleNamespace(returncode=3 if "is-active" in cmd else 0, stderr=""))
     monkeypatch.setattr(a, "devkit_register", lambda _: pytest.fail("off registered a shortcut"))
     result = a.cmd_launch({"package": "com.x.y"})
     assert result["via"] == "direct"
@@ -2199,7 +2200,8 @@ def test_pending_later_play_never_registers_shortcut(monkeypatch, tmp_path):
     a._write_json(a.PENDING_FILE, {"packages": ["com.x.y"], "remove": []})
     monkeypatch.setattr(a, "deployment", lambda _: {"appid": 123, "title": "X"})
     monkeypatch.setattr(a, "game_is_running", lambda _: False)
-    monkeypatch.setattr(a, "run", lambda *args, **kw: SimpleNamespace(returncode=0))
+    monkeypatch.setattr(a, "run", lambda cmd, **kw: SimpleNamespace(returncode=3 if "is-active" in cmd else 0,
+                                                                    stderr=""))
     monkeypatch.setattr(a, "devkit_register", lambda _: pytest.fail("pending Play added a devkit shortcut"))
     assert a.cmd_launch({"package": "com.x.y", "mode": "later"})["via"] == "direct"
 
@@ -2240,3 +2242,68 @@ def test_manual_restart_worker_wakes_existing_lock_holder(monkeypatch, tmp_path)
         a.fcntl.flock(lock, a.fcntl.LOCK_EX)
         a.shortcuts_worker(json.dumps({"restart_now": True, "packages": []}))
     assert json.load(open(a.RESTART_REQUEST_FILE))["requested"] > 0
+
+
+def test_library_hook_is_bounded_and_never_fails_steam(monkeypatch, tmp_path):
+    a = load_agent(monkeypatch, tmp_path)
+    text = a.library_hooks_text(python="/usr/bin/python3", agent="/home/u/100% $HOME/frameport_agent.py",
+                                timeout_bin="/usr/bin/timeout")
+    lines = [line for line in text.splitlines() if line.startswith("Exec")]
+    assert len(lines) == 2
+    pre, post = lines
+    # '-' first (a non-zero exit, also 127 for a missing interpreter, never fails Steam), then timeout(1)
+    assert pre.startswith("ExecStartPre=-/usr/bin/timeout -k 5 20 ") and pre.endswith(" library_pending")
+    assert post.startswith("ExecStartPost=-/usr/bin/timeout -k 5 20 /usr/bin/systemd-run --user ")
+    assert "--no-block" in post and "RuntimeMaxSec=" in post and post.endswith(" library_pending_verify")
+    assert '"/home/u/100%% $$HOME/frameport_agent.py"' in pre  # systemd specifiers/variables escaped
+    assert "[Service]" in text
+    assert "timeout" not in a.library_hooks_text(timeout_bin="")  # internal alarm then
+
+
+def test_library_hook_written_once_and_removed_when_idle(monkeypatch, tmp_path):
+    a = load_agent(monkeypatch, tmp_path)
+    calls = []
+    monkeypatch.setattr(a, "run", lambda cmd, **kw: calls.append(cmd) or SimpleNamespace(returncode=0))
+    hook = tmp_path / ".config/systemd/user/steam.service.d/frameport-library.conf"
+    a.cmd_library_mode({"mode": "later"})
+    a.ensure_library_hooks()
+    a.ensure_library_hooks()
+    assert hook.exists()
+    assert calls.count(["systemctl", "--user", "daemon-reload"]) == 1  # unchanged drop-in: no reload
+    # back to "now" with a game still waiting for Steam's start: the hook stays until it is applied
+    a._write_json(a.PENDING_FILE, {"packages": ["com.x.y"], "remove": []})
+    a.cmd_library_mode({"mode": "now"})
+    assert hook.exists()
+    monkeypatch.setattr(a, "deployment", lambda _: {"title": "X"})
+    monkeypatch.setattr(a, "library_users", lambda: ["42"])
+    monkeypatch.setattr(a, "shortcuts_lost", lambda *args: [])
+    a.cmd_library_pending_verify({})
+    assert not hook.exists() and not hook.parent.exists()
+    assert calls.count(["systemctl", "--user", "daemon-reload"]) == 2
+    # nothing pending: switching away from "later" removes it at once, the user's own drop-ins stay
+    a.cmd_library_mode({"mode": "later"})
+    a.ensure_library_hooks()
+    (hook.parent / "extra_args.conf").write_text("[Service]\n")
+    a.cmd_library_mode({"mode": "off"})
+    assert not hook.exists() and (hook.parent / "extra_args.conf").exists()
+
+
+def test_library_pre_hook_leaves_vdf_alone_when_nothing_waits(monkeypatch, tmp_path):
+    a = load_agent(monkeypatch, tmp_path)
+    monkeypatch.setattr(a, "library_users", lambda: pytest.fail("touched the library"))
+    monkeypatch.setattr(a, "steam_users", lambda: pytest.fail("touched the library"))
+    assert a.cmd_library_pending({}) == {"added": [], "errors": []}
+    Path(a.PENDING_FILE).write_text("[]")  # damaged journal: treated as empty, never a crash in Steam's start
+    assert a.cmd_library_pending({}) == {"added": [], "errors": []}
+
+
+def test_off_play_refuses_while_launcher_unit_starts(monkeypatch, tmp_path):
+    a = load_agent(monkeypatch, tmp_path)
+    a.cmd_library_mode({"mode": "off"})
+    monkeypatch.setattr(a, "deployment", lambda _: {"title": "X", "appid": 123})
+    monkeypatch.setattr(a, "game_is_running", lambda _: False)
+    calls = []
+    monkeypatch.setattr(a, "run", lambda cmd, **kw: calls.append(cmd) or SimpleNamespace(returncode=0, stderr=""))
+    with pytest.raises(a.AgentError):
+        a.cmd_launch({"package": "com.x.y"})
+    assert not any(c[0] == "systemd-run" for c in calls)

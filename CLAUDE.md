@@ -1172,3 +1172,6 @@ writes and verify before clearing; preserve this ordering and avoid locking acro
 Off Play (also pending Later Play) uses detached systemd-run launch.sh, with no shortcut/devkit registration;
 Steam's per-game controller/overlay/Exit game integration is lost. Restart Steam now explicitly bypasses holds,
 asks before ending a running game, and closes local FramePort/Desktop Mode. Purge removes the startup hook.
+Hook hardening: both lines `-` + `/usr/bin/timeout -k 5 20`; ExecStartPost only `systemd-run --no-block`s the
+verify (unit frameport-library-verify) so Steam's start never waits; drop-in removed once mode != later and nothing
+pending (`drop_library_hooks_if_idle`). Steam = static user unit steam.service (Type=simple, Restart=always, 90 s).
