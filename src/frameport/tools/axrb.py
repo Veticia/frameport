@@ -827,8 +827,17 @@ def log_dir(root: Path | None = None) -> Path:
     return (root or runtime_root()) / "output" / "logs"
 
 
-def read_log(path: Path, limit: int = 1 << 20) -> str:
-    """A log written on Windows: Windows PowerShell 5.1's redirection writes UTF-16 with a BOM, others UTF-8."""
+def read_log(path: Path, limit: int = 1 << 20, head: int = 0) -> str:
+    """A log written on Windows: Windows PowerShell 5.1's redirection writes UTF-16 with a BOM, others UTF-8. Its last
+    `limit` characters, and with `head` also its first ones (a long session's start-up lines: direct.out reached
+    10 MB in 3 minutes of LEGO Bricktales, and its tail no longer had the milestones)."""
+    text = _read_text(path)
+    if head and len(text) > head + limit:
+        return text[:head] + "\n[... FramePort: middle of the log left out ...]\n" + text[-limit:]
+    return text[-limit:]
+
+
+def _read_text(path: Path) -> str:
     try:
         data = path.read_bytes()
     except OSError:
@@ -837,7 +846,7 @@ def read_log(path: Path, limit: int = 1 << 20) -> str:
         text = data.decode("utf-16", errors="replace")
     else:
         text = data.decode("utf-8-sig", errors="replace")
-    return text[-limit:]
+    return text
 
 
 def start_emulator(root: Path | None = None, app: Path | None = None, timeout: float = 1200) -> bool:

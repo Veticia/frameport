@@ -402,6 +402,9 @@ DIRECT_LOGS = (("session.json", "game/session.json", 1 << 16), ("host.err", "gam
                ("frameport-launch-test.log", "frameport-launch-test.log", 1 << 16))
 
 
+HEAD_TOO = ("direct.out", "direct.log")
+
+
 def game_logs(backend: str | None = None) -> dict[str, str]:
     """AXRB's session logs (newest session) for triage and diagnostics. Both backends when `backend` is None: the
     direct ones then under "direct/"."""
@@ -417,7 +420,8 @@ def game_logs(backend: str | None = None) -> dict[str, str]:
         for name, sub, limit in files:
             p = logs / sub
             if p.is_file():
-                out[prefix + name] = axrb.read_log(p, limit)
+                # the runner's logs keep their start (milestones) as well as their end
+                out[prefix + name] = axrb.read_log(p, limit, head=limit // 4 if name in HEAD_TOO else 0)
     return out
 
 
@@ -524,7 +528,7 @@ def _launch_test_direct(dep: dict, reporter: Reporter, seconds: int, triage, ext
         time.sleep(3)
         alive = axrb.pid_running(pid)
         fresh = out.is_file() and out.stat().st_mtime >= before - 5  # the run script rewrites it every session
-        now = direct_state(axrb.read_log(out, 1 << 20) if fresh else "", alive)
+        now = direct_state(axrb.read_log(out, 1 << 20, head=1 << 18) if fresh else "", alive)
         if now in ("EXITED", "NEVER_STARTED"):
             state = now
             break

@@ -859,6 +859,12 @@ def test_direct_logs_and_state(tmp_path, monkeypatch):
     out = "AXRB_AOSP_BOOTSTRAP\nAXRB_AOSP_ACTIVITY_CREATED com.game.x.Main\n"
     assert pc_android.direct_state(out, True) == "RUNNING" and pc_android.direct_state(out, False) == "EXITED"
     assert pc_android.dep_backend({}) == "emulator"  # installs from before direct mode
+    # a long session (LEGO Bricktales: 10 MB of direct.out in 3 minutes) keeps its start-up milestones
+    (root / "output/logs/game/direct.out").write_text(out + "I/Unity( 1): frame\n" * 400_000)
+    logs = pc_android.game_logs(axrb.DIRECT)
+    assert logs["direct.out"].startswith("AXRB_AOSP_BOOTSTRAP") and logs["direct.out"].endswith("frame\n")
+    assert len(logs["direct.out"]) < 3 << 20 and "middle of the log left out" in logs["direct.out"]
+    assert axrb.read_log(root / "output/logs/game/direct.out", 100) == ("I/Unity( 1): frame\n" * 6)[-100:]
 
 
 def test_direct_mode_triage():
