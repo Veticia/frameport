@@ -195,9 +195,11 @@ One recipe serves both builds; `patches/base.pc_selection(patches, analysis)` pi
   `frame.unity_text_input`, `frame.unreal_quest_precompile`, `frame.unreal_quest_keymap`,
   `frame.unreal_thumb_touch`, `frame.unreal_skip_obb_check`, `frame.unreal_skip_obb_delivery`, `frame.nodebug`,
   `frame.meta_permissions`, `frame.launcher`, and `frame.vrapi_bridge` (VrApi → OpenXR through OVRPort's loader,
-  so AXRB's runtime; seen working in direct mode with The Climb 2, see "VrApi-direct games" below; the **GL shim
-  stays off**: it fixes Mesa/Zink GLSL strictness, and the bridge doesn't need it — only `frame.gl_shim` requires
-  the bridge, not the other way round).
+  so AXRB's runtime; seen working in direct mode with The Climb 2, see "VrApi-direct games" below; the bridge
+  doesn't need the GL shim, but GLES games keep `frame.gl_shim` for gfxstream, see "GLES games in the emulator").
+- **Experimental on the PC, for GLES games in the emulator**: `frame.gl_shim` (only with a GLES analysis,
+  `Patch.pc_keeps`; Vulkan VrApi games never get it), `frame.unity_multipass` (also added by `pc_detect`), and the
+  GLES FrameBridge defaults `scale` ≤ 0.5, `scale_max=1`, `projection_only=1`.
 - **Experimental on the PC** (`on_pc = "experimental"`, kept but not yet seen working in AXRB): `frame.vk_sanitize`
   (the Vulkan shim; gfxstream / the host driver instead of Lepton's Fossilize), `frame.unity_tls_key_pool`,
   `frame.eos_keychain_loop`.
@@ -259,14 +261,65 @@ through FramePort's launcher with the emulator booted by AXRB's run script (~1 m
 
 - **Lucky's Tale (Unity, GLES): black.** GLES games go through AXRB's raw image path (eye readback → TCP), sized
   by SteamVR's recommended resolution: 3412×3412 per eye at the owner's 250 % supersampling = 93 MB per frame,
-  ~10 s per frame; at a lowered resolution 2644×2644 = 56 MB, 6.6 s per frame (~8.5 MB/s). Not fixable from
-  FramePort (AXRB has no maximum-extent setting, only AXRB_MIN_EYE_EXTENT); even ~1000² would be ~1 fps.
-  AXRB's zero-copy GPU path covers Vulkan games only.
+  ~10 s per frame; at a lowered resolution 2644×2644 = 56 MB, 6.6 s per frame (~8.5 MB/s). AXRB's zero-copy GPU
+  path covers Vulkan games only. The ~8.5 MB/s was the transport, not the readback: see "GLES games in the
+  emulator" below (adb reverse: ~100 MB/s, half-size eyes, multipass: Lucky's Tale draws at 30 fps).
 - **Pinball FX VR (UE5, Vulkan): crash 4 s after start**, the same gfxstream `vkAllocateMemory` SIGSEGV from AXRB's
   runtime layer as headless (so not a headless artefact). AXRB's side.
 
 Not reached: sound, controllers. Next candidates: a Vulkan game AXRB reports playable (Deadpool VR, Batman: Arkham
 Shadow); an AXRB issue for the Pinball crash.
+
+## GLES games in the emulator (2026-10-16, headless under Monado's simulated HMD)
+
+AXRB 1.0.4's emulator is the only backend with GLES (direct mode's EGL is a stub). A GLES frame is read back with
+`glReadPixels` on the game's thread inside `xrEndFrame` (`runtime/src/frame_transport.cpp`), sent as raw RGBA to the
+host (two eyes per frame) and uploaded there; `xrEndFrame` returns only after the send. Measured with
+`AXRB.Perf eye-readback` / `image-send` (guest log) and `host-image-arrival` (host.err):
+
+| Eye size (per eye) | Bytes/frame | Route | Send | Frame rate |
+|---|---|---|---|---|
+| 896×1007 (Monado's recommendation) | 7.2 MB | default: TCP to 10.0.2.2 (QEMU user-mode network) | 850-950 ms | 1.1 fps |
+| 448×504 (`scale=0.5`) | 1.8 MB | default | 200-230 ms | 4.4 fps |
+| 896×1008 | 7.2 MB | **adb reverse** (`debug.axrb.image_transport=adb`) | 87 ms (~83 MB/s) | 9.4 fps |
+| 640×720 (`scale=0.7`) | 3.7 MB | adb reverse | 38 ms (~96 MB/s) | 17.6 fps |
+| 448×512 (`scale=0.5`) | 1.8 MB | adb reverse | 14.5 ms (~125 MB/s) | 30.5-30.8 fps |
+
+The readback itself is 1-3 ms. The default route caps at ~8 MB/s (the same rate as in the headset run above); AXRB's
+adb reverse route (AXRB sets up `adb reverse tcp:38491` anyway) is 10-15x faster. For SteamVR's resolutions the math
+stays hard: 2016² per eye = 32.5 MB/frame (~3 fps), at half size 8.1 MB (~10 fps); the owner's 2644² at half size
+14 MB (~6 fps). Lowering SteamVR's resolution for the game is what helps further (AXRB has a minimum-extent setting,
+`AXRB_MIN_EYE_EXTENT`, but no maximum).
+
+What FramePort does for GLES games on this PC (all in the PC build / launcher, nothing on the Frame changes):
+- FramePort's launcher (`fp-axrb-run.ps1`) starts Android itself when it isn't running (AXRB's Start action, as the run
+  script would; the run script then gets `-OwnsEmulator` and shuts it down), sets `debug.axrb.image_transport=adb`
+  (`FRAMEPORT_AXRB_IMAGE_TRANSPORT=default` leaves AXRB's choice) and `debug.wm.disable_deprecated_target_sdk_dialog=1`.
+- `pc_selection` with a GLES analysis: FrameBridge `scale` at most 0.5 (FrameBridge's minimum), `scale_max=1` (the
+  maximum eye size reported is the scaled one too), `projection_only=1` (see below).
+- `frame.unity_multipass` (experimental on the PC, `pc_detect` for Unity GLES + Oculus XR Plugin): gfxstream lists
+  `GL_OVR_multiview2` but its encoder finds a multiview framebuffer incomplete and drops every draw
+  (`GL2Encoder.cpp:s_glDrawElements … GL error 0x506 checkFramebufferCompleteness`): both eyes black.
+- `frame.gl_shim` (experimental on the PC, GLES only, `Patch.pc_keeps`): gfxstream has no
+  `GL_EXT_disjoint_timer_query`; the shim lists it and hands out stand-ins ("available, 0 ns") so GLAD engines that
+  call the timer queries unconditionally don't jump to NULL. Its multiview hiding also suits gfxstream.
+- FrameBridge settings without a rebuild: `frameport settings <pkg> --to pc key=value` writes
+  `/sdcard/Android/data/<pkg>/files/framebridge.conf` (emulator: adb push, Android started for it if needed; direct
+  mode: the file in AXRB's runtime folder); an empty value removes a key.
+
+Per game (AXRB 1.0.4 emulator, Monado simulated HMD at 72 Hz, FramePort's PC build; Windows 11, RTX 4080 SUPER):
+
+| Game | Build / settings | Furthest | Frame rate / time | Blocker |
+|---|---|---|---|---|
+| Lucky's Tale 1.0.55 (Unity 2019.4 + Oculus XR Plugin, GLES) | PC build + `frame.unity_multipass`, `scale=0.5`, adb route | **title scene drawn in both eyes** (Monado window captured) | 30.5-30.8 fps, image-send 14.5 ms | none headless; needs the headset (picture through SteamVR at its resolution, controllers) |
+| Accounting+ 1.24.35 (Unity 2017.4 built-in Oculus, GLES) | PC build (`frame.unity_oculus_check`), `projection_only`, old-SDK dialog off | **stance selection screen drawn in both eyes** | 10 fps, image-send 82 ms: its OVRPlugin makes 896×1024 eye buffers whatever FrameBridge's scale/max say | its quads (OVROverlay) are dropped by `projection_only` (AXRB rejects every multi-layer GLES frame with -2); eye size only shrinks with the PC runtime's resolution |
+| Path of the Warrior 21.11.10 (VrApi-direct GLES, own engine; from the `PATCHED/` copy) | VrApi bridge + GL shim (timer-query stand-ins) | VR session FOCUSED, 72 fps of empty frames, no crash in 150 s | – | under `--sim` only: Monado's simulated HMD reports position valid but not tracked, AXRB's host then never sets its LOCAL origin (`local_origin_flags` 0), so `xrLocateSpace(VIEW, LOCAL)` has no flags and the bridge's `EnterVrMode` gives up after 30 s ("no tracked head pose before deadline"). Before the stand-ins: SIGSEGV at pc 0 in `EgHalGrTimestampQueryGL` (NULL `glad_glGenQueriesEXT`). Needs a real headset run |
+| BattleSisters 1.2.4 (Unity 2019.4 built-in VR, GLES) | PC build (ovrpshim frame loop), `scale=0.5` | OpenXR session, 3 frames submitted (448×512), then UnityMain and the render thread both wait in futexes (debuggerd stacks) | – | hang after the first frames, not diagnosed yet (guest stacks are only translator frames) |
+
+`--sim` notes: AXRB's opt-in host capture (`AXRB_CAPTURE_PREFIX`) only starts at sequence 2000 in 1.0.4 (hard-coded;
+`AXRB_CAPTURE_FIRST_SEQUENCE` isn't read), which GLES games at 10-30 fps don't reach in a test: use the Monado
+window captures and FrameBridge `snapshot=N`. AXRB's guest log only keeps warnings plus AXRB's own tags: read
+`adb logcat -d` for FrameBridge/OVRPlugin lines. `debuggerd -b <pid>` works from `adb shell` (stacks).
 
 ## Open (needs the owner + a headset)
 
