@@ -313,6 +313,11 @@ def register(core):
                         match = re.search(r"\bstate\s*:\s*(ready|install_available)\b", line, re.I)
                         if match:
                             state = match[1].lower()
+                        # Meta's PackageManager lists every registered package at start ("Currently installed
+                        # package: <name>, version code: N"); the "state:" line only comes later (app tracker / sign-in)
+                        elif state == "timeout" and re.search(r"Currently installed package:\s*" + re.escape(app) + r"\s*,",
+                                                              line):
+                            state = "installed"
                 if state != "timeout" or (proc is not None and proc.poll() is not None):
                     break
                 time.sleep(1)

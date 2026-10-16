@@ -224,6 +224,6 @@ def install(frame, reporter: Reporter, *, from_library: str | None = None, folde
     if runtime_check:
         result["checks"] = dict(result.get("checks") or {},
                                 **frame.agent("fex_runtime_state", app=info["app"], timeout=125))
-        reporter.check("Meta library state", result["checks"].get("runtime_state") == "ready",
+        reporter.check("Meta library state", result["checks"].get("runtime_state") in ("ready", "installed"),
                        result["checks"].get("runtime_state", "unknown"))
     return result

@@ -396,3 +396,20 @@ def test_large_inventory_sent_to_helper_on_stdin(monkeypatch, tmp_path):
     agent.fex_helper("prepare_local", {"files": {"x": "x" * 200000}})
     assert received[0][0][-1] == "prepare_local"
     assert len(received[0][1]["input"]) > 200000
+
+
+def test_runtime_state_installed_from_package_manager_line(fx, monkeypatch):
+    """The PackageManager start-up listing (seen on the Frame) counts as registered when no state line comes."""
+    probe = fx.COMMANDS["runtime_state"]
+    sub = probe.__globals__["subprocess"]
+    log = Path(fx.USER_DIR) / "AppData/Local/Oculus/Service_123.txt"
+    log.parent.mkdir(parents=True)
+    log.write_text("")
+
+    def run(argv, **kwargs):
+        with log.open("a") as f:
+            f.write("15/10 20:37:03.294 [ 404] {INFO} [PackageManager] Currently installed package: demo-other, version code: 1\n"
+                    "15/10 20:37:03.294 [ 404] {INFO} [PackageManager] Currently installed package: demo, version code: 1\n")
+        return types.SimpleNamespace(returncode=0)
+    monkeypatch.setattr(sub, "run", run)
+    assert probe({"app": "demo"})["runtime_state"] == "installed"
