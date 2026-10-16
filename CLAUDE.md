@@ -610,6 +610,237 @@ Toy Master doesn't request a model after that (it uses its own), so the glb load
 **Multiview programs on flat framebuffers (#77):** Mesa drops num_views=2 draws on single-view FBOs → `frame.gl_multiview_fbo` (`native/glmv` = `libfpglmv.so`, analysis `gl_multiview_libs`); headset-verified with Doom3Quest. → docs/DEVICE_NOTES.md#multiview-programs-on-flat-framebuffers-doom3quest
 **BlazeRush (#57):** `frame.blazerush` (1.0.349 only), GL shim `gl_int_attribs` / `gl_highp_markers`, saved VrApi FOV (`files/framebridge-vrapi-fov.txt`), `device.config_sync` (catalog `config_sync`); launch tests treat an end after the headless deadline as a pass (triage `headless_end`). → docs/DEVICE_NOTES.md#blazerush
 **Session triage:** real play sessions are triaged too: agent `last_play` / `session_log` (`<anchor>/plays.log`), `pipeline.sessions_due` / `triage_session` = `validate/session.analyze` (incl. `space-warp-used`, `gpu-hang`, `slow-frames`, `focus-dips`) → library `last_session` → game page "Last session"; `apply_suggestions_live`; CLI `frameport session <pkg> [--apply]`; pac_hints stays triage-only. → docs/DEVICE_NOTES.md#session-triage
+**Start activity / QuestCraft / ITR2 pop-in (2026-10-05):** WiiCompiled's VR part (`QuestActivity`, SDL, process `:game`) stays behind Lepton's flat window when the launcher is shown (`device.text_input_window`). `frame.start_activity` (opt-in; analysis `extra.vr_activity` = the original APK's activity with Meta's VR category when it isn't the launcher) gives that activity's filter LAUNCHER and every other LAUNCHER becomes INFO, per element (`axml.set_start_activity`); Lepton's own `apk-info-extractor --print-activity-name` (on the Frame under Lepton/liblepton/apk_extractor) then answers QuestActivity. **OVRPort gives every MAIN activity LAUNCHER + VR categories**, so the VR activity must come from the original APK's analysis, not the converted manifest. Lepton has no activity override (`APP_ACTIVITY` is reset when app_metadata.sh is sourced). QuestCraft reaches Minecraft 1.21.5 (Fabric, Vivecraft, Sodium; LTW "Large Thin Wrapper" GL 3.0 on the Frame's Zink) and stops at `OpenGL error 1282` in `WindowFramebuffer` createTexture (Minecraft's crash report in `files/instances/1.21.5/crash-reports/`, Pojlib's `files/latestlog.txt`); the vrclient SIGSEGV / "pthread_mutex_lock called on a destroyed mutex" afterwards is only the shutdown (Unity's render thread still in vrclient while the instance is destroyed). ITR2 "models popping in and out" in game: Unreal reads user config from **internal** storage (`lepton-data/internal/<pkg>/files/UnrealGame/<Project>/<Project>/Saved/Config/Android/Engine.ini`, not external); `r.AllowOcclusionQueries=0` there broke its menus (removed again). Vulkan shim `vk_query_slots` (two slots per occlusion query) never saw ITR2 create an occlusion query pool, and the run with it crashed (Unreal RenderThread SIGSEGV, caught by sentry-native: no tombstone; the backtrace is in `cache/sentry/*/.sentry-native/*.run/*.envelope` with module offsets) - left off. Next suspect: Unreal 5 mobile HZB occlusion reading depth stored with Valve's FDM injection layer; test = launcher `VK_INSTANCE_LAYERS=''` (Lepton then loads neither VALVE_rpo nor VALVE_fdm_injection, Fossilize still). QuestCraft: LTW overrides glGetError and returns 0 with `LIBGL_NOERROR` set; Lepton passes `LEPTON_ENV_<NAME>` to the app as `<NAME>`, so catalog `lepton_env: {LEPTON_ENV_LIBGL_NOERROR: '1'}` gets Minecraft past the GL error 1282; then black picture (see the catalog entry). FrameBridge logs `new layer` once per layer type per process and projection views only for the first frames, so a second session in the same process (Vivecraft after Unity) needs `layer_debug=1`.
+**Vulkan validation / ITR2 solved (2026-10-05):** Khronos' validation layer can't come from Lepton (its layer dir is in the read-only guest image; the Linux copies on the Frame are glibc) and a global `debug.vulkan.layers` property (via the LEPTON_GFXRECON_FP_PROPS trick) kills the container at boot. Working recipe: bundle `libVkLayer_khronos_validation.so` (Khronos android-binaries release, arm64-v8a, stored uncompressed) into a test APK re-signed with the game's key (`apk.sign.sign`), install with `frameport install <pkg> --apk`, and set the Vulkan shim's `vk_validation=1` (it adds the layer at vkCreateInstance; findings under the logcat tag VALIDATION in launch.log, each message ID capped at 10). ITR2's flicker + windows behind models = Unreal's Qualcomm shader-resolve subpasses with a depth resolve of a single-sampled depth attachment (VUID-04908/-03179); `vk_spec_fixes=1` drops that resolve (its TRANSFER_DST half never applies to ITR2: the main depth is transient). Valve's VALVE_rpo layer removed ITR2's fog (catalog `lepton_env: VK_INSTANCE_LAYERS: VK_LAYER_VALVE_fdm_injection`). `r.ViewDistanceScale=2` in the internal Saved/Config/Android/Engine.ini only exists on the owner's Frame (the catalog can't write internal storage yet). Launch tests: Lepton prints a transient "is not a running context" on the first start after an APK change (agent v54 `not_started` waits 30 s for "Boot complete!").
+**GitHub #38/#39 (2026-10-05):** PowerWash Simulator stuck at "Waiting.." on a reporter's Frame = Unity sized the right-eye image rect past its swapchain (rect 268+1656 on a 1920-wide swapchain; the runtime's recommended size differs per Frame) and SteamVR rejected every frame (`xrEndFrame failed -25`, XR_ERROR_SWAPCHAIN_RECT_INVALID), after which the game stopped calling xrEndFrame. FrameBridge `rect_clamp` (default on; sizes noted in xrCreateSwapchain; clamped layers count as swapped) keeps projection/quad rects inside their swapchain; triage `swapchain-rect-invalid`. Not reproducible on the dev Frame with `scale` (Unity's eye sizing isn't just the recommended width); no regression there (72 fps). The adapter's revision was NOT bumped (that would mark every installed game outdated): affected users rebuild. The Room VR (#38) = Unity's render thread SIGSEGV in libgallium_dri.so ~30 ms after the game recreates its eye swapchain with samples=4 (FrameBridge retries samples=1); the game's own code turns MSAA on (not OVRManager); candidate fix: hide GL_EXT_multisampled_render_to_texture (GL shim) - needs the APK to test. The launch test passed both (render thread dead / no frames): triage gap.
+**Headset round 2026-10-05 (evening):** I Am Cat's judder = repeated xrLocateViews of one display time returning
+slightly different poses → FrameBridge `pose_consistency` (owner-verified, works). Lucky's Tale freeze on touching a
+save slot = OVRPort's OpenXR dispatcher converting XR_FB_haptic_amplitude_envelope with ns read as s (GitHub #9) →
+xrshim `haptic_fix` (owner-verified); its remaining short pauses were the wear sensor ("HMD off/on" 0.5-1 s in
+`logs/eyetracking.txt`, not vrserver.txt) → **`focus_hold` is on by default with 5 s** (owner's choice; C defaults
+too). The Room VR works (`unity_no_overlay_copy`). BattleSisters (Unity 2019.4 built-in VR, no libOculusXRPlugin.so)
+flooded "outside of frame bounds" ~2400/s and hung the GPU (kernel hangcheck, zink DEVICE LOST) → the ovrpshim frame
+wait now also applies to Unity 2019 without the Oculus XR Plugin (`UnityOculusCheck.legacy_loop`). Vader Immortal
+(UE4, stuck on the loading image after the intro, GitHub #49): VRP repacks carry a Frida gadget (`libfrda.so`,
+config `hijack_responses`), but OVRPort's `patch_clean_up_frida` removes its loadLibrary call, so it never runs on
+the Frame; `frame.ovr_trace` (opt-in, `native/ovrtrace`: 1138 exported ovr_* stubs → real loader functions, logcat
+tag `fp_ovrtrace`: calls, PopMessage answers, unanswered requests every 10 s) is the next diagnostic.
+**Unity built-in VR input (2026-10-05):** probe builds (`FRAMEPORT_INPUT_PROBE=1 frameport build …`; it logs
+trigger/grip crossings too) showed OVRPlugin returns the full Touch state for every controller mask (also Go masks);
+presses reach the games' OVRInput. Accounting+ (Il2CppDumper v6.7.46 reads its Unity 2017 metadata v24, run on Windows)
+passes stance selection (NewtonVR grip/trigger) but its motion warning waits for `Input.GetMouseButtonDown(0/1)`,
+which Lepton never delivers (no focused Android window) → ovrpshim registers its own
+`UnityEngine.Input::GetMouseButtonDown(System.Int32)` icall (il2cpp_add_internal_call, after Unity's: resolve first)
+that adds a click in the frame a Touch trigger or A/B/X/Y is newly pressed (`unity_oculus_check` revision 3).
+BattleSisters (Unity 2019 InputSystem/XR InputDevices via `VrHandInput`): libunity's Oculus module (OVRPlugin
+function table: a global pointer at 0x16b57c0 in this build, slots filled by name, e.g. +0x160 GetControllerState,
++0x168 State2, +0xe8 GetNodePresent) only reports controllers when `strncmp(deviceModel, "Oculus", 6) == 0` (next to
+the Go check `deviceModel == "Oculus Pacific"`); Lepton's model is "Valve Lepton" → Go/unknown → only Go masks polled,
+buttons dead. `unity_oculus_check` revision 4 (`oculus_model_checks`, Unity 2019 only) turns the 17 compares' length
+into 0 (`orr w2, wzr, #6` → `mov w2, #0` after the adrp/add of the "Oculus" literal; the string stays: it is also
+Unity's VR device name). Device result: libunity now polls `ovrp_GetControllerState(0x3)` (Touch); owner-confirmed
+2026-10-06: buttons work. Its first controller vibration then hit OVRPort's haptic-envelope bug (11 GB, OOM kill) →
+`haptic_fix` is now suggested for every game with libOVRPlugin.so (settings detect), BattleSisters works. Ruled out before: ProductName, GetNodePresent, the device-model string itself, exports.
+Accounting+ works (owner, 2026-10-06).
+**Vader Immortal (UE4, GitHub #49, 2026-10-06, headless):** stuck after the intro on an in-game image (the splash
+quad ends ~6 s in; then the game's own projection frames, 72 fps, balanced xrBeginFrame/xrEndFrame). Not the Platform
+SDK (`frame.ovr_trace`: only user + entitlement, both answered) and not the repack's Frida gadget (OVRPort's
+`patch_clean_up_frida` removes its loadLibrary). It **leaks ~430 GPU mappings (/dev/dri/renderD128) and ~20 MB a
+second** (6.5 GB + swap after 5 min, then 26 fps): page-fault stacks (perf -e page-faults, offsets resolved with the
+process maps + vrclient.so's own symbols; its text segment is at file offset + 0x4000) end in SteamVR's runtime:
+`xrBeginFrame → CSxrCompositorOpenVR::BeginFrame → SubmitExplicitTimingData → CVRCompositorSharedTextures::
+BeginGPUTimingCommandBuffer` and `xrEndFrame → CVRCompositorClient::SubmitWithArrayIndexAndTime`. Ruled out: the
+layer color scale/bias + image layout structs (FrameBridge `strip_color_bias` 1/2, diagnostic), Valve's Vulkan
+layers (VK_INSTANCE_LAYERS=""), array swapchains in general (Lucky's Tale/I Am Cat flat). Kernel tracepoints aren't
+allowed for steamos. FrameBridge: `layer_debug` logs xrDestroySwapchain and per-5 s xrBeginFrame/xrEndFrame counts;
+`frame_balance` (ends an open frame before the next begin) exists but Vader never leaves one open. Next (built,
+not yet run: the Frame slept): `layer_debug` also counts xrAcquire/Wait/ReleaseSwapchainImage per 5 s (hooked only
+with layer_debug, after the other conditional hooks) to see whether Vader skips a wait or release: it doesn't (361/361/361 per 5 s).
+FrameBridge `snapshot=N` (`snapshot_gl.c`, GLES): every N s the left-eye image the game submits is read back on its
+own context and saved as `files/fb_snap_0-7.ppm` (quarter size) — headless launches show a black headset view, this
+shows what the game draws. Vader: Lucasfilm logo (an OBB mp4: video works), then its loading card (portrait + segmented
+bar) that never advances; the async loader thread sleeps and OBB reads stop (~168 MB of a 2.7 GB pak).
+**SteamVR overlay apps (agent v75, 2026-10-10):** host OpenVR overlays (VRApplication_Overlay) are composited over Lepton (Quest) games on the Frame (probe checker seen over 4XVR in the headset view, `native/vroverlay_probe`); Windows ones register through Proton's vrclient too (Temporal Reality's Windows build created its overlays; fpsVR never reaches OpenVR under Proton). Detection `analysis/vroverlay.py` (bundled `.vrmanifest` with `is_dashboard_overlay`, else OpenVR + IVROverlay + self-registration markers, engine Other; Rift fingerprint `RIFT_ANALYSIS`), patch `pcvr.vr_overlay` (param autostart), Linux entry fields `vr_overlay`/`vr_overlay_autostart` (game page switch); agent `register_vr_overlay`/`unregister_vr_overlay`/`launch_vr_overlay` (IVRApplications via ctypes, live; manifest `<anchor>/frameport-overlay.vrmanifest`, the app's own key, binary = launch.sh). **SteamVR on the Frame reads only `binary_path_linux_arm`** (binary_path_linux alone is skipped). Overlay apps: no launch test, no Linux Steam-parent watchdog (`FRAMEPORT_OVERLAY`), not a "running game". A Steam overlay-app shortcut and a game shortcut run together. SteamVR's SetApplicationAutoLaunch didn't persist on the dev Frame (the watch never started by itself) → **agent v76: FramePort's own autostart**: the deployment's `overlay.autostart` is the source of truth; `ensure_host_fixes` (`ensure_overlay_service`) keeps the user service `frameport-vr-overlays.service` (`_vr_overlay_watch`, 5 s polls of the known vrserver's /proc stat) only while an overlay app has autostart on (register/unregister, uninstall, purge and the kill switch `~/.local/share/frameport/vr-overlays.disabled` / `FRAMEPORT_NO_OVERLAY_AUTOSTART` update it); a new vrserver (pid + start time, kept in `~/.cache/frameport-vr-overlays.json` across agent updates) → child `_vr_overlay_round`: wait for IVRApplications, 15 s grace, `launch_vr_overlay` for apps not running (folder process or GetApplicationProcessId); log `~/.local/share/frameport/vr-overlays.log`. Dev Frame: adopted the running vrserver, skipped the already running watch; a start after a real SteamVR start/boot is not yet seen. Details: docs/FRAME_RUNTIME.md "Overlay apps".
+**Vader's leak solved / AC Nexus flips (2026-10-14):** Vader Immortal leaves GL errors pending on its context; SteamVR's GL interop (`openxr_graphics_gl_openvr.cpp`, `xrclient_<pkg>.txt` in Steam's logs: `SXR_GL_CHECK: error:0x502 ... glGenTextures`) takes the stale error as its own failure once, and from then on `CVRCompositorSharedTextures::BeginCommandBuffer` allocates a command buffer every frame (perf page-fault stacks; ~430 renderD128 mappings + 22 MB/s). Adapter `gl_error_clear` (GLES, catalog on for Vader ep1-3) clears them before xrCreateSwapchain/xrBeginFrame/xrEndFrame: flat memory, no SXR_GL_CHECK (headless). The per-game `xrclient_<pkg>.txt` logs are worth reading for runtime errors. The Frame's runtime caps swapchains per session (XR_ERROR_LIMIT_REACHED from ~15; AC Nexus asks for more): flip emulation now turns quads upright in place (scratch VkImage, once per acquire; transfer usage added to single-layer colour swapchains) instead of a shadow swapchain per quad, which ran into the cap (#138). Headless sessions don't draw AC Nexus's panels (adapter `flip_dump` saves before/after images of flipped quads, for headset runs).
+**Mixed reality: scanned rooms (agent v92, 2026-10-16, branch mr-scene; docs/mr/):** Quest MR games read the room
+through Meta's scene APIs; the Frame offers none, and Valve's chaperone is no room (2D outline raised to 2.43 m, often
+the default 1 m circle -> the Android runtime's STAGE rect falls back to 1x1 m; XRService's plane detection is
+horizontal-only, its persistent map sparse ORB, its XRIPC single-client; cameras are XRService's alone,
+IVRTrackedCamera gives no frames). **The passthrough's RoomView 3D depth mesh is readable** (docs/mr/PHASE0.md:
+IVRBlockQueue_005 `/xrservice/roomview3d/meshData|meshLayout`, metadata through the C++ `IVRPaths_002` on the block
+handle, `meshIsUpToDate` on the queue handle; 132x128 fan, ~30/s; raw->standing moves during a session -> convert
+with the final one), so FramePort scans rooms itself: agent `room_capture` (Background/Overlay OpenVR app, prompts =
+artifacts/roomscan/*.png via IVROverlay_028 slots 1/3/20/22/35/43/44/63, `scripts/mr/render_prompts.py`) -> `.fprs`
+dump -> `fp_roomscan` (native/roomscan, freestanding, offline) -> `room.txt` + `room-mesh.bin`
+(docs/mr/ROOM_FORMAT.md; outline = positive shoelace in x-z, wall inward normal (-dz, dx)) in
+`~/.local/share/frameport/rooms/<universe>/`; launch.sh copies it next to settings.conf (`_room_sync`, games with
+`scene_emul`); FrameBridge (`scene_room.c/scene_meta.c/scene_anchors.c`) serves N walls, volumes (BOUNDED_3D),
+planes, GLOBAL_MESH (XR_META_spatial_entity_mesh), XR_META discovery/persistence (newer Meta SDKs and MRUK), anchors
+saved in `files/framebridge-anchors.txt`; all through xrshim (OVRPort's dispatcher drops unknown META calls).
+`scene_emul` is now suggested for every USE_SCENE/USE_ANCHOR_API game (migration `scene_emul_all`; NOPE and Pinball
+FX had none). PC: Frame page "Room" card, `frameport frame room scan|status|from-boundary|import|export|build|show`.
+Real data (owner's room, 2026-10-16): floor at 0, table surfaces, orthogonal walls found; the ceiling needs "look up".
+**Unreal's self-restart (agent v90, 2026-10-13):** UE 4.21+ restarts the app once after its first-run shader
+precompile ("optimizing" screen; `r.ProgramBinaryCache.RestartAndroidAfterPrecompile`): it starts its own LAUNCHER
+activity and calls System.exit(0); Lepton ends the container with the first process (the restarted one with it).
+Skipping `AndroidThunkJava_RestartApplication` or the cvar = 0 (accepted via UE4CommandLine.txt `-ini:`) left Sports
+Scramble on that level for good. launch.sh (RESTART_BLOCK, `upgrade_launchers` adds it) starts Lepton once more when
+`_restart_requested` sees the app's own LAUNCHER start (system log, uid >= 10000) <= 5 s before its exit; first run
+kept as `launch-before-restart.log`; `FRAMEPORT_NO_RESTART=1` off. Owner-verified with Sports Scramble's first start (2026-10-13).
+**xrWaitFrame runs ahead (Journey of the Gods, 2026-10-14, owner-verified):** with real frames (headset on) the
+Frame's runtime sometimes returns from xrWaitFrame at once with a display time less than one refresh after the frame
+just submitted, and then rejects the second submission for that refresh (`VRCompositorError_AlreadySubmitted` in
+Steam's `logs/xrclient_<pkg>.txt`; FrameBridge pacing above the display rate). VrApi games that render faster than
+the display ran ahead (~120 submits/s at 90 Hz) and the scene slid and snapped back. The VrApi bridge re-waits when
+the new display time is under half a period after the last submitted one (`pacing 2s:` counters). Headless runs only
+submit empty frames and never show it. Lepton's logcat mirror also missed the whole verifying session (launch.log =
+Lepton's own lines only): the keeper now catches a silent mirror too (agent v91).
+**Lepton's logcat mirror dies (agent v67, 2026-10-09; v91 2026-10-14):** Lepton's mirror (`podman exec -it <container> logcat -v threadtime,color`) fails three ways: `logcat: Unexpected EOF!` right after the game starts, `Logcat read failure`, or running and writing nothing at all (Lepton 3.0.5: seen twice on 2026-10-14, once in the owner's session, once headless). launch.sh's `_logcat_keeper` reads `podman exec <container> logcat -v threadtime -T <epoch>` itself into launch.log after a failure line or 20 s without a logcat line (from the launcher's start when the mirror never wrote, else from just before its last line), restarts it from where it ended (≤5), stops it when Lepton's coloured lines come back, sets the container's log buffer to 16 MiB (`logcat -G`), and logs every decision to `<base>/logcat-keeper.log`. Checked on the dev Frame: a mirror killed mid-game (hand-over without a gap) and a silent mirror (the whole session recovered).
+**Double launch (agent v57, 2026-10-06):** a second Play while Lepton still boots (~10 s with nothing to see) made
+the second Lepton stop the first one's container ("Waiting for steamlaunch-<appid> (PID …) to exit", exit 137
+"(starting)", "Clearing baked app data due to early exit") and both died (Vader, BattleSisters). launch.sh now takes
+`flock` on `<base>/.launch.lock` (fd 9, inherited by Lepton; the watchdog and dashboard helpers close it with
+`9>&-`); a second launch exits 0 and logs to `<base>/launch-dup.log`. `upgrade_launchers` adds it to existing
+launchers. Verified on the device (second launch during boot: ignored, the first kept running). Vader on its loading
+card ignores input too (owner pressed/held every button: presses reach the runtime, the card never changes).
+**Issue triage round (2026-10-06, owner's headset):** vibration in OVRPlugin games = 2 s vibrations updated per frame and
+stopped with amplitude 0; FrameBridge turns amplitude 0 into xrStopHapticFeedback (else each buzz ran 2 s), haptic_fix
+uses the envelope RMS (was its peak), per-game `haptic_scale` → Creed/The Boys/Jurassic World fine. Lambda1VR (TBXR):
+loader named by Build.MANUFACTURER (`frame.tbxr_vendor`), no graphics extension enabled (FrameBridge adds
+XR_KHR_opengl_es_enable + asks for the requirements on -50), always multisampled render-to-texture (GL shim gives
+single-sampled stand-ins when GL_EXT_multisampled_render_to_texture is hidden) + its xash/ data → works. Jurassic World:
+`frame.vrapi_stub`. Metro Awakening: contributor's vkshim fixes + hide_space_warp + no VALVE_rpo (jumping polygons like
+ITR2). Pinball FX VR: hide_space_warp (stutters). Eleven: a Meta online request fails after platform init → needs Meta
+services. Star Wars Tales: top half black + freeze after loading; ruled out: asset-file paks (never requested), Valve
+foveation (off: no change), GL errors (MESA_DEBUG=1: none), EGL_BAD_ACCESS once in OVRPlugin init (harmless); the game's
+eye image reads back black. BlazeRush: VrApi bridge exports + ovr*_ToString stubs + avatar stub get it to the menu room
+at 72 fps, full input reaches it (diagnostics `input 5s`: Touch type only, sticks 1.0, buttons, poses 0x8f), but the room
+draws no controllers and ignores input; avatar loader forced to its "Failed" path (no logged-in user) changed nothing.
+`frame.ovr_trace` can't trace Unity games (P/Invoke dlsym; nothing imports ovr_*). Headless: the VrApi bridge's 30 s
+head-pose deadline ends VR mode without a worn headset (not a game bug).
+**Lepton storage (2026-09-30):** each app's /sdcard (= /storage/emulated/0 → `<base>/lepton-data/external`) has `Movies`/`Download`/`Documents` symlinked to the Frame's `~/Videos`/`~/Downloads`/`~/Documents` (liblepton/mounting.sh, only if they exist at start); agent v24 `storage_targets` reads that mapping. Android's MediaProvider canonicalises paths to /home/steamos/... and rejects every file ("doesn't appear under [/system/media...]"), `sm list-volumes` is empty: the media index never works, apps must browse folders. Lepton installs with `adb install -g` (runtime permissions granted, MANAGE_EXTERNAL_STORAGE too). Files: `install/files.py`, `frameport frame send|storage`, GUI Files tab (formerly Frame → Send files).
+**SteamVR per-app settings (2026-09-30):** editing steamvr.vrsettings while SteamVR runs is lost; the web API (127.0.0.1:27062 /app/setsettings) needs `x-steamvr-secret`. `native/vrsettings` = `fp_vrsettings.exe` (freestanding, OpenVR `FnTable:IVRSettings_003` as a Utility app, loads SteamVR's bin/win64/openvr_api.dll) sets them live and SteamVR persists them: section `steam.app.<shortcut appid>`, keys `preferredRefreshRate` (float) and `motionSmoothingOverride` (0 global, 1 on, 2 off, 3 always). Steam Link (vrlink) lists the Frame's rates 72/80/90/96/108/120/144 in vrserver.txt and follows the per-app preference ("host preferred N Hz"; whether the key is honoured is unverified in-headset yet). Judder metric: vrcompositor.txt session summary dropped + "Timed out. N total" (Stormland: 0 dropped but 313 timeouts in 2 min); fpsVR (`%LOCALAPPDATA%\fpsVR\*.json`, 0.1 ms histograms) gives p99 CPU/GPU ms. `pcvr.steamvr_tuning` (default on, PC only) applies on Play: highest rate whose budget ≥ p99×1.05, at least one step down, smoothing on.
+
+**Language packs (merged from PR #20, 2026-10-04):** overport's `libovrplatformloader.so` is a dispatcher that `dlopen`s Meta's own loader (`libovrplatformloader_meta.so` / `_meta_q1.so`, also `libpxrplatformloader.so`) and keeps its own message queue; `ovr_LanguagePack_GetCurrent/SetCurrent` are 8-byte `return 0` stubs in it, `ovr_AssetFile_GetList` forwards to Meta's loader. `frame.langpacks` (opt-in, `native/langpack`) serves `<tag>.lang` files from the game's data; `elf.hide_exports` marks the loader's exports STB_LOCAL (bionic and glibc only match GLOBAL/WEAK; verified for glibc, bionic's `is_symbol_global_and_defined` is from memory). `libfp_langpack.so` is built here (`python native/build.py --only langpack`) and committed. Owner-verified 2026-10-04: Deadpool VR with only `en.lang` and the patch on plays English dialogue and runs normally (headless launch tests show 2-6 fps while it loads: not a regression sign). A dispatcher answer that arrives after we answered the timed-out GetList is dropped (one answer per request); games already in a library get `lang_packs` filled after an app update (`library._refresh_data_fields`). The library logs to logcat under the tag `fp_langpack` (dirs looked in, packs found, every language-pack call), so it shows up in the game's `launch.log`; an `ovr_AssetFile_GetList` the dispatcher leaves unanswered for 1.5 s is answered with our packs alone. Deadpool VR (Unreal) accepts a pack only when its `Metadata` equals the game's own version string (`ULanguagePacksSubsystem` compares it with `%s.%s.%s.%s.%s` built from the build info, e.g. `1.0.40.356975.Quest` = versionName; found by disassembling `libUE4.so`): the patch writes the APK's versionName into the library (`@FPMETA@` slot, `with_metadata`), `FRAMEPORT_LANGPACK_META` overrides it. Deadpool VR (2026-10-04, headset): German became selectable with that Metadata, but dialogue stayed silent (even English once reported as a pack) while the path was spelled `/sdcard/Android/obb/<pkg>/x.lang`; with the `/storage/emulated/0/Android/obb/<pkg>/x.lang` spelling (Unreal's own, now listed first in `scan_dirs`) German dialogue plays. `FRAMEPORT_LANGPACK_SKIP=<tags>` or a file `fp_langpack_skip` in the obb folder leaves packs out of the list (experiments).
+
+**Cube swapchains (GitHub #107, 2026-10-09):** the Frame's runtime refuses `faceCount=6` swapchains (-2,
+XR_ERROR_RUNTIME_FAILURE); OVRPlugin ignores that ("CreateSwapchain for eye 0: 0x0, 0 stages") and crashes in
+ovrp_EndFrame4 (memset). FrameBridge `cube_standin` (default on, `native/adapter/cube_standin.c`) serves a refused cube
+swapchain as one GL cube-map texture in the app's context (GLES only) and drops its layers. Verified headless with
+Budget Cuts Ultimate (2048² sRGB, 12 mips; runs on at ~70 fps); what the cube layer showed is simply missing.
+**Hardware video decoding (PR #96, PR #128 by Lucas-Mathieu, adapted 2026-10-10, agent v71):** `native/hevc` = one
+OMX plugin `OMX.frameport.{avc,hevc,vp9}.decoder` (FFmpeg v4l2m2m on Iris /dev/video-dec0, FFmpeg software decoders as
+fallback inside the component, Vulkan copy for big native surfaces). The connection installs it once per Frame
+(`ensure_video_codec` → agent `video_codec_status`/`install_video_codec`: `~/.local/share/frameport/video-codec/versions/
+<manifest sha>` + `current` symlink). A Frame keeps the same or a newer `revision` (no flip-flop between PCs) → **bump
+`revision` in native/hevc/build.py with every artifact change**; a failed install isn't retried during the connection.
+Per game: only launchers of games whose recipe has `frame.hw_video_decode` (install stage, no APK change; suggested
+from analysis `media_codec`, ANALYSIS_VERSION 8; deployment.json `hw_video_decode`) get the codec line → the Podman
+wrapper (native/hevc/podman.py) mounts the plugin into that container (merged media_codecs.xml in
+$XDG_RUNTIME_DIR/frameport-video). Off for every game: Settings → Installing (library `video.hw_decode` → agent
+`video_codec_switch` = video-codec/disabled); one game: `FRAMEPORT_NO_HW_VIDEO=1 %command%`. `upgrade_launchers`
+converts agent ≤70 launchers (Batman's `<base>/frameport-codec` → keeps the line, folder then removed). Batman: catalog
++ migration `batman_video_patches` (`frame.hw_video_decode` + hidden adapter setting `surface_native`). Iris: 8K
+refused (ENOMEM) while any other decoder session is open; SteamVR's vrlinkrunthread holds one ~12 s at game start →
+refused opens retry until 20 s after the plugin loaded (else 2 s), then software; VP9 7680x3840 never returned a
+picture → VP9 ≤4096x2304; hidden VP9 frames come back as empty capture buffers (bytesused 0, no LAST):
+FFmpeg's wrapper ended the EOS drain at the first one (two-pass VP9 lost its last ~25 frames) → build.py requeues
+them (codec revision 8; drain ends at LAST, or 1 s after a skipped empty buffer; dev Frame 2026-10-10: 600/600 =
+OMX.google.vp9 Y hashes). Rebuilds are deterministic (ext4 + NTFS path
+with spaces, two NDK copies → same; rev 8 141de01f…; PR #128's own sources → its 27a2d749…). Not yet run on the device.
+**Vulkan shader dump (GitHub #140, 2026-10-10):** adapter `vk_shader_dump=1` (Vulkan shim, `native/vkshim/shader_dump.h`;
+applies where vk_sanitize can: Unreal/Other arm64) writes each distinct SPIR-V module once to
+`files/fp_vk_shaders/<size>_<sha256>.spv` (tmp + rename) and one `index.txt` line per vkCreateShaderModule (`<seq> <ms>
+<unix ms> <name> new|known|again|failed`, O_APPEND) to find the module behind a GPU hang. Agent v72 `collect_diag`
+returns `shaders` (newest modules of fp_vk_shaders + fp_spirv, ≤4 MB each, base64) → bundle
+`games/<pkg>/target/shaders/`. Triage `gpu-hang` suggests both dumps; `triage.graphics_api` (FrameBridge's
+xrCreateSwapchain formats: <0x1000 Vulkan, else GL) keeps only the session's API's (`API_ONLY`). Host-tested only.
+Agent v74: a reporter's hang came ~10 s after the last new module, so the culprit wasn't among the newest written →
+with an index naming modules, `shader_dumps` sends every module of the index's **newest session** (after the last
+`# start`), deduplicated, last used first, each ≤4 MB, ≤30 MB in all (`session` = how many it names) + that session's
+index lines; no index (fp_spirv) = the old newest-by-mtime 4 MB. One JSON line (~40 MB base64) over the SSH channel
+is read whole by `Frame.agent` (fine at that size); `_Writer.fit` drops the least recently used modules last, after
+cutting logs, to stay under the 24 MB zip limit.
+**Unreal OBB check (GitHub #159, 2026-10-10):** Epic's DownloaderActivity checks OBB name+size (OBBData), then with `bVerifyOBBOnStartUp=true` CRCs the whole OBB; its screens are invisible in Lepton (stuck at `Displayed …/.DownloaderActivity`, triage `unreal-obb-check-stuck`) → `frame.unreal_skip_obb_check` (analysis `unreal_verify_obb`, ANALYSIS_VERSION 11) flips the manifest boolean (`axml.set_meta_data_bool`); skips only the CRC pass. Host-tested only.
+**Issue round 2026-10-12 (agent v83):** Lepton pastes STEAM_COMPAT_DATA_PATH unquoted into `sh -c "ln -s …/internal/<pkg>
+/data/data/<pkg>"` (mounting.sh): a game on a card named "Steam Frame 512g" got no internal storage (no saves/prefs;
+Beyond Sandbox's EOS then looped `createKeychain→resetKeychain` forever, 1.85 GB log). Quest launchers with an unsafe
+path now `ln -sfn <base> ~/.local/share/frameport/lepton-paths/<pkg>` at every start and give Lepton that path
+(`app_dir_lines`/`set_app_dir`/`launcher_base`; upgrade_launchers converts; deployment.json keeps the real base).
+Verified on the device with a spaced copy of Stremio (old: the `ln` error; new: /data/data link, shared_prefs
+writable). `frame.eos_keychain_loop` (opt-in, triage `eos-keychain-loop`) returns from EOSSDK.resetKeychain. Wander
+0.3570 (Unity 6.5, Firebase, Gecko) ran out of bionic's 128 pthread keys → `frame.unity_tls_key_pool` (Klownicle's
+approach, #198: libunity's 4 key imports renamed `fp_tkey_*` via `elf.rename_imports`, `libfp_tkeys.so` pools
+destructor-less keys behind one real key); device: past Firestore, 72 fps. Cpp2IL releases can't read metadata v107
+(Unity 6.5) → `tools/cpp2il.py` falls back to the development CI build (nightly.link) on that error. Vermillion's canvas
+is an OVROverlay quad (drawn above the hand) → `frame.vermillion_scene_canvas` (PaintableMesh getters → false;
+installed build checked, 72 fps headless; headset not yet). Linux apps: `desktop_icon` switch, a deleted desktop copy
+stays deleted (#212). Findings: OLAR (#201) RHIThread null deref in libUnreal (`ldr x8,[x19,#792]`, x19=0) not fixed by
+hide_space_warp / vk_hide_fdm / no Valve layers; FNAF HW (#135) "freeze" = first-start GL program-binary-cache compile
+on Zink (threads busy in zink/disk cache), not a hang; VR4 (#199) reporter's patch.203 OBB truncated. Upload benchmark
+(`scripts/upload_bench.py`, #242): home Wi-Fi caps every method at ~11 MB/s; paramiko uses ~3x OpenSSH's CPU; Windows
+OpenSSH refuses FramePort's key file (ACL "bad permissions") until its permissions are tightened.
+**OpenSSH uploads (2026-10-15, #324/#242):** sftp escapes `* ? [` inside double quotes itself (and undoes it for
+put's destination), so `native_upload.quote` escapes only `\\`/`"`; Win32 sftp turns every local backslash into `/`
+(escapes too) → local paths go as `C:/…`. Logins: `Frame.auth` = the attempt that worked (app_key / user_key = a key
+file from Settings → Installing → SSH keys, library `ssh.extra_keys`, CLI `frame ssh-keys` / agent / password).
+OpenSSH strict (FramePort + Settings keys, IdentitiesOnly) unless auth was "agent"; a refused strict login retries
+relaxed (+ private copies of ~/.ssh/id_{rsa,dsa,ecdsa,ed25519}: OpenSSH skips its defaults once any -i is given, + the
+agent); `-v` key lines go into the error. FramePort doesn't add its key to the Frame for this. Windows-tested.
+**Meta user id (GitHub #182, 2026-10-11):** OVRPort's platform loader (runtimes 3.4.3-23204ea and -aa54c3f) answers
+`ovr_GetLoggedInUserID` (and two other callers) without a Meta account with a made-up id from a helper (`stp; mov x29,
+sp; bl random; …; mov/movk x9 = 0x53444835ec580000 (6e18); add x0, x8, x9; ldp; ret`), kept only in memory → a new id
+every start; Walkabout Mini Golf files saves under `Profiles/Oculus/<id>/` and lost all progress. `frame.ovr_stable_user`
+(default_on, detect = the game has libovrplatformloader.so) rewrites the helper to `mov x0, <6e18 + 32 bits of
+sha256(package, keystore)>; ret`: stable per game and per user (keystores are personal), so online games never see two
+FramePort users as one. Found in every PATCHED build checked. Host-tested only; upstream candidate.
+**Vivox API 31 (GitHub #101, 2026-10-09):** newer Vivox builds (Green Hell VR) call Android 12 AudioManager
+communication-device methods from `com.vivox.sdk.AudioChangeListener` with no SDK check → NoSuchMethodError on Lepton's
+Android 11. `frame.vivox_audio_route` (analysis `vivox_api31`, ANALYSIS_VERSION 4) makes every such method return at
+once (`Dex.return_early`: return-void / `const/4 v0,0; return v0`; nopping the invoke would leave a move-result the
+verifier rejects). Older Vivox (Eleven Table Tennis, BattleSisters) lacks that code and isn't matched. Verified
+headless: Vivox initialises, 150 s at ~65-70 fps.
+**Steam Input gamepad for 2D apps (GitHub #162, agent v72, 2026-10-10):** Lepton's Android only has the Wayland seat's `wayland_touch/keyboard/pointer`. Steam makes its virtual pad (uinput, `/devices/virtual/input`, 28de:11ff, "Microsoft X-Box 360 pad N", ACL for steamos) only while the Frame's controllers are on (controller.txt "Steam Controller reserving XInput slot 0"; gone when they sleep), also with no game running; steamos-manager's 28de:0000 keys device isn't a pad (no BTN_SOUTH). Lepton's container root (system_server too) = steamos (`keep-id:uid=0`), so a bind-mounted `/dev/input/eventN` opens. Opt-in `device.steam_gamepad` (vr_kind none; suggested for `android.hardware.gamepad`/`LEANBACK_LAUNCHER`, analysis `gamepad`, ANALYSIS_VERSION 9): deployment.json `steam_gamepad` → launcher `GAMEPAD_LINE` (after the codec line: exports FRAMEPORT_GAMEPAD + LEPTON_ENV_SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD, puts `agent/bin` first on PATH) → `PODMAN_WRAPPER` (written by ensure_host_fixes; non-`run` calls go straight on; `run` imports the agent's `podman_run_args`; hands on to the next Podman after its own PATH entry with itself removed from PATH, so it chains to the codec wrapper either way round) adds the pads + `Vendor_28de_Product_<pid>.kl` (Xbox 360 layout). Verified headless with a uinput stand-in pad (Stremio's container: EventHub `classes=0x80000141`, our key layout, KeyEvent BUTTON_A dispatched); with Steam's real pad and a game: not yet. Pads made after the start aren't seen until the next one.
+**Multiview programs on flat framebuffers (GitHub #77, Doom3Quest, 2026-10-09, prototype):** Mesa enforces OVR_multiview's
+"program num_views == draw framebuffer views" rule (`draw_validate.c`, the draw is dropped silently); Qualcomm doesn't.
+Doom3Quest compiles every VS with `layout(num_views=2) in;` and draws its HUD/PDA into 2D-texture FBOs → black. Opt-in
+`frame.gl_multiview_fbo` (analysis `gl_multiview_libs`, ANALYSIS_VERSION 6; own-engine GLES only): `native/glmv` =
+`libfpglmv.so` (12 chars = "libGLESv3.so": libdoom3.so's one `.rodata` dlopen string is rewritten in place, its qgl*
+table comes from dlsym on that handle; also first DT_NEEDED for its direct gl*/egl* imports). Such draws use a lazily
+built single-view twin (view 0, uniforms copied per draw); eglMakeCurrent resets the per-thread cache. Host-tested only
+(rewriter on all 19 Doom3Quest shaders + glmv.c against a stand-in GL, `tests/test_gl_multiview_fbo.py`); the host's
+Mesa 23.2 llvmpipe has no OVR_multiview. Headset-verified by Xandrix1987 (2026-10-09: HUD/PDA shown, no fps drop) -> in the Doom3Quest catalog recipe.
+**BlazeRush (GitHub #57, Klownicle's verified guide, 2026-10-10; FramePort's version headless-tested only):**
+`frame.blazerush` (1.0.349 only: exec-segment SHA + every word checked, offsets from PT_LOAD) NOPs the avatar-readiness
+wait (0x4b2dbc), RETs the avatar renderer (0x4b2adc), renames `cache/shader_cache` → `cache/br_shader_v1`. GL shim
+(now also exports glShaderSource/glLinkProgram/glProgramBinary/glDeleteProgram/glDraw*: pass-through unless a setting
+is on) `gl_int_attribs` (integer inputs fed via glVertexAttribPointer re-set with glVertexAttribIPointer per draw,
+reflection cached per EGL context + program, dropped on link/binary/delete) and `gl_highp_markers` (vertex shaders with
+every '|' marker: mediump→highp except on in/out/uniform lines); host test `tests/test_blazerush.py` with a stand-in
+GL. FOV: the game reads VrApi props 7/8 right after vrapi_Initialize (no session; the Frame has no
+XR_EPIC_view_configuration_fov) → the bridge saves the live FOV (also located before tracking, headless: 118.87×120.04
+on the dev Frame) in `files/framebridge-vrapi-fov.txt` and answers with it at the next start (log `FOV properties: …
+(saved by an earlier session)`). `device.config_sync` (catalog field `config_sync`, agent v78): user_config.xml
+r_3dwidth/height, r_width/height from the runtime eye size (FrameBridge logs `runtime recommended eye size`) × scale,
+written at finalize, set_settings and by launch.sh before Lepton starts (`_config_sync`). Headless runs at scale 1.7
+end in `zink: DEVICE LOST` right after the bridge's 30 s no-tracking deadline tears the session down (gpu fault at the
+teardown; not at scale 1.0): a headless-only artifact, the headset never hits that deadline. Launch tests count an exit/crash after
+such a line as a pass (triage.yaml `headless_end`, finding `headless-end`; GitHub #57 "Failed to launch" on install).
+**Session triage (agent v70, 2026-10-09):** launch tests never reach FOCUSED, so real play sessions are triaged
+too. list_installed gives each game `last_play` {start, end, test} from `<anchor>/plays.log` (launch tests write a
+`test <unix>` line first → test sessions are only marked); `session_log` returns the newest session's launch.log
+(`<base>/session.log`, ≤4 MB: head + tail + FrameBridge/crash lines between) + that session's logcat-crash.log +
+`journalctl -k` GPU lines ("kernel: …"). The GUI's connection refresh (`app._check_sessions` → `pipeline.sessions_due`,
+background thread; sessions >7 days old are skipped) runs `pipeline.triage_session` = `validate/session.analyze`
+(triage.yaml signatures incl. `space-warp-used` (info, `question:`, never auto-applied), `gpu-hang` (`report: true`)
++ computed `slow-frames` (pacing windows vs the nearest refresh rate) and `focus-dips` (FrameBridge always logs
+`focus: lost` / `focus: back after N ms`, session_fixes.c)) → library `last_session` / `last_session_checked` → game
+page "Last session" callout (Try this fix / Rebuild with this fix / Yes-No question / Report / Dismiss). Suggestions may
+be values (`adapter.scale=0.85`, `triage.split_suggestion`); adapter-only fixes are pushed live (`apply_suggestions_live`
+→ agent set_settings, like the Game settings dialog). CLI `frameport session <pkg> [--apply]`. PC VR (Proton) launchers
+log no session end, so they aren't triaged yet. pac_hints stays triage-only: a survey of all 68 dump APKs found unpaired
+PAC hints in 21 libraries of 18 games (OpenSSL's 38/40 in most UE4 libUE4.so and libEOSSDK.so, UE5 libUnreal.so ~400
+vs +2-3, libass, libopencv, …), most of them games that work, so default-on would rewrite many working builds.
 **Unresolved (as of 2026-09-28):** Arcsmith (right-eye distortion) and Time Stall (both eyes) — swap, tracking, Valve
 layers, depth, pacing ruled out. Sniper Elite VR (DEVICE LOST), Espire 1 (Mesa GL upload crash), HITMAN 3 (freedreno
 crash): use PC versions.
