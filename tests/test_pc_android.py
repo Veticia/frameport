@@ -132,6 +132,9 @@ def test_launcher_script_and_steam_arguments(tmp_path, win):
     text = axrb.launcher_text(tmp_path / "AXRB Runtime", app)
     assert "run_windows_game.ps1" in text and f"-Avd '{axrb.AVD}' -Port {axrb.PORT}" in text
     assert "@" not in text.replace("@{", "")  # every placeholder filled
+    # pixel frames (GLES) over adb reverse: Android started first so the property is set before the game connects
+    assert "setprop debug.axrb.image_transport $transport" in text and "-OwnsEmulator:$owns" in text
+    assert f"-ApiLevel {axrb.API_LEVEL} -Abi arm64-v8a" in text and "-GuestClock TscCorrected" in text
     args = axrb.launcher_args(r"C:\x\fp-axrb-run.ps1", "com.a.b", "com.a.b/.Main", 'Say "Hi" $now')
     assert '-File "C:\\x\\fp-axrb-run.ps1" -Package com.a.b -Activity com.a.b/.Main -GameName "Say Hi now"' in args
 
