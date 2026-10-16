@@ -140,3 +140,19 @@ def test_pc_launch_test_passes_the_simulator_on(tmp_path, monkeypatch, win):
     assert commands[-1].index("XR_RUNTIME_JSON") < commands[-1].index("fp-axrb-run.ps1")
     pc_android.launch_test(dep, Reporter(), seconds=1, extra_env={"FOO": "1"})
     assert commands[-1].startswith("$env:FOO = '1'; ") and "XR_RUNTIME_JSON" not in commands[-1]
+
+
+def test_running_launch_tests_save_the_simulated_headset_view(tmp_path, monkeypatch, win):
+    from frameport.targets import pc_android
+
+    shots = []
+    monkeypatch.setattr(xr_sim, "capture_exe", lambda: tmp_path / "cap.exe")
+    monkeypatch.setattr(xr_sim, "capture_dir", lambda: tmp_path / "caps")
+    monkeypatch.setattr(xr_sim, "capture", lambda out: shots.append(out) or out)
+    assert pc_android.sim_capture({}, "com.x.game", Reporter()) is None and not shots  # no simulator
+    path = pc_android.sim_capture({"XR_RUNTIME_JSON": "W:\\m.json"}, "com.x.game", Reporter())
+    assert shots == [path] and path.parent == tmp_path / "caps" and path.name.endswith("-com.x.game-headset.bmp")
+    monkeypatch.setattr(xr_sim, "capture", lambda out: (_ for _ in ()).throw(xr_sim.XrSimError("no window")))
+    assert pc_android.sim_capture({"XR_RUNTIME_JSON": "W:\\m.json"}, "com.x.game", Reporter()) is None
+    monkeypatch.setattr(xr_sim, "capture_exe", lambda: None)
+    assert pc_android.sim_capture({"XR_RUNTIME_JSON": "W:\\m.json"}, "com.x.game", Reporter()) is None
