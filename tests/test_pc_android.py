@@ -692,6 +692,9 @@ def test_backend_choice_and_flags():
     assert pc_android.choose_backend(plain, "Vulkan (libvulkan)") == "direct"
     assert pc_android.choose_backend(plain, "GLES or unknown") == "emulator"  # direct mode has no GLES renderer
     assert pc_android.choose_backend(plain, "") == "emulator"
+    # Unity boot.config's xr-vulkan-* keys are in GLES builds too (Toy Master: EGL crash in direct mode)
+    assert pc_android.choose_backend(plain, "Vulkan (Unity boot.config)") == "emulator"
+    assert pc_android.choose_backend(plain, "Vulkan (declared in manifest)") == "direct"
     chosen = Recipe("com.g", {"pc.axrb_backend": {"backend": "emulator", "translator": "digitalis"}})
     assert pc_android.choose_backend(chosen, "Vulkan (x)") == "emulator"
     assert pc_android.choose_backend(chosen, "Vulkan (x)", override="direct") == "direct"
@@ -875,6 +878,11 @@ def test_direct_mode_triage():
     assert [f.id for f in triage(crash, "EXITED", "com.game.x", kind="axrb").findings] == ["axrb-direct-guest-crash"]
     gles = "E/Unity   ( 4410): [EGL] Unable to initialize EGL display: EGL_BAD_DISPLAY\n"
     assert [f.id for f in triage(gles, "EXITED", "com.game.x", kind="axrb").findings] == ["axrb-direct-no-gles"]
+    # Toy Master (Unity 2022.3, GLES) in direct mode, 2026-10-15: Unity's own EGL message, then its SIGTRAP
+    toy = ("E/Unity( 4252): Unable to retrieve the default EGL display!\n"
+           "   17.854 82044 E/cpu: thread 4252 (UnityMain): fatal signal 5 (SIGTRAP), code -6, fault addr 278b00001092\n")
+    assert {f.id for f in triage(toy, "EXITED", "com.game.x", kind="axrb").findings} == \
+        {"axrb-direct-no-gles", "axrb-direct-guest-crash"}
     for text, want in (("E/vulkan: vulkan-1.dll is not installed: the guest has no GPU", "axrb-direct-no-vulkan"),
                        ("Direct mode is missing C:\\x\\sysroot/system/lib64.", "axrb-direct-incomplete"),
                        ("  1.0 1 E/host-fault: axrb-direct.exe + 0x1234", "axrb-direct-host-fault"),
