@@ -43,7 +43,9 @@ IL2CPP_METADATA = "assets/bin/Data/Managed/Metadata/global-metadata.dat"
 # 17: headset (the Meta headset a VR app was made for: Gear VR / Go games run through frame.a32_bridge) (2026-10)
 # 18: headset "quest" also for 32-bit apps that require 6DoF head tracking (Santa Cruz builds, e.g. Sports
 #     Scramble: Touch controllers on the a32 bridge) (2026-10)
-ANALYSIS_VERSION = 19
+# 20: unity_appui_vibrator (Unity App UI's activity uses Android 12's VibratorManager: frame.unity_appui_vibrator,
+#     GitHub #297) (2026-10)
+ANALYSIS_VERSION = 20
 
 
 # Android versions by API level (for messages); the Frame's Lepton container runs Android 11 (API 30)
@@ -242,6 +244,9 @@ def analyze(path: Path, deep: bool = True, data_bytes: int | None = None) -> Ana
         godot_clipboard = any(b"Lorg/godotengine/godot/Godot;" in d and GODOT_CLIPBOARD_CAST in d for d in dexes)
         # Vivox voice chat calling Android 12 audio-routing methods: crashes in Lepton (Android 11)
         vivox_api31 = any(b"Lcom/vivox/sdk/AudioChangeListener;" in d and b"CommunicationDevice" in d for d in dexes)
+        # Unity App UI's activity gets Android 12's VibratorManager in onCreate: crashes in Lepton (Android 11)
+        unity_appui_vibrator = any(b"Lcom/unity3d/player/appui/" in d and b"Landroid/os/VibratorManager;" in d
+                                   and b"vibrator_manager" in d for d in dexes)
         # Epic Online Services' keychain (it can retry without end when it can't write: frame.eos_keychain_loop)
         eos_keychain = any(b"Lcom/epicgames/mobile/eossdk/EOSSDK;" in d and b"resetKeychain" in d for d in dexes)
         # bHaptics asks for an Android 12 permission; the prompt interrupts the game (frame.bhaptics_permission)
@@ -381,6 +386,7 @@ def analyze(path: Path, deep: bool = True, data_bytes: int | None = None) -> Ana
             "sdl_java": sdl_java,
             "godot_clipboard": godot_clipboard,
             "vivox_api31": vivox_api31,
+            "unity_appui_vibrator": unity_appui_vibrator,
             "eos_keychain": eos_keychain,
             "bhaptics_permission": bhaptics_permission,
             "media_codec": media_codec,

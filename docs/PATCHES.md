@@ -2,7 +2,7 @@
 
 # Patches
 
-Every patch and game setting FramePort knows: 169 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
+Every patch and game setting FramePort knows: 170 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
 
 Each entry says what the patch does, whether it changes the APK or only the install, when FramePort suggests it, its options, the catalog games whose recipe names it and the launch-test signatures that suggest it. Patches that are on by default are on for every game, so the catalog rarely names them.
 
@@ -11,7 +11,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 ## Groups
 
 - [Patches from OVRPort](#group-overport) (25)
-- [Steam Frame patches](#group-frame) (55)
+- [Steam Frame patches](#group-frame) (56)
 - [Game settings](#group-adapter) (68)
 - [Files and settings on the Frame](#group-device) (8)
 - [PC VR (Proton and Revive)](#group-pcvr) (13)
@@ -76,6 +76,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Start straight in VR (skip the 2D launcher)](#frame-start_activity) | `frame.start_activity` | Steam Frame patches |  |
 | [Allow swapchains larger than 4096 px](#frame-swapchain_limit) | `frame.swapchain_limit` | Steam Frame patches | default |
 | [Team Beef ports: treat the Frame as a Meta headset](#frame-tbxr_vendor) | `frame.tbxr_vendor` | Steam Frame patches | 1 |
+| [Unity App UI: no Android 12 vibrator](#frame-unity_appui_vibrator) | `frame.unity_appui_vibrator` | Steam Frame patches |  |
 | [GL shim for Unity (no multisampled render-to-texture)](#frame-unity_gl_shim) | `frame.unity_gl_shim` | Steam Frame patches | 23 |
 | [Unity: render each eye separately (no multiview)](#frame-unity_multipass) | `frame.unity_multipass` | Steam Frame patches | 1 |
 | [Unity: disable MSAA](#frame-unity_no_msaa) | `frame.unity_no_msaa` | Steam Frame patches | 9 |
@@ -896,6 +897,19 @@ Lets Team Beef ports (for example Lambda1VR) start on the Frame.
 - **Source:** [patches/frame/tbxr_vendor.py](../src/frameport/patches/frame/tbxr_vendor.py)
 
 > Team Beef's ports (for example Lambda1VR, RTCWQuest) load an OpenXR library named after the headset maker and pick their VR setup by maker; for "valve" they stop at start (libopenxr_loader_valve.so not found) or take the Pico path. Adds that library and lets them take the Meta path. Keeps GL4ES in charge of its desktop OpenGL draw calls so animated models don't turn into stretched triangles.
+
+### <a id="frame-unity_appui_vibrator"></a>Unity App UI: no Android 12 vibrator
+
+Lets games built with Unity's App UI start on the Frame (they'd quit at once on an Android 12 vibrator call).
+
+- `frame.unity_appui_vibrator` · also for 2D apps
+- **Changes:** Changes the APK (a rebuild and reinstall apply it).
+- **Suggested (on):** Unity App UI's activity uses Android 12's VibratorManager at start, which Lepton (Android 11) lacks: the game would quit at once.
+- **Suggested by launch-test signatures:**
+  - `unity-appui-vibrator` (fatal): The game's start activity uses Android 12's VibratorManager (Unity's App UI package, for example PianoVision) and Lepton runs Android 11, so it quits before the game starts.
+- **Source:** [patches/frame/unity_appui_vibrator.py](../src/frameport/patches/frame/unity_appui_vibrator.py)
+
+> The activity of Unity's App UI package (for example PianoVision) gets the vibrator through Android 12's VibratorManager without checking the Android version; on Lepton's Android 11 the game quits at start with a NoClassDefFoundError. The activity then starts without a vibrator and its UI haptic feedback does nothing (an in-place edit of classes.dex).
 
 ### <a id="frame-unity_gl_shim"></a>GL shim for Unity (no multisampled render-to-texture)
 
