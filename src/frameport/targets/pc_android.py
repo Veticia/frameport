@@ -54,13 +54,17 @@ def backend_params(recipe: Recipe | None) -> dict:
 
 def choose_backend(recipe: Recipe | None, graphics: str = "", override: str | None = None) -> str:
     """Which AXRB runs the game: `override` (CLI), else the recipe's pc.axrb_backend, else direct mode for Vulkan
-    games and the emulator for OpenGL ES ones (direct mode has no GLES renderer; "unknown" counts as GLES)."""
+    games and the emulator for OpenGL ES ones (direct mode has no GLES renderer; "unknown" counts as GLES).
+    "Vulkan (Unity boot.config)" counts as unknown: that label comes from the Oculus XR plugin's xr-vulkan-* keys,
+    which GLES builds have too (all 9 such games in the dev library; Toy Master and I Am Cat run GLES, and Toy
+    Master crashed in direct mode at "Unable to retrieve the default EGL display!")."""
     for choice in (override, backend_params(recipe).get("backend")):
         if choice:
             if choice not in axrb.BACKENDS:
                 raise ValueError(f"unknown AXRB backend {choice!r} (direct or emulator)")
             return choice
-    return axrb.DIRECT if (graphics or "").startswith("Vulkan") else axrb.EMULATOR
+    graphics = graphics or ""
+    return axrb.DIRECT if graphics.startswith("Vulkan") and "boot.config" not in graphics else axrb.EMULATOR
 
 
 def launch_flags(backend: str, params: dict, profile: dict | None = None) -> list[str]:
