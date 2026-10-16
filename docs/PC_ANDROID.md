@@ -76,10 +76,25 @@ folder) and picks per game:
   direct.log, host.err, host.log, session.json}` (diagnostics: `axrb/direct/*`); triage signatures
   `axrb-direct-*` and milestones ART started → activity created → OpenXR → Vulkan device (`catalog/triage.yaml`).
 
-**Untested** (written 2026-10-15 from AXRB's source at 5b3dba19; no Windows run, no AXRB 2.x build yet): every
-direct-mode step on a real PC (silent install of the 2.x NSIS installer, `make_sysroot.py` through WSL interop, the
-launcher script, the launch test's markers and stop, the triage patterns against real logs), the upgrade of an
-installed 1.0.x, and whether AXRB's own launcher shows FramePort-set-up runtimes as ready.
+**Tested end to end with a local build** (2026-10-15, AXRB `windows-android16` @ 59626ac built on the dev PC,
+`FRAMEPORT_AXRB_DIRECT_DIR` = its staged `runtime\`, the staged sysroot reached through a junction
+`<FRAMEPORT_AXRB_DIRECT_RUNTIME>\direct\sysroot`; Monado's simulated HMD, see below): scan → PC build → direct
+install → `frameport test --to pc --sim --axrb-backend direct` → launcher → AXRB's run script → bridge + runner →
+milestones → AXRB's Stop. Still untested: the 2.x NSIS installer (no release yet), `setup_direct`'s download +
+`make_sysroot.py` path, the upgrade of an installed 1.0.x, AXRB's launcher seeing FramePort-set-up runtimes.
+
+### Direct-mode results (2026-10-15, Monado simulated HMD at 72 Hz, Dynarmic, no headset)
+
+PC build = the catalog recipe's PC selection (OVRPort's patches + `on_pc` fixes + FrameBridge with `focus_hold=0`),
+no `pc.axrb_backend` options. "fps" = AXRB.Perf `end-frame` (game) / `host-fresh-submit` (bridge → Monado), the
+median of the last summaries. What is drawn was judged from Monado's window and AXRB's layer captures.
+
+| Game (engine, graphics) | Reached | fps | Picture | Blocker / notes |
+|---|---|---|---|---|
+| Batman: Arkham Shadow 1.4.1-350961 (Unity, Vulkan; 90 content files, 27 GB) | menu (SELECT REGION) in ~25 s | 63.7 / 62.9 | stereo menu over the Batcave scene, both eyes correct | none; needed the content-list fix (command line overflow) and hard links; stop clean (activities stopped) |
+| PowerWash Simulator VR 2.5.0 (Unity 2020.3, Vulkan) | in game: the garage hub (~3-4 min; at 90 s still its loading logo) | 70.5 / 69.8 | garage in both eyes, both hands drawn at the simulated controllers | none; Meta multiplayer callbacks throw NullReferenceExceptions (no Meta services, harmless so far) |
+| LEGO Bricktales 2.1 (Unity, Vulkan, URP) | scene `Diorama_Hub_Startup` loaded (~3 min) | 72 / 72 | intro text panel ("You want to free the simulation? Follow the white rabbit.") on black, both eyes | stop slow: the game didn't finish its activity shutdown in 25 s (`axrb-direct-slow-stop`); Meta achievements fail (no Meta services, harmless) |
+| Toy Master 1.1.2 (Unity 2022.3, **GLES**) | activity created, then crash in 18 s | - | - | not a Vulkan game: "Vulkan (Unity boot.config)" came from the Oculus plugin's `xr-vulkan-*` keys; Unity: "Unable to retrieve the default EGL display!" + SIGTRAP. Automatic choice now sends such games to the emulator |
 
 ## Spike results (2026-10-10, Windows 11 26200, i7-14700K, RTX 4080 SUPER, 64 GB; headless)
 
