@@ -614,6 +614,9 @@ signatures:
   - id: axrb-direct-no-gles
     kind: axrb
     pattern: 'eglInitialize\b.*(?:fail|0x3008)|Failed to initiali[sz]e EGL|Unable to initiali[sz]e (?:EGL|the OpenGL)|EGL_BAD_DISPLAY'
+    # Unreal Vulkan builds probe EGL at start too (eglInitialize -> EGL_BAD_DISPLAY in direct mode), then create
+    # their Vulkan device: only a session without one is a GLES game (Deadpool VR, 2026-10-15)
+    unless: '(?m)I/vulkan: vkCreateDevice\(.*\) = 0$'
     severity: fatal
     diagnosis: The game draws with OpenGL ES, and AXRB's direct mode only has a Vulkan renderer. Install it for AXRB's emulator instead (the "AXRB mode on this PC" option, pc.axrb_backend backend=emulator, or `frameport install <game> --to pc --axrb-backend emulator`).
     suggest: []

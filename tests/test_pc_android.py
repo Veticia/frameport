@@ -823,6 +823,10 @@ def test_direct_mode_triage():
     assert [f.id for f in triage(crash, "EXITED", "com.game.x", kind="axrb").findings] == ["axrb-direct-guest-crash"]
     gles = "E/Unity   ( 4410): [EGL] Unable to initialize EGL display: EGL_BAD_DISPLAY\n"
     assert [f.id for f in triage(gles, "EXITED", "com.game.x", kind="axrb").findings] == ["axrb-direct-no-gles"]
+    # Unreal Vulkan builds probe EGL first (Deadpool VR): with a Vulkan device it isn't a GLES game
+    unreal = ("E/libEGL( 4242): eglInitializeImpl:283 error 3008 (EGL_BAD_DISPLAY)\n"
+              "   35.775 70748 I/vulkan: vkCreateDevice(2 queue families, 12 extensions) = 0\n")
+    assert "axrb-direct-no-gles" not in {f.id for f in triage(unreal, "RUNNING", "com.game.x", kind="axrb").findings}
     for text, want in (("E/vulkan: vulkan-1.dll is not installed: the guest has no GPU", "axrb-direct-no-vulkan"),
                        ("Direct mode is missing C:\\x\\sysroot/system/lib64.", "axrb-direct-incomplete"),
                        ("  1.0 1 E/host-fault: axrb-direct.exe + 0x1234", "axrb-direct-host-fault"),
