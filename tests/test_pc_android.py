@@ -2,6 +2,7 @@
 import hashlib
 import io
 import json
+import os
 import re
 import struct
 import subprocess
@@ -788,6 +789,42 @@ def test_install_for_direct_mode(tmp_path, monkeypatch, win):
     monkeypatch.setattr(axrb, "direct_runtime_root", lambda: inst.runtime)
     assert pc_android.uninstall(dep, keep_data=True) and saves.exists() and not game.exists()
     assert pc_android.uninstall(dep, keep_data=False) and not saves.exists()
+
+
+def test_long_content_lists_go_through_hard_links(tmp_path, monkeypatch, win):
+    """axrb-direct.exe gets one --mount-ro argument per content file (paths resolved by AXRB, so junctions don't
+    help): Batman's 90 files from a long dump folder overflowed Windows' 32767-character command line. Such lists go
+    through hard links in <game dir>\\content; a short list keeps the files' own paths."""
+    from frameport.targets import pc_android
+
+    monkeypatch.setattr(axrb, "local_appdata", lambda: tmp_path / "Local")
+    data = tmp_path / ("a-very-long-dump-folder-name" * 6) / "obb"
+    data.mkdir(parents=True)
+    names = [f"scenes_{i:03d}_assets_all_with_a_long_name.bundle" for i in range(90)]
+    for n in names:
+        (data / n).write_bytes(b"x")
+    links = tmp_path / "Local/FramePort/axrb/games/com.game.x/content"
+    lines = pc_android.asset_lines("com.game.x", data, names[:3], Reporter())  # fits: the files' own paths
+    assert lines[0] == f"Android/obb/com.game.x/{names[0]}\tW:{str(data / names[0]).replace('/', chr(92))}"
+    assert not links.exists()
+    lines = pc_android.asset_lines("com.game.x", data, None, Reporter())
+    assert len(lines) == 90 and pc_android.mount_args_length(lines) <= pc_android.MOUNT_ARGS_BUDGET
+    assert lines[0] == f"Android/obb/com.game.x/{names[0]}\tW:{str(links).replace('/', chr(92))}\\{names[0]}"
+    assert os.path.samefile(links / names[5], data / names[5])
+    assert pc_android.asset_lines("com.game.x", data, None, Reporter()) == lines  # again: links kept
+    pc_android.asset_lines("com.game.x", data, names[:3], Reporter())  # short again: the links go, the data stays
+    assert not links.exists() and (data / names[0]).read_bytes() == b"x"
+    # no hard links possible (another drive): a clear error instead of Windows' "filename too long"
+    monkeypatch.setattr(os, "link", lambda a, b: (_ for _ in ()).throw(OSError(18, "cross-device link")))
+    with pytest.raises(RuntimeError, match="don't fit on the command line of AXRB's direct mode"):
+        pc_android.asset_lines("com.game.x", data, None, Reporter())
+    assert not links.exists()
+    # a folder Windows reaches only through \\wsl$: copies next to the APK
+    monkeypatch.setattr(winhost, "to_windows", lambda p: ("\\\\wsl.localhost\\U" if "games" not in str(p) else "W:")
+                        + str(p).replace("/", "\\"))
+    lines = pc_android.asset_lines("com.game.x", data, names[:1], Reporter())
+    copy = tmp_path / "Local/FramePort/axrb/games/com.game.x/obb" / names[0]
+    assert copy.read_bytes() == b"x" and lines[0].endswith(names[0]) and "\\\\wsl" not in lines[0]
 
 
 def test_direct_logs_and_state(tmp_path, monkeypatch):

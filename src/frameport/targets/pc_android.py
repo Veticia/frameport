@@ -17,6 +17,7 @@ AXRB's own run script (run_windows_game.ps1 / run_direct_game.ps1). See docs/PC_
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -210,28 +211,89 @@ def _apk_versions(apk: Path) -> tuple[str | None, str | None]:
         return None, None
 
 
+CONTENT_LINKS = "content"  # <game dir>\content: hard links to the game's data files (short paths)
+# axrb-direct.exe gets one "--mount-ro <guest>=<host>" argument per content file (prepare_art_session.py, which
+# resolves every path first: junctions and 8.3 names don't shorten it), and a Windows command line holds 32767
+# characters: Batman's 90 files from a long dump path didn't fit ("The filename or extension is too long": 32876
+# characters, 27028 of them content mounts). What is left for the content files next to AXRB's own arguments
+# (~5,900 characters with the dev PC's paths; more with longer runtime folders).
+MOUNT_ARGS_BUDGET = 25000
+
+
+def _windows_readable(path: Path) -> str | None:
+    """The Windows path of a local folder when Windows reads it directly (not through \\\\wsl$), else None."""
+    try:
+        w = winhost.to_windows(path)
+    except ValueError:
+        return None
+    return None if w.startswith("\\\\") else w
+
+
+def mount_args_length(lines: list[str]) -> int:
+    """Characters the content files take on axrb-direct.exe's command line (quoted "--mount-ro" "<guest>=<host>")."""
+    return sum(len(' "--mount-ro" ""') + len("/storage/emulated/0/") + len(line) for line in lines)
+
+
+def _hard_links(package: str, data_dir: Path, rels: list[str]) -> Path | None:
+    """Hard links to the data files in <game dir>\\content (no copies, no extra space), None when they can't be made
+    (the data is on another drive than FramePort's folder)."""
+    links = axrb.game_dir(package) / CONTENT_LINKS
+    try:
+        for rel in rels:
+            src, dst = data_dir / rel, links / rel
+            if dst.exists() and os.path.samefile(src, dst):
+                continue
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.unlink(missing_ok=True)
+            os.link(src, dst)
+    except OSError:
+        shutil.rmtree(links, ignore_errors=True)
+        return None
+    return links
+
+
+def _line(package: str, rel: str, host_win: str) -> str:
+    guest = f"Android/obb/{package}/{rel}"
+    # prepare_art_session.py's rules: inside the app's storage, no empty/dot parts, no backslash; one line each
+    if any(part in ("", ".", "..") for part in guest.split("/")) or "\\" in guest or \
+            re.search(r"[\t\r\n]", guest + host_win):
+        raise RuntimeError(f"unsupported content file name: {rel}")
+    return f"{guest}\t{host_win}"
+
+
 def asset_lines(package: str, data_dir: Path | None, files: list[str] | None, reporter: Reporter) -> list[str]:
     """AXRB's content-file list (core/direct.mjs writeAssetList): "Android/obb/<pkg>/<file>\\t<Windows path>" per
-    data file. Files stay where they are when Windows can read them, else they are copied next to the APK."""
-    manifest = data_manifest(data_dir, files) if data_dir else {}
+    data file. Files stay where they are when Windows can read them, else (a WSL-only folder: \\\\wsl$ is unreliable)
+    they are copied next to the APK. A list too long for axrb-direct.exe's command line goes through hard links in
+    <game dir>\\content instead (same drive only), else the install stops with a clear message."""
+    manifest = list(data_manifest(data_dir, files) if data_dir else {})
+    base = _windows_readable(data_dir) if manifest else None
     lines = []
     for rel in manifest:
         host = data_dir / rel
-        try:
-            host_win = winhost.to_windows(host)
-        except ValueError:  # e.g. a WSL-only folder: give AXRB a copy it can read
+        if base:
+            host_win = base + "\\" + rel.replace("/", "\\")
+        else:
             copy = axrb.game_dir(package) / "obb" / rel
             if not copy.is_file() or copy.stat().st_size != host.stat().st_size:
                 reporter.log(f"copying {rel} to where Windows can read it")
                 copy.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(host, copy)
             host_win = winhost.to_windows(copy)
-        guest = f"Android/obb/{package}/{rel}"
-        # prepare_art_session.py's rules: inside the app's storage, no empty/dot parts, no backslash; one line each
-        if any(part in ("", ".", "..") for part in guest.split("/")) or "\\" in guest or \
-                re.search(r"[\t\r\n]", guest + host_win):
-            raise RuntimeError(f"unsupported content file name: {rel}")
-        lines.append(f"{guest}\t{host_win}")
+        lines.append(_line(package, rel, host_win))
+    links = axrb.game_dir(package) / CONTENT_LINKS
+    if base and mount_args_length(lines) > MOUNT_ARGS_BUDGET:
+        made = _hard_links(package, data_dir, manifest)
+        if made:
+            reporter.log(f"{len(lines)} content files: listed through hard links in {made} (shorter paths)")
+            short = winhost.to_windows(made)
+            lines = [_line(package, rel, short + "\\" + rel.replace("/", "\\")) for rel in manifest]
+    elif links.is_dir():
+        shutil.rmtree(links, ignore_errors=True)  # hard links of an earlier install, no longer needed
+    if mount_args_length(lines) > MOUNT_ARGS_BUDGET:
+        raise RuntimeError(f"{len(lines)} content files with paths this long don't fit on the command line of "
+                           "AXRB's direct mode; move the game's data to the drive FramePort is on, or to a folder "
+                           "with a shorter path")
     return lines
 
 
@@ -504,7 +566,7 @@ def _uninstall_direct(dep: dict, keep_data: bool) -> bool:
     data in AXRB's runtime folder (direct\\data\\data\\<pkg> = /data/data, direct\\sdcard\\Android\\data\\<pkg>)."""
     package = dep["package"]
     try:
-        shutil.rmtree(axrb.game_dir(package), ignore_errors=True)
+        shutil.rmtree(axrb.game_dir(package), ignore_errors=True)  # content\ holds hard links: the data stays
     except axrb.AxrbError:
         return False
     root = axrb.direct_runtime_root()

@@ -58,8 +58,14 @@ folder) and picks per game:
   (FramePort removes its converted copies after an install; `FRAMEPORT_AXRB_LAUNCHER_DIR` moves FramePort's `axrb`
   folder, for isolated `FRAMEPORT_HOME` runs), the launch activity comes from the APK's manifest
   (`axml.launcher_activity`, `pkg/fully.qualified.Class`), the data files become AXRB's content list `assets.txt`
-  (`Android/obb/<pkg>/<file>\t<Windows path>`, read-only mounts at the original place; WSL-only folders are copied
-  next to the APK). App data and saves: `<runtime>\direct\data\data\<pkg>` and `direct\sdcard\Android\data\<pkg>`.
+  (`Android/obb/<pkg>/<file>\t<Windows path>`, read-only mounts of the files where they are; WSL-only folders, which
+  Windows reads only through `\\wsl$`, are copied next to the APK). AXRB's `prepare_art_session.py` turns every
+  content file into one `--mount-ro` argument of `axrb-direct.exe` (with the path resolved: junctions and 8.3 names
+  don't shorten it), and Batman's 90 files from a long dump folder made a 32,876-character command line (Windows'
+  limit is 32,767: "The filename or extension is too long"). A list over 25,000 characters therefore goes through
+  hard links in `games\<pkg>\content` (no extra space; only on the drive FramePort's folder is on), else the install
+  stops with a clear message. App data and saves: `<runtime>\direct\data\data\<pkg>` and
+  `direct\sdcard\Android\data\<pkg>`.
 - **Play**: Steam shortcut → `%LOCALAPPDATA%\FramePort\axrb\fp-axrb-direct.ps1 -Package … -Activity … [flags]` →
   sets `AXRB_DATA_HOME=<runtime>\output` (as AXRB's launcher does) → AXRB's `run_direct_game.ps1 -Apk -Package
   -Activity -GameName -Executable <root>\out\direct\axrb-direct.exe -DataDirectory <runtime>\direct -Sysroot
