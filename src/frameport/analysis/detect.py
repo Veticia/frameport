@@ -43,7 +43,9 @@ IL2CPP_METADATA = "assets/bin/Data/Managed/Metadata/global-metadata.dat"
 # 17: headset (the Meta headset a VR app was made for: Gear VR / Go games run through frame.a32_bridge) (2026-10)
 # 18: headset "quest" also for 32-bit apps that require 6DoF head tracking (Santa Cruz builds, e.g. Sports
 #     Scramble: Touch controllers on the a32 bridge) (2026-10)
-ANALYSIS_VERSION = 19
+# 20: graphics "Vulkan (VrApi Vulkan system)" for direct-VrApi engines that import vrapi_CreateSystemVulkan (The Climb
+#     2: AXRB's direct mode, Vulkan only, is chosen for it on the PC) (2026-10)
+ANALYSIS_VERSION = 20
 
 
 # Android versions by API level (for messages); the Frame's Lepton container runs Android 11 (API 30)
@@ -293,6 +295,8 @@ def analyze(path: Path, deep: bool = True, data_bytes: int | None = None) -> Ana
         graphics = "Vulkan (Unity boot.config)"
     elif engine == "CryEngine" and re.search(r'(?im)^\s*r_Driver\s*=\s*"?vk"?\s*(?:;.*)?$', system_cfg):
         graphics = "Vulkan (CryEngine system.cfg)"
+    elif direct_vrapi and vrapi_vulkan(lib_bytes):
+        graphics = "Vulkan (VrApi Vulkan system)"
     else:
         graphics = "GLES or unknown (no Vulkan declaration)"
 
@@ -517,6 +521,14 @@ def _uses_feature(manifest: bytes, feature: str) -> bool:
 
 # Platform SDK enum helpers, e.g. ovrPeerConnectionState_ToString (BlazeRush): OVRPort's loader lacks several
 OVR_TO_STRING = re.compile(r"^ovr[A-Z][A-Za-z0-9]*_ToString$")
+
+
+def vrapi_vulkan(lib_bytes: dict[str, bytes]) -> bool:
+    """An engine library that calls VrApi directly creates VrApi's Vulkan system (vrapi_CreateSystemVulkan): the game
+    renders with Vulkan even without a manifest declaration (The Climb 2's CryEngine). GLES VrApi games (Path of the
+    Warrior) never import it. Only the game's own libraries count, not libvrapi.so or OVRPlugin."""
+    return any(elf.is_elf(b) and "vrapi_CreateSystemVulkan" in elf.dyn_symbols(b, False)
+               for n, b in lib_bytes.items() if n not in ("libvrapi.so", "libOVRPlugin.so"))
 
 
 def missing_ovr_symbols(lib_bytes: dict[str, bytes]) -> set[str]:

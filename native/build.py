@@ -380,6 +380,15 @@ def build_tlskeys(tc: Path):
          "-Wl,-z,max-page-size=16384", "tlskeys.c", "-llog", "-o", ART / "arm64-v8a/libfp_tkeys.so"], cwd=src)
 
 
+def build_vkext(tc: Path):
+    """Android-only Vulkan device extensions listed for builds for this PC (see vkext/vkext.c, patch
+    frame.vk_android_extensions)."""
+    src = HERE / "vkext"
+    run([exe(tc, "aarch64-linux-android29-clang"), "-shared", "-fPIC", "-O2", "-Wall", "-Wextra", "-Werror",
+         "-fvisibility=hidden", f"-ffile-prefix-map={HERE}=native", "-Wl,-soname,libfp_vkext.so",
+         "-Wl,-z,max-page-size=16384", "vkext.c", "-lvulkan", "-llog", "-o", ART / "arm64-v8a/libfp_vkext.so"], cwd=src)
+
+
 def build_luajit(tc: Path):
     run([sys.executable, HERE / "luajit/build.py", "--clang-dir", tc / "bin",
          "--out", ART / "arm64-v8a/libfp_luajit.so"])
@@ -438,7 +447,7 @@ def write_sums():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--only", default="adapter,bridge,compat,langpack,glshim,eglfmt,glmv,ovrtrace,dex,xrlayer,oculushmd,xrshim,vkshim,zinkfix,foveation,ovrpshim,tlskeys,luajit,vrsettings,venc,a32")
+    ap.add_argument("--only", default="adapter,bridge,compat,langpack,glshim,eglfmt,glmv,ovrtrace,dex,xrlayer,oculushmd,xrshim,vkshim,zinkfix,foveation,ovrpshim,tlskeys,vkext,luajit,vrsettings,venc,a32")
     ap.add_argument("--ndk")
     args = ap.parse_args()
     parts = set(args.only.split(","))
@@ -451,11 +460,11 @@ def main():
              "oculushmd": lambda: build_oculushmd(tc), "vkshim": lambda: build_vkshim(tc),
              "zinkfix": lambda: build_zinkfix(tc),
              "foveation": lambda: build_foveation(tc),
-             "ovrpshim": lambda: build_ovrpshim(tc), "tlskeys": lambda: build_tlskeys(tc),
+             "ovrpshim": lambda: build_ovrpshim(tc), "tlskeys": lambda: build_tlskeys(tc), "vkext": lambda: build_vkext(tc),
              "luajit": lambda: build_luajit(tc),
              "vrsettings": lambda: build_vrsettings(tc), "venc": lambda: build_venc(tc),
              "vroverlay_probe": lambda: build_vroverlay_probe(tc), "a32": lambda: build_a32(tc)}
-    for name in ("adapter", "bridge", "compat", "langpack", "glshim", "eglfmt", "glmv", "ovrtrace", "xrshim", "vkshim", "zinkfix", "foveation", "ovrpshim", "tlskeys", "luajit", "dex", "xrlayer", "oculushmd", "vrsettings", "venc",
+    for name in ("adapter", "bridge", "compat", "langpack", "glshim", "eglfmt", "glmv", "ovrtrace", "xrshim", "vkshim", "zinkfix", "foveation", "ovrpshim", "tlskeys", "vkext", "luajit", "dex", "xrlayer", "oculushmd", "vrsettings", "venc",
                  "vroverlay_probe", "a32"):
         if name in parts:
             log(f"build {name}")

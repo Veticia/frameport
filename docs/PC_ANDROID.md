@@ -137,12 +137,18 @@ One recipe serves both builds; `patches/base.pc_selection(patches, analysis)` pi
   `frame.asset_files_stub`, `frame.ovr_trace`, `frame.blazerush`, `frame.unity_oculus_check` (with its ovrpshim),
   `frame.unity_text_input`, `frame.unreal_quest_precompile`, `frame.unreal_quest_keymap`,
   `frame.unreal_thumb_touch`, `frame.unreal_skip_obb_check`, `frame.unreal_skip_obb_delivery`, `frame.nodebug`,
-  `frame.meta_permissions`, `frame.launcher`.
+  `frame.meta_permissions`, `frame.launcher`, and `frame.vrapi_bridge` (VrApi → OpenXR through OVRPort's loader,
+  so AXRB's runtime; seen working in direct mode with The Climb 2, see "VrApi-direct games" below; the **GL shim
+  stays off**: it fixes Mesa/Zink GLSL strictness, and the bridge doesn't need it — only `frame.gl_shim` requires
+  the bridge, not the other way round).
 - **Experimental on the PC** (`on_pc = "experimental"`, kept but not yet seen working in AXRB): `frame.vk_sanitize`
-  (the Vulkan shim; gfxstream / the host driver instead of Lepton's Fossilize), `frame.vrapi_bridge` (VrApi → OpenXR
-  through OVRPort's loader, so AXRB's runtime; the **GL shim stays off**: it fixes Mesa/Zink GLSL strictness, and
-  the bridge doesn't need it — only `frame.gl_shim` requires the bridge, not the other way round),
-  `frame.unity_tls_key_pool`, `frame.eos_keychain_loop`.
+  (the Vulkan shim; gfxstream / the host driver instead of Lepton's Fossilize), `frame.unity_tls_key_pool`,
+  `frame.eos_keychain_loop`.
+- **PC-only APK fix** `frame.vk_android_extensions` (`pc_detect`: direct-VrApi games whose engine creates VrApi's
+  Vulkan system, analysis `graphics` "Vulkan (VrApi Vulkan system)"): the renderer's
+  `vkEnumerateDeviceExtensionProperties` import goes to `libfp_vkext.so`, which also lists the Quest device
+  extensions the PC's driver lacks (VK_EXT_fragment_density_map, Android external memory); AXRB's vkCreateDevice
+  leaves them out again.
 - **FrameBridge** (`frame.adapter`) with its settings in `lib/<abi>/libframe_settings.so`: it wraps OVRPort's loader
   the same way in AXRB (scale, haptic_fix, pose_time_fix, rect_clamp, profile_remap, ...). Left out
   (`settings.PC_DENY`): `sync_guard` (a race in the Frame's vrclient.so), `focus_hold` / `focus_hold_ms` (the

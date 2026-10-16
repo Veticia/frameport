@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstring>
 #include <dlfcn.h>
+#include <string>
 #include <thread>
 
 namespace ovp {
@@ -747,12 +748,68 @@ VRAPI ovrResult vrapi_GetInstanceExtensionsVulkan(char* names, uint32_t* size) {
     uint32_t capacity = names ? *size : 0;
     return xrOk(s.xr.xrGetVulkanInstanceExtensionsKHR(s.instance, s.system, capacity, size, names), "xrGetVulkanInstanceExtensionsKHR") ? Success : InvalidOperation;
 }
+// The runtime's device extensions that no Vulkan device here offers are left out (FramePort): engines like
+// CryEngine refuse to create a device when a requested extension is missing, and AXRB's runtime asks for its
+// emulator's VK_ANDROID_external_memory_android_hardware_buffer + VK_EXT_queue_family_foreign also in its direct mode,
+// where the Windows driver has neither ("CrySystem initialization failed"). Where every device has them (the Frame)
+// the list is unchanged.
+static std::string supportedDeviceExtensions(const std::string& wanted) {
+    VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
+    app.apiVersion = VK_API_VERSION_1_0;
+    VkInstanceCreateInfo info{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
+    info.pApplicationInfo = &app;
+    VkInstance probe = VK_NULL_HANDLE;
+    if (vkCreateInstance(&info, nullptr, &probe) != VK_SUCCESS || !probe) return wanted;
+    std::vector<std::string> available;
+    uint32_t devices = 0;
+    vkEnumeratePhysicalDevices(probe, &devices, nullptr);
+    std::vector<VkPhysicalDevice> list(devices);
+    if (devices && vkEnumeratePhysicalDevices(probe, &devices, list.data()) >= VK_SUCCESS) {
+        for (uint32_t d = 0; d < devices; ++d) {
+            uint32_t count = 0;
+            vkEnumerateDeviceExtensionProperties(list[d], nullptr, &count, nullptr);
+            std::vector<VkExtensionProperties> props(count);
+            if (count && vkEnumerateDeviceExtensionProperties(list[d], nullptr, &count, props.data()) >= VK_SUCCESS)
+                for (uint32_t i = 0; i < count; ++i) available.emplace_back(props[i].extensionName);
+        }
+    }
+    vkDestroyInstance(probe, nullptr);
+    if (available.empty()) return wanted;  // nothing to judge by: keep the runtime's list
+    std::string out, dropped;
+    size_t start = 0;
+    while (start < wanted.size()) {
+        size_t end = wanted.find(' ', start);
+        if (end == std::string::npos) end = wanted.size();
+        std::string name = wanted.substr(start, end - start);
+        if (!name.empty()) {
+            std::string& to = std::find(available.begin(), available.end(), name) != available.end() ? out : dropped;
+            to += (to.empty() ? "" : " ") + name;
+        }
+        start = end + 1;
+    }
+    if (!dropped.empty()) OVP_LOG("Vulkan device extensions the runtime asks for but no device offers, left out: %s", dropped.c_str());
+    return out;
+}
 VRAPI ovrResult vrapi_GetDeviceExtensionsVulkan(char* names, uint32_t* size) {
     LOCK_STATE;
     if (!s.instance) return NotInitialized;
     if (!size) return InvalidParameter;
-    uint32_t capacity = names ? *size : 0;
-    return xrOk(s.xr.xrGetVulkanDeviceExtensionsKHR(s.instance, s.system, capacity, size, names), "xrGetVulkanDeviceExtensionsKHR") ? Success : InvalidOperation;
+    static std::string filtered;
+    static bool haveFiltered = false;
+    if (!haveFiltered) {
+        uint32_t needed = 0;
+        if (!xrOk(s.xr.xrGetVulkanDeviceExtensionsKHR(s.instance, s.system, 0, &needed, nullptr), "xrGetVulkanDeviceExtensionsKHR")) return InvalidOperation;
+        std::vector<char> raw(needed + 1, '\0');
+        if (needed && !xrOk(s.xr.xrGetVulkanDeviceExtensionsKHR(s.instance, s.system, needed, &needed, raw.data()), "xrGetVulkanDeviceExtensionsKHR")) return InvalidOperation;
+        filtered = supportedDeviceExtensions(std::string(raw.data()));
+        haveFiltered = true;
+    }
+    const uint32_t needed = static_cast<uint32_t>(filtered.size() + 1);
+    if (!names) { *size = needed; return Success; }
+    if (*size < needed) { *size = needed; return InvalidParameter; }
+    std::memcpy(names, filtered.c_str(), needed);
+    *size = needed;
+    return Success;
 }
 VRAPI ovrResult vrapi_CreateSystemVulkan(ovrSystemCreateInfoVulkan* info) {
     LOCK_STATE;

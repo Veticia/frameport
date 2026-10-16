@@ -157,6 +157,8 @@ def triage(log: str, state: str = "UNKNOWN", package: str | None = None, crash: 
     res.findings = [f for f in res.findings if f.id not in hidden]
     if headless:
         _forgive_headless_end(res, lines, db.get("headless_end") or [])
+    if kind == "axrb" and state == "RUNNING":
+        _forgive_axrb_stop(res, lines)
     fps = re.findall(r"pacing: ([0-9.]+) fps", text)
     if fps:
         res.fps = float(fps[-1])
@@ -208,6 +210,37 @@ def _forgive_headless_end(res: TriageResult, lines: list[str], markers: list[dic
         f"The game ran (paced frames) until the VR session ended for lack of a worn headset ({marker['label']}). What "
         f"came after ({what}) is a side effect of this headless test and doesn't happen in the headset.", [],
         lines[at].strip()[:300]))
+
+
+AXRB_STOPPED = re.compile(r"^AXRB_AOSP_ACTIVITIES_STOPPED")
+
+
+def _forgive_axrb_stop(res: TriageResult, lines: list[str]) -> None:
+    """A PC launch test in AXRB's direct mode that ran its full time ends with AXRB's own stop (stop_game.ps1: the
+    activities pause and stop, AXRB_AOSP_ACTIVITIES_STOPPED). A crash after that line is the game's shutdown, not
+    its play (The Climb 2: SIGSEGV in libc after "ovr_Shutdown finished"): such findings become one info finding.
+    Order is judged inside direct.log, which has the guest's lines and the runner's crash report in one stream."""
+    start = next((i for i, ln in enumerate(lines) if ln.startswith("===== ") and "direct.log" in ln), None)
+    if start is None:
+        return
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("===== ")), len(lines))
+    section = lines[start + 1:end]
+    at = next((i for i, ln in enumerate(section) if AXRB_STOPPED.match(ln.strip())), None)
+    if at is None:
+        return
+
+    def late(f: Finding) -> bool:
+        i = next((i for i, ln in enumerate(section) if f.evidence and f.evidence in ln.strip()), None)
+        return i is not None and i > at and f.severity == "fatal"
+
+    after = [f for f in res.findings if late(f)]
+    if not after:
+        return
+    res.findings = [f for f in res.findings if f not in after]
+    res.findings.append(Finding(
+        "axrb-direct-crash-at-stop", "info",
+        "The game ran for the whole test; it crashed only while AXRB stopped it at the end ("
+        + ", ".join(f.id for f in after) + "), which doesn't affect play.", [], section[at].strip()[:300]))
 
 
 def _secs(line: str) -> float | None:
