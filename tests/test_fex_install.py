@@ -444,3 +444,27 @@ def test_folder_in_a_meta_library_uses_metas_manifest(tmp_path):
     (lib / "Manifests" / "oculus-dreamdeck.json").write_text(json.dumps({"canonicalName": "other", "appId": "1",
                                                                          "launchFile": "x.exe"}))
     assert fexinstall.meta_manifest(game) is None
+
+
+def test_launch_args_from_the_pcs_meta_library(tmp_path, monkeypatch):
+    """A copy outside Meta's library gets the launch arguments of the same build in the user's Meta app library."""
+    from frameport.core import winhost
+    lib = tmp_path / "Meta Horizon" / "Software"
+    (lib / "Manifests").mkdir(parents=True)
+    (lib / "Manifests" / "oculus-dreamdeck.json").write_text(json.dumps({
+        "canonicalName": "oculus-dreamdeck", "appId": "941682542593981", "launchParameters": "-fullscreen -vr",
+        "launchFile": "WindowsNoEditor\\Dreamdeck\\Binaries\\Win64\\Dreamdeck-Win64-Shipping.exe"}))
+    monkeypatch.setattr(winhost, "meta_libraries", lambda: [lib])
+    m = fexinstall.library_manifest("941682542593981", None, "x/Dreamdeck-Win64-Shipping.exe")
+    assert m and m["launchParameters"] == "-fullscreen -vr"
+    assert fexinstall.library_manifest("941682542593981", None, "x/Other-Win64-Shipping.exe") is None   # other build
+    assert fexinstall.library_manifest("1", "other", "x/Dreamdeck-Win64-Shipping.exe") is None
+
+
+def test_meta_libraries_on_this_pc():
+    """Real lookup on a PC with Meta's app (skipped elsewhere): every result holds a Manifests folder."""
+    from frameport.core import winhost
+    libs = winhost.meta_libraries()
+    if not libs:
+        pytest.skip("no Meta app library on this PC")
+    assert all((p / "Manifests").is_dir() for p in libs)

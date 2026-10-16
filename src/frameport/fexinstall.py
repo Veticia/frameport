@@ -148,6 +148,24 @@ def meta_manifest(folder: Path) -> dict | None:
     return m
 
 
+def library_manifest(app_id: str | None, canonical: str | None, exe: str) -> dict | None:
+    """The same game's manifest in one of this PC's Meta app libraries (installed with the user's own account), for its
+    launch arguments: only when Meta's exe has the same file name as the one being installed (same game build)."""
+    from .core import winhost
+
+    for lib in winhost.meta_libraries():
+        for path in sorted((lib / "Manifests").glob("*.json")):
+            try:
+                m = json.loads(path.read_text(encoding="utf-8-sig"))
+            except (OSError, ValueError):
+                continue
+            if not (str(m.get("appId")) == str(app_id) or (canonical and m.get("canonicalName") == canonical)):
+                continue
+            if Path(str(m.get("launchFile", "")).replace("\\", "/")).name.lower() == Path(exe).name.lower():
+                return m
+    return None
+
+
 def source_info(folder: Path, entry: dict | None = None, title: str | None = None,
                 app: str | None = None, app_id: str | None = None) -> dict:
     folder = folder.expanduser().resolve()
@@ -187,6 +205,11 @@ def source_info(folder: Path, entry: dict | None = None, title: str | None = Non
                                                                       if meta else [])
     if isinstance(args, str):
         args = shlex.split(args)
+    if not args and not meta:
+        # Meta launches many Rift games with arguments (Unreal: -vr); a copy installed elsewhere has none of them
+        lib = library_manifest(found, canonical, exe)
+        if lib:
+            args = shlex.split(lib.get("launchParameters") or "")
     version = re.search(r"(?i)(?<![a-z0-9])(?:v|version[ _-]*)?(\d+(?:\.\d+)+)", folder.name)
     return {"folder": folder, "app": canonical, "package": entry.get("package") or package, "title": title,
             "exe": exe, "args": args, "app_id": found, "app_id_source": source, "store_app_id": store_id,
