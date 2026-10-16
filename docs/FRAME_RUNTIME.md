@@ -421,3 +421,24 @@ sighting, command lines checked once per process, render fds cached (rescanned e
 game processes without one), temperatures every 2 s, the CPU-cluster power rails every 5 s and the battery gauge every
 2-10 s, the stream measured ~10-13 ms CPU per 1 s tick on the device (idle clocks; idle or with 4XVR running) = about
 1 % of one core, ~0.15 % of the whole CPU. The I2C sensors (power monitors, battery gauge) are the slowest reads.
+
+## Steam library scheduling
+
+Agent v92 holds automatic shortcut restarts while the local app's
+`~/.local/share/frameport-app/gui.alive` heartbeat is under ten seconds old, as well as while a game or Desktop Mode
+is open. Closed/crashed GUIs expire; the existing twelve-hour hold limit still applies.
+
+`library_mode` accepts `now` (default), `later`, and `off`; FramePort stores its preference as
+`install.steam_library`. Later writes shortcuts and journals packages/removals in
+`~/.local/share/frameport/library-pending.json`. Steam rewrites shortcuts.vdf on exit, so a user drop-in
+`~/.config/systemd/user/steam.service.d/frameport-library.conf` reapplies the journal in ExecStartPre, after the
+previous session has exited. ExecStartPost verifies the entries and uses the existing live devkit fallback if Steam
+removed them. The journal is cleared only after success, and survives agent/app exit and reboot. The hooks share the
+shortcut worker lock; an active worker performs its own write/verification instead. Purge removes the drop-in.
+This automatic application targets SteamOS's `steam.service`; if Steam is started outside that service, use
+FramePort's Restart Steam now action to apply the journal safely.
+
+Off skips new shortcuts (existing entries remain). Play in Off, and Play for a pending Later entry, starts launch.sh
+in a detached user systemd unit, just as launch tests do, without adding a devkit entry. Steam/SteamVR must already
+be running. This loses Steam's per-game overlay/controller setup and Exit game integration; use FramePort Monitor
+to stop the game. This direct path has unit coverage; headset input/visual behaviour needs device validation.

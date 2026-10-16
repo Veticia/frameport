@@ -1163,3 +1163,12 @@ the unresolved eye distortion, and testing the release bundles on real Windows/m
   (regenerates docs/PATCHES.md + site/src/data/patches.json, the site's id → anchor map; a test runs `--check`).
 - Known-good backups of every working APK and the signing keys: `PATCHED/_known-good-2026-09-28/` (don't delete).
 - Your development Frame: `frameport frame info` (remembered in `<user data>/frames.json`); SSH as `steamos@<frame>`.
+
+
+Steam library scheduling (#305, agent v92): `install.steam_library` = now/later/off; agent `library_mode` persists it.
+Automatic restarts also hold on a fresh local `frameport-app/gui.alive` (10 s; existing 12 h cap).
+Later journals changes and installs steam.service ExecStartPre/ExecStartPost hooks to reapply after Steam's exit
+writes and verify before clearing; preserve this ordering and avoid locking across systemctl's startup hooks.
+Off Play (also pending Later Play) uses detached systemd-run launch.sh, with no shortcut/devkit registration;
+Steam's per-game controller/overlay/Exit game integration is lost. Restart Steam now explicitly bypasses holds,
+asks before ending a running game, and closes local FramePort/Desktop Mode. Purge removes the startup hook.

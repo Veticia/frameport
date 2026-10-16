@@ -44,7 +44,7 @@ try:
 except ImportError:  # Windows: pc_revive loads this file for its VDF code only (GitHub #131)
     fcntl = None
 
-AGENT_VERSION = 91
+AGENT_VERSION = 92
 HOME = os.path.expanduser("~")
 STEAM = os.path.join(HOME, ".local/share/Steam")
 ANCHORS = os.path.join(HOME, "Applications/quest-frame")
@@ -1111,6 +1111,145 @@ def remove_shortcut(vdf_path, exe):
 STATUS_FILE = os.path.join(HOME, ".local/share/frameport/shortcuts-status.json")
 
 
+LIBRARY_MODE_FILE = os.path.join(HOME, ".local/share/frameport/library-mode.json")
+PENDING_FILE = os.path.join(HOME, ".local/share/frameport/library-pending.json")
+RESTART_REQUEST_FILE = os.path.join(HOME, ".local/share/frameport/restart-request.json")
+
+
+def library_mode(args=None):
+    mode = (args or {}).get("mode")
+    if mode is None:
+        try:
+            mode = json.load(open(LIBRARY_MODE_FILE))["mode"]
+        except (OSError, ValueError, KeyError):
+            mode = "now"
+    if mode not in ("now", "later", "off"):
+        raise AgentError("Steam library mode must be now, later or off")
+    return mode
+
+
+def cmd_library_mode(args):
+    mode = library_mode(args)
+    _write_json(LIBRARY_MODE_FILE, {"mode": mode})
+    if mode == "off":
+        with open(STATUS_FILE + ".lock", "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            pending = pending_library()
+            pending["packages"] = []
+            _write_json(PENDING_FILE, pending)
+    return {"mode": mode}
+
+
+def pending_library():
+    try:
+        return json.load(open(PENDING_FILE))
+    except (OSError, ValueError):
+        return {"packages": [], "remove": []}
+
+
+def queue_library(packages, remove):
+    # Serialize with the worker and Steam's startup hooks; persist before touching the live VDF.
+    os.makedirs(os.path.dirname(STATUS_FILE), exist_ok=True)
+    with open(STATUS_FILE + ".lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return _queue_library(packages, remove)
+
+
+def _queue_library(packages, remove):
+    """Caller holds the shortcut lock."""
+    pending = pending_library()
+    pending["packages"] = sorted(set(pending["packages"]) | set(packages))
+    pending["remove"].extend(remove)
+    _write_json(PENDING_FILE, pending)
+    result = {"state": "pending", **pending, "added": [], "errors": []}
+    for user in library_users():
+        update_library(user, packages, result)
+    _write_json(STATUS_FILE, result)
+    return result
+
+
+def ensure_library_hooks():
+    """SteamOS runs Steam as a user service. Apply AFTER its exit writes and BEFORE its next start.
+    Keep the journal until the post-start verification succeeds, including across reboots/crashes.
+    """
+    folder = os.path.join(HOME, ".config/systemd/user/steam.service.d")
+    os.makedirs(folder, exist_ok=True)
+    def quote(value):
+        return '"' + value.replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%') + '"'
+    command = quote(sys.executable) + " " + quote(os.path.abspath(__file__))
+    with open(os.path.join(folder, "frameport-library.conf"), "w") as f:
+        f.write("[Service]\nExecStartPre=-" + command + " library_pending\n"
+                "ExecStartPost=-" + command + " library_pending_verify\n")
+    if run(["systemctl", "--user", "daemon-reload"]).returncode:
+        raise AgentError("Could not enable Steam library startup hooks")
+
+
+def cmd_library_pending(args):
+    os.makedirs(os.path.dirname(STATUS_FILE), exist_ok=True)
+    with open(STATUS_FILE + ".lock", "w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return {"worker_active": True}  # that worker writes before start and verifies afterward
+        pending = pending_library()
+        result = {"added": [], "errors": []}
+        # An uninstall queued after an install wins; never resurrect a deleted deployment.
+        packages = [p for p in pending["packages"] if deployment(p)]
+        for user in steam_users():
+            remove_from_library(user, pending["remove"], result)
+        for user in library_users():
+            update_library(user, packages, result)
+        pending["errors"] = result["errors"]
+        _write_json(PENDING_FILE, pending)
+        return result
+
+
+def cmd_library_pending_verify(args):
+    os.makedirs(os.path.dirname(STATUS_FILE), exist_ok=True)
+    with open(STATUS_FILE + ".lock", "w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return {"worker_active": True}  # that worker writes before start and verifies afterward
+        pending = pending_library()
+        packages = [p for p in pending["packages"] if deployment(p)]
+        result = {"state": "done", "added": [], "errors": list(pending.get("errors", []))}
+        if not packages and not pending["remove"]:
+            return result
+        for pkg in shortcuts_lost(library_users(), packages):
+            add_devkit_entry(pkg, result)
+        if not result["errors"]:
+            _write_json(PENDING_FILE, {"packages": [], "remove": []})
+        _write_json(STATUS_FILE, result)
+        return result
+
+
+def frameport_running():
+    """A local GUI heartbeat is refreshed every second; crashed/closed windows expire in ten seconds."""
+    data = os.environ.get("XDG_DATA_HOME", os.path.join(HOME, ".local/share"))
+    try:
+        age = time.time() - os.path.getmtime(os.path.join(data, "frameport-app/gui.alive"))
+        return 0 <= age < 10
+    except OSError:
+        return False
+
+
+def restart_hold():
+    return "game" if game_running() else "desktop" if desktop_mode() else "frameport" if frameport_running() else None
+
+
+def cmd_restart_steam(args):
+    if game_running() and not args.get("confirm"):
+        return {"confirmation_required": True}
+    status = cmd_shortcut_status({})
+    if status.get("state") == "waiting" and time.time() - float(status.get("started") or 0) < 60:
+        # Wake the worker already holding the lock; a second worker would wait behind the local GUI hold.
+        _write_json(RESTART_REQUEST_FILE, {"requested": time.time()})
+        return {"started": True, "waiting_worker": True}
+    return cmd_shortcuts({"packages": pending_library()["packages"], "restart_now": True,
+                          "remove": pending_library()["remove"], "mode": "now"})
+
+
 def cmd_shortcuts(args):
     """Add library entries (+ grid artwork) for installed games. Steam must be closed while shortcuts.vdf is
     rewritten, so the work runs in a detached systemd unit (terminals/SSH sessions started from Steam live in
@@ -1118,18 +1257,27 @@ def cmd_shortcuts(args):
     packages = [check_pkg(p) for p in args.get("packages", [])]
     remove = [r for r in args.get("remove", [])
               if isinstance(r, dict) and str(r.get("exe", "")).startswith('"' + ANCHORS)]
-    if not packages and not remove:
+    mode = library_mode(args)
+    if mode == "off" and not remove:
+        return {"state": "done", "disabled": True, "added": [], "errors": []}
+    if mode == "off":
+        packages = []
+    if mode == "later":
+        ensure_library_hooks()
+        return queue_library(packages, remove)
+    if not packages and not remove and not args.get("restart_now"):
         return {"started": False}
     current = cmd_shortcut_status({})
     alive = time.time() - float(current.get("started") or 0) < 60  # a waiting worker rewrites its status every 10 s
-    if current.get("state") == "waiting" and alive and set(packages) <= set(current.get("packages") or []) \
-            and not remove:
+    if (not args.get("restart_now") and current.get("state") == "waiting" and alive
+            and set(packages) <= set(current.get("packages") or []) and not remove):
         return {"started": False, "waiting": True}  # the update for these games already waits (Gaming Mode / game)
     os.makedirs(os.path.dirname(STATUS_FILE), exist_ok=True)
     with open(STATUS_FILE, "w") as f:
         json.dump({"state": "running", "packages": packages, "started": time.time()}, f)
     unit = f"frameport-shortcuts-{int(time.time())}"
-    payload = json.dumps({"packages": packages, "remove": remove, "restart": args.get("restart", True)})
+    payload = json.dumps({"packages": packages, "remove": remove, "restart": args.get("restart", True),
+                          "restart_now": bool(args.get("restart_now"))})
     run(["systemd-run", "--user", "--collect", "--quiet", f"--unit={unit}", "--setenv=HOME=" + HOME,
          sys.executable, os.path.abspath(__file__), "_shortcuts_worker", payload])
     return {"started": True, "unit": unit}
@@ -1206,7 +1354,14 @@ def shortcuts_worker(payload):
 
     os.makedirs(os.path.dirname(STATUS_FILE), exist_ok=True)
     with open(STATUS_FILE + ".lock", "w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+        if json.loads(payload).get("restart_now"):
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                _write_json(RESTART_REQUEST_FILE, {"requested": time.time()})
+                return  # wake an existing hold, rather than queueing another restart behind it
+        else:
+            fcntl.flock(lock, fcntl.LOCK_EX)
         _shortcuts_worker(payload)
 
 
@@ -1230,7 +1385,7 @@ def _shortcuts_worker(payload):
                 copy_grid_art(pkg, appid)
         args["packages"] = [p for p in args["packages"] if p not in devkit]
         result["devkit"] = devkit
-        if not args.get("remove") and not library_changes(users, args["packages"]):
+        if not args.get("restart_now") and not args.get("remove") and not library_changes(users, args["packages"]):
             # nothing to change in shortcuts.vdf (e.g. a reinstall): only the artwork, no Steam restart
             for user in users:
                 update_library(user, args["packages"], result, shortcuts=False)
@@ -1240,8 +1395,25 @@ def _shortcuts_worker(payload):
                 json.dump(result, f)
             return
         deadline = time.time() + 12 * 3600
-        while time.time() < deadline:  # restarting Steam would end the game being played, or Desktop Mode
-            reason = "game" if game_running() else "desktop" if desktop_mode() else None
+        while not args.get("restart_now") and time.time() < deadline:
+            try:
+                requested = json.load(open(RESTART_REQUEST_FILE))["requested"]
+                if 0 <= time.time() - requested < 60:
+                    os.remove(RESTART_REQUEST_FILE)
+                    break
+            except (OSError, ValueError, KeyError):
+                pass
+            mode = library_mode()
+            if mode == "later":
+                ensure_library_hooks()
+                _queue_library(args["packages"], args.get("remove", []))
+                return
+            if mode == "off" and not args.get("remove"):
+                _write_json(STATUS_FILE, {"state": "done", "disabled": True, "added": [], "errors": []})
+                return
+            if mode == "off":
+                args["packages"] = []
+            reason = restart_hold()
             if not reason:
                 break
             with open(STATUS_FILE, "w") as f:
@@ -1252,6 +1424,9 @@ def _shortcuts_worker(payload):
             service = stop_steam()
         except AgentError:
             raise AgentError("Steam did not close; library not modified") from None
+        pending = pending_library()
+        args["packages"] = sorted(set(args["packages"]) | {p for p in pending["packages"] if deployment(p)})
+        args.setdefault("remove", []).extend(pending["remove"])
         for user in steam_users():  # uninstalled games leave every account's library
             remove_from_library(user, args.get("remove", []), result)
         for user in users:
@@ -1272,6 +1447,12 @@ def _shortcuts_worker(payload):
         result["state"] = "failed"
         result["errors"].append(str(exc))
         run(["systemctl", "--user", "start", "steam.service"])
+    if result["state"] == "done" and not result["errors"]:
+        _write_json(PENDING_FILE, {"packages": [], "remove": []})
+    try:
+        os.remove(RESTART_REQUEST_FILE)
+    except OSError:
+        pass
     result["finished"] = time.time()
     with open(STATUS_FILE, "w") as f:
         json.dump(result, f)
@@ -1783,6 +1964,17 @@ def cmd_launch(args):
         check_base_present(dep["base"], dep.get("title") or pkg)
     if run(["pgrep", "-x", "steam"]).returncode != 0:
         raise AgentError("Steam isn't running on the Frame")
+    mode = library_mode(args)
+    if mode == "off" or (mode == "later" and pkg in pending_library()["packages"]):
+        # Detached from SSH/FramePort. The launcher keeps Lepton/Proton's environment; SteamVR must be running.
+        unit = f"frameport-play-{dep['appid']}"
+        if game_is_running(dep):
+            raise AgentError("the game is already running")
+        p = run(["systemd-run", "--user", "--collect", "--quiet", f"--unit={unit}",
+                 os.path.join(ANCHORS, pkg, "launch.sh")])
+        if p.returncode:
+            raise AgentError("could not start the launcher: " + p.stderr[-300:])
+        return {"package": pkg, "title": dep.get("title"), "via": "direct"}
     devkit = devkit_gameid(pkg)
     appid = devkit_appid(devkit) if devkit else None  # this Frame needed the fallback entry before: use it
     if devkit and not appid:
@@ -6556,6 +6748,11 @@ def purge_worker(payload):
                 result["removed"].append(VR_OVERLAY_UNIT_PATH)
         except Exception as exc:  # noqa: BLE001
             result["errors"].append(f"overlay autostart service: {exc}")
+        hook = os.path.join(HOME, ".config/systemd/user/steam.service.d/frameport-library.conf")
+        if os.path.exists(hook):
+            os.remove(hook)
+            user_systemctl("daemon-reload")
+            result["removed"].append(hook)
         try:
             service = stop_steam()
         except AgentError as exc:

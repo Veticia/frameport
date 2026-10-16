@@ -2081,3 +2081,162 @@ def test_launcher_starts_lepton_again_once_when_the_game_restarts_itself(monkeyp
     (tmp_path / "starts").unlink()
     subprocess.run([str(launcher)], timeout=30, env={**env, "FRAMEPORT_NO_RESTART": "1"}, start_new_session=True)
     assert (tmp_path / "starts").read_text().count("started") == 1
+
+
+def test_local_frameport_hold_expires(monkeypatch, tmp_path):
+    a = load_agent(monkeypatch, tmp_path)
+    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+    monkeypatch.setattr(a, "game_running", lambda: False)
+    monkeypatch.setattr(a, "desktop_mode", lambda: False)
+    assert a.restart_hold() is None
+    heartbeat = tmp_path / ".local/share/frameport-app/gui.alive"
+    heartbeat.parent.mkdir(parents=True)
+    heartbeat.touch()
+    assert a.restart_hold() == "frameport"
+    os.utime(heartbeat, (a.time.time() - 11, a.time.time() - 11))
+    assert a.restart_hold() is None
+    monkeypatch.setattr(a, "game_running", lambda: True)
+    assert a.restart_hold() == "game"
+
+
+def test_library_later_survives_steam_exit_and_next_start(monkeypatch, tmp_path):
+    a = load_agent(monkeypatch, tmp_path)
+    pkg = "com.x.y"
+    anchor = Path(a.ANCHORS) / pkg
+    anchor.mkdir(parents=True)
+    (anchor / "deployment.json").write_text(json.dumps({"title": "X", "appid": 123, "base": str(anchor)}))
+    cfg = Path(a.STEAM) / "userdata/42/config"
+    cfg.mkdir(parents=True)
+    monkeypatch.setattr(a, "library_users", lambda: ["42"])
+    monkeypatch.setattr(a, "run", lambda *args, **kw: SimpleNamespace(returncode=0, stdout="", stderr=""))
+    monkeypatch.setattr(a, "stop_steam", lambda: pytest.fail("later stopped Steam"))
+    monkeypatch.setattr(a, "start_steam", lambda _: pytest.fail("later started Steam"))
+    a.cmd_library_mode({"mode": "later"})
+    assert a.cmd_shortcuts({"packages": [pkg]})["state"] == "pending"
+    hook = tmp_path / ".config/systemd/user/steam.service.d/frameport-library.conf"
+    assert "ExecStartPre=" in hook.read_text() and "ExecStartPost=" in hook.read_text()
+    vdf = cfg / "shortcuts.vdf"
+    assert pkg in a.pending_library()["packages"]
+    vdf.write_bytes(a.vdf_encode({"shortcuts": {}}))  # Steam saved its old in-memory copy at exit
+    a.cmd_library_pending({})
+    assert any(e["appname"] == "X" for e in a.vdf_decode(vdf.read_bytes())["shortcuts"].values())
+    monkeypatch.setattr(a.time, "sleep", lambda _: None)
+    a.cmd_library_pending_verify({})
+    assert not a.pending_library()["packages"]
+
+
+def test_pending_retained_when_live_repair_fails(monkeypatch, tmp_path):
+    a = load_agent(monkeypatch, tmp_path)
+    a._write_json(a.PENDING_FILE, {"packages": ["com.x.y"], "remove": []})
+    monkeypatch.setattr(a, "deployment", lambda _: {"title": "X"})
+    monkeypatch.setattr(a, "library_users", lambda: ["42"])
+    monkeypatch.setattr(a, "shortcuts_lost", lambda *args: ["com.x.y"])
+    monkeypatch.setattr(a, "devkit_register", lambda _: (_ for _ in ()).throw(a.AgentError("test")))
+    assert a.cmd_library_pending_verify({})["errors"]
+    assert a.pending_library()["packages"] == ["com.x.y"]
+
+
+def test_off_skips_shortcuts_and_play_uses_direct_launcher(monkeypatch, tmp_path):
+    a = load_agent(monkeypatch, tmp_path)
+    a.cmd_library_mode({"mode": "off"})
+    assert a.library_mode() == "off"
+    assert a.cmd_shortcuts({"packages": ["com.x.y"]})["disabled"]
+    calls = []
+    monkeypatch.setattr(a, "deployment", lambda _: {"title": "X", "appid": 123})
+    monkeypatch.setattr(a, "game_is_running", lambda _: False)
+    monkeypatch.setattr(a, "run", lambda cmd, **kw: calls.append(cmd) or SimpleNamespace(returncode=0))
+    monkeypatch.setattr(a, "devkit_register", lambda _: pytest.fail("off registered a shortcut"))
+    result = a.cmd_launch({"package": "com.x.y"})
+    assert result["via"] == "direct"
+    assert calls[-1][0] == "systemd-run" and calls[-1][-1].endswith("com.x.y/launch.sh")
+    assert not any("rungameid" in str(c) for c in calls)
+
+
+def test_manual_restart_requires_game_confirmation(monkeypatch, tmp_path):
+    a = load_agent(monkeypatch, tmp_path)
+    monkeypatch.setattr(a, "game_running", lambda: True)
+    assert a.cmd_restart_steam({}) == {"confirmation_required": True}
+    monkeypatch.setattr(a, "cmd_shortcuts", lambda args: args)
+    assert a.cmd_restart_steam({"confirm": True})["restart_now"]
+
+
+def test_startup_hook_does_not_deadlock_active_worker(monkeypatch, tmp_path):
+    a = load_agent(monkeypatch, tmp_path)
+    Path(a.STATUS_FILE).parent.mkdir(parents=True)
+    with open(a.STATUS_FILE + ".lock", "w") as lock:
+        a.fcntl.flock(lock, a.fcntl.LOCK_EX)
+        assert a.cmd_library_pending({})["worker_active"]
+        assert a.cmd_library_pending_verify({})["worker_active"]
+
+
+@pytest.mark.parametrize("hold", [None, "frameport"])
+def test_shortcut_worker_holds_local_gui_until_closed(monkeypatch, tmp_path, hold):
+    a = load_agent(monkeypatch, tmp_path)
+    clock = [100.0]
+    events = []
+    monkeypatch.setattr(a.time, "time", lambda: clock[0])
+    def sleep(seconds):
+        status = a.cmd_shortcut_status({})
+        events.append(status.get("reason"))
+        clock[0] += seconds
+        monkeypatch.setattr(a, "restart_hold", lambda: None)
+    monkeypatch.setattr(a.time, "sleep", sleep)
+    monkeypatch.setattr(a, "refresh_desktop_entries", lambda: None)
+    monkeypatch.setattr(a, "library_users", lambda: [])
+    monkeypatch.setattr(a, "steam_users", lambda: [])
+    monkeypatch.setattr(a, "library_changes", lambda *args: True)
+    monkeypatch.setattr(a, "restart_hold", lambda: hold)
+    monkeypatch.setattr(a, "stop_steam", lambda: events.append("stop") or True)
+    monkeypatch.setattr(a, "start_steam", lambda _: events.append("start"))
+    monkeypatch.setattr(a, "shortcuts_lost", lambda *args: [])
+    a.shortcuts_worker(json.dumps({"packages": [], "remove": []}))
+    assert events == (["frameport"] if hold else []) + ["stop", "start"]
+    assert a.cmd_shortcut_status({})["state"] == "done"
+
+
+def test_pending_later_play_never_registers_shortcut(monkeypatch, tmp_path):
+    a = load_agent(monkeypatch, tmp_path)
+    a._write_json(a.PENDING_FILE, {"packages": ["com.x.y"], "remove": []})
+    monkeypatch.setattr(a, "deployment", lambda _: {"appid": 123, "title": "X"})
+    monkeypatch.setattr(a, "game_is_running", lambda _: False)
+    monkeypatch.setattr(a, "run", lambda *args, **kw: SimpleNamespace(returncode=0))
+    monkeypatch.setattr(a, "devkit_register", lambda _: pytest.fail("pending Play added a devkit shortcut"))
+    assert a.cmd_launch({"package": "com.x.y", "mode": "later"})["via"] == "direct"
+
+
+@pytest.mark.parametrize("action", ["restart", "later", "off", "cap"])
+def test_waiting_worker_can_be_released_without_deadlock(monkeypatch, tmp_path, action):
+    a = load_agent(monkeypatch, tmp_path)
+    clock = [100.0]
+    stopped = []
+    monkeypatch.setattr(a.time, "time", lambda: clock[0])
+    monkeypatch.setattr(a, "refresh_desktop_entries", lambda: None)
+    monkeypatch.setattr(a, "library_users", lambda: [])
+    monkeypatch.setattr(a, "steam_users", lambda: [])
+    monkeypatch.setattr(a, "library_changes", lambda *args: True)
+    monkeypatch.setattr(a, "restart_hold", lambda: "frameport")
+    monkeypatch.setattr(a, "game_running", lambda: False)
+    monkeypatch.setattr(a, "ensure_library_hooks", lambda: None)
+    monkeypatch.setattr(a, "stop_steam", lambda: stopped.append(True) or True)
+    monkeypatch.setattr(a, "start_steam", lambda _: None)
+    monkeypatch.setattr(a, "shortcuts_lost", lambda *args: [])
+    def sleep(seconds):
+        if action == "restart":
+            assert a.cmd_restart_steam({})["waiting_worker"]
+        elif action in ("later", "off"):
+            a._write_json(a.LIBRARY_MODE_FILE, {"mode": action})
+        clock[0] += 12 * 3600 if action == "cap" else seconds
+    monkeypatch.setattr(a.time, "sleep", sleep)
+    a.shortcuts_worker(json.dumps({"packages": [], "remove": []}))
+    assert bool(stopped) == (action in ("restart", "cap"))
+    status = a.cmd_shortcut_status({})
+    assert status["state"] == ("pending" if action == "later" else "done")
+
+
+def test_manual_restart_worker_wakes_existing_lock_holder(monkeypatch, tmp_path):
+    a = load_agent(monkeypatch, tmp_path)
+    Path(a.STATUS_FILE).parent.mkdir(parents=True)
+    with open(a.STATUS_FILE + ".lock", "w") as lock:
+        a.fcntl.flock(lock, a.fcntl.LOCK_EX)
+        a.shortcuts_worker(json.dumps({"restart_now": True, "packages": []}))
+    assert json.load(open(a.RESTART_REQUEST_FILE))["requested"] > 0
