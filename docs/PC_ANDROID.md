@@ -96,6 +96,13 @@ median of the last summaries. What is drawn was judged from Monado's window and 
 | LEGO Bricktales 2.1 (Unity, Vulkan, URP) | scene `Diorama_Hub_Startup` loaded (~3 min) | 72 / 72 | intro text panel ("You want to free the simulation? Follow the white rabbit.") on black, both eyes | stop slow: the game didn't finish its activity shutdown in 25 s (`axrb-direct-slow-stop`); Meta achievements fail (no Meta services, harmless) |
 | Toy Master 1.1.2 (Unity 2022.3, **GLES**) | activity created, then crash in 18 s | - | - | not a Vulkan game: "Vulkan (Unity boot.config)" came from the Oculus plugin's `xr-vulkan-*` keys; Unity: "Unable to retrieve the default EGL display!" + SIGTRAP. Automatic choice now sends such games to the emulator |
 
+Integration bugs found and fixed on the way: AXRB's trap message never reached FramePort's log; the content list
+overflowed the command line (Batman); Unity's EGL failure and SIGTRAP weren't triaged; long sessions lost their
+start-up milestones; the boot.config Vulkan label picked direct mode for GLES games. Open, AXRB's side: the content
+list should reach `axrb-direct.exe` as a file (FramePort's hard links only work when the data is on the drive of
+FramePort's folder; drafted as an upstream issue). Needs a headset: picture and latency through SteamVR, sound,
+controllers (the simulated ones hold still), Batman beyond its region menu.
+
 ## Spike results (2026-10-10, Windows 11 26200, i7-14700K, RTX 4080 SUPER, 64 GB; headless)
 
 | Step | Result |
