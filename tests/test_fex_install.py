@@ -421,3 +421,26 @@ def test_runtime_state_installed_from_package_manager_line(fx, monkeypatch):
         return types.SimpleNamespace(returncode=0)
     monkeypatch.setattr(sub, "run", run)
     assert probe({"app": "demo"})["runtime_state"] == "installed"
+
+
+def test_folder_in_a_meta_library_uses_metas_manifest(tmp_path):
+    """C:\\Program Files\\Meta Horizon\\Software layout: Meta's manifest gives exe, -vr arguments, ID and version."""
+    lib = tmp_path / "Meta Horizon" / "Software"
+    game = lib / "Software" / "oculus-dreamdeck"
+    exe = game / "WindowsNoEditor/Dreamdeck/Binaries/Win64/Dreamdeck-Win64-Shipping.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"MZ" + b"\0" * 64)
+    (lib / "Manifests").mkdir()
+    (lib / "Manifests" / "oculus-dreamdeck.json").write_text(json.dumps({
+        "canonicalName": "oculus-dreamdeck", "appId": "941682542593981", "version": "1.3",
+        "launchFile": "WindowsNoEditor\\Dreamdeck\\Binaries\\Win64\\Dreamdeck-Win64-Shipping.exe",
+        "launchParameters": "-fullscreen -vr"}), encoding="utf-8")
+    info = fexinstall.source_info(game, title="Oculus Dreamdeck")
+    assert info["exe"] == "WindowsNoEditor/Dreamdeck/Binaries/Win64/Dreamdeck-Win64-Shipping.exe"
+    assert info["args"] == ["-fullscreen", "-vr"] and info["version"] == "1.3"
+    assert (info["app"], info["app_id"], info["app_id_source"]) == ("oculus-dreamdeck", "941682542593981",
+                                                                     "meta-manifest")
+    # a manifest for another name is not trusted
+    (lib / "Manifests" / "oculus-dreamdeck.json").write_text(json.dumps({"canonicalName": "other", "appId": "1",
+                                                                         "launchFile": "x.exe"}))
+    assert fexinstall.meta_manifest(game) is None

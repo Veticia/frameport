@@ -132,6 +132,22 @@ def exe_version(path: Path) -> str | None:
     return None
 
 
+def meta_manifest(folder: Path) -> dict | None:
+    """Meta's own manifest when the folder is in a Meta app library (<library>/Software/<name> next to
+    <library>/Manifests/<name>.json, e.g. C:\\Program Files\\Meta Horizon\\Software): its exe, launch arguments
+    (Unreal games need -vr), app ID and version beat anything guessed from the files."""
+    path = folder.parent.parent / "Manifests" / f"{folder.name}.json"
+    if folder.parent.name.lower() != "software" or not path.is_file():
+        return None
+    try:
+        m = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return None
+    if m.get("canonicalName") != folder.name or not m.get("launchFile") or not str(m.get("appId", "")).isdigit():
+        return None
+    return m
+
+
 def source_info(folder: Path, entry: dict | None = None, title: str | None = None,
                 app: str | None = None, app_id: str | None = None) -> dict:
     folder = folder.expanduser().resolve()
@@ -140,7 +156,8 @@ def source_info(folder: Path, entry: dict | None = None, title: str | None = Non
     files, skipped = inventory(folder)
     entry = entry or {}
     extra = (entry.get("analysis") or {}).get("extra") or {}
-    exe = entry.get("exe") or extra.get("exe")
+    meta = None if entry else meta_manifest(folder)
+    exe = entry.get("exe") or extra.get("exe") or (meta and meta["launchFile"].replace("\\", "/"))
     if not exe:
         analysis = rift.analyze(folder)
         if not analysis.extra.get("exe_confirmed"):
@@ -151,12 +168,13 @@ def source_info(folder: Path, entry: dict | None = None, title: str | None = Non
     if exe not in files:
         raise ValueError("the selected game program is missing or is a skipped repack file")
     title = title or entry.get("title") or folder.name
-    canonical = app or extra.get("canonical_name") or re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    canonical = (app or extra.get("canonical_name") or (meta and meta["canonicalName"])
+                 or re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-"))
     package = fexrift.package_for(canonical)  # validate before any remote mutation
     store_url = (entry.get("details") or {}).get("store_url") or ""
     match = re.fullmatch(r"https://(?:www\.)?meta\.com/experiences/(\d+)/?", store_url)
     store_id = match[1] if match else None
-    found, source = config_app_id(folder, files)
+    found, source = (str(meta["appId"]), "meta-manifest") if meta else config_app_id(folder, files)
     if not found and store_id:
         found, source = store_id, "oculusdb:details.store_url"
     if not found and app_id:
@@ -165,13 +183,15 @@ def source_info(folder: Path, entry: dict | None = None, title: str | None = Non
         found, source = app_id, "cli:--app-id"
     if not found:
         raise ValueError("no Meta app ID in the game's config or cached store details; supply --app-id")
-    args = entry.get("launch_args", extra.get("launch_args", [])) or []
+    args = entry.get("launch_args", extra.get("launch_args", [])) or (shlex.split(meta.get("launchParameters") or "")
+                                                                      if meta else [])
     if isinstance(args, str):
         args = shlex.split(args)
     version = re.search(r"(?i)(?<![a-z0-9])(?:v|version[ _-]*)?(\d+(?:\.\d+)+)", folder.name)
     return {"folder": folder, "app": canonical, "package": entry.get("package") or package, "title": title,
             "exe": exe, "args": args, "app_id": found, "app_id_source": source, "store_app_id": store_id,
-            "version": version[1] if version else exe_version(folder / exe) or "0.0.0",
+            "version": (meta and meta.get("version")) or (version[1] if version else exe_version(folder / exe))
+                       or "0.0.0",
             "files": files, "skipped": skipped}
 
 
