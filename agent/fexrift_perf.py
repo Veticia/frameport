@@ -26,7 +26,7 @@ FEX_KEYS = {"FEX_TSOENABLED", "FEX_VECTORTSOENABLED", "FEX_MEMCPYSETTSOENABLED",
 DEFAULTS = {"dxvk_disable_msaa": False, "dxgi_sync_interval": -1, "dxgi_max_frame_latency": 0,
             "eye_scale": 1.5, "motion_smoothing": 2, "cores": "4-7", "ntsync": True,
             "fp_mem": False, "bigcache_mb": 256, "fp_mem_zero": False, "fex": {},
-            "wine_large_address_aware": True}
+            "wine_large_address_aware": False}
 BOOL_KEYS = {"dxvk_disable_msaa", "ntsync", "fp_mem", "fp_mem_zero", "wine_large_address_aware"}
 INT_KEYS = {"dxgi_sync_interval": (-1, 4), "dxgi_max_frame_latency": (0, 16), "motion_smoothing": (0, 2),
             "bigcache_mb": (1, 6144)}
@@ -165,23 +165,33 @@ def perf_prepare(args):
     managed = ("d3d11.disableMsaa", "dxgi.syncInterval", "dxgi.maxFrameLatency")   # these settings win
     profile = [str(line) for line in args.get("dxvk", []) if "\n" not in str(line)
                and str(line).split("=", 1)[0].strip() not in managed]
-    CORE.put_text(config, "\n".join(profile + [
-        "d3d11.disableMsaa = " + str(s["dxvk_disable_msaa"]),
-        "dxgi.syncInterval = " + str(s["dxgi_sync_interval"]),
-        "dxgi.maxFrameLatency = " + str(s["dxgi_max_frame_latency"]), ""]))
-    revive = scale_folder(s["eye_scale"])
-    if not os.path.isfile(os.path.join(revive, "LibRevive64.dll")):
-        # Existing installations can use the uploaded research patch without rerunning the downloads.
-        prepare_scales()
-    exports = {"DXVK_CONFIG_FILE": config, "FP_CORES": s["cores"], "FP_REVIVE_DIR": revive,
+    lines = profile + [f"{k} = {s[key]}" for k, key, default in (
+        ("d3d11.disableMsaa", "dxvk_disable_msaa", False), ("dxgi.syncInterval", "dxgi_sync_interval", -1),
+        ("dxgi.maxFrameLatency", "dxgi_max_frame_latency", 0)) if s[key] != default]
+    # Defaults = exactly the launch verified in the headset (First Contact, 2026-10-10): no dxvk.conf, the uploaded
+    # Revive (its eye-size patch is 1.5), no large-address-aware flag; only a changed setting adds something.
+    if lines:
+        CORE.put_text(config, "\n".join(lines + [""]))
+    elif os.path.lexists(config):
+        os.remove(config)
+    if s["eye_scale"] == 1.5:
+        revive = CORE.REVIVE
+    else:
+        revive = scale_folder(s["eye_scale"])
+        if not os.path.isfile(os.path.join(revive, "LibRevive64.dll")):
+            prepare_scales()
+    exports = {"FP_CORES": s["cores"], "FP_REVIVE_DIR": revive,
                "FP_MEM": "1" if s["fp_mem"] else "", "FP_BIGCACHE_MB": str(s["bigcache_mb"]),
                "FP_MEM_ZERO": "1" if s["fp_mem_zero"] else "0", "PROTON_NO_NTSYNC": "0" if s["ntsync"] else "1",
-               "WINE_LARGE_ADDRESS_AWARE": "1" if s["wine_large_address_aware"] else "0",
                "FP_MOTION_SMOOTHING": json.dumps({"section": f"steam.app.{CORE.GAME_ID}",
                                                  "key": "motionSmoothingOverride", "kind": "i",
                                                  "value": s["motion_smoothing"]})}
     exports.update({k: str(s["fex"].get(k, "0" if "TSO" in k else "1" if k == "FEX_MULTIBLOCK" else "0"))
                     for k in FEX_KEYS})
+    if lines:
+        exports["DXVK_CONFIG_FILE"] = config
+    if s["wine_large_address_aware"]:
+        exports["WINE_LARGE_ADDRESS_AWARE"] = "1"
     shell = "\n".join(f"export {k}={shlex.quote(v)}" for k, v in exports.items())
     if s["ntsync"]:
         shell += "\nunset PROTON_NO_NTSYNC"

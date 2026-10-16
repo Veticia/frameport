@@ -128,7 +128,9 @@ def test_prepare_reads_new_settings_each_launch(perf, tmp_path):
                     "fex": {"FEX_X87REDUCEDPRECISION": 1}, "motion_smoothing": 0})
     first = p.perf_prepare({"app": app})
     config = Path(core.ROOT) / "settings" / (app + ".dxvk.conf")
-    assert "d3d11.disableMsaa = False" in config.read_text()
+    # all DXVK settings at their defaults: no config at all (= the launch verified in the headset)
+    assert not config.exists() and "DXVK_CONFIG_FILE" not in first["shell"]
+    assert f"FP_REVIVE_DIR={core.REVIVE}" in first["shell"] and "WINE_LARGE_ADDRESS_AWARE" not in first["shell"]
     assert "export FP_MEM=''" in first["shell"] and "PROTON_NO_NTSYNC=1" in first["shell"]
     assert 'FEX_X87REDUCEDPRECISION=1' in first["shell"] and 'FP_MEM_ZERO=1' in first["shell"]
     p.settings_set({"app": app, "dxvk_disable_msaa": True, "motion_smoothing": 1})
@@ -412,10 +414,11 @@ def test_profile_dxvk_lines_share_the_one_config(perf, tmp_path):
     folder = Path(p.scale_folder(1.5))
     folder.mkdir(parents=True)
     (folder / "LibRevive64.dll").touch()
-    p.perf_prepare({"app": app, "dxvk": ["dxgi.maxFrameRate = 72", "d3d11.disableMsaa = True", "bad\nline"]})
+    p.settings_set({"app": app, "dxvk_disable_msaa": True})
+    p.perf_prepare({"app": app, "dxvk": ["dxgi.maxFrameRate = 72", "d3d11.disableMsaa = False", "bad\nline"]})
     text = (Path(core.ROOT) / "settings" / (app + ".dxvk.conf")).read_text()
     assert "dxgi.maxFrameRate = 72" in text and "bad" not in text
-    assert text.count("d3d11.disableMsaa") == 1 and "d3d11.disableMsaa = False" in text
+    assert text.count("d3d11.disableMsaa") == 1 and "d3d11.disableMsaa = True" in text   # the setting wins
     anchor = tmp_path / "anchor"
     anchor.mkdir()
     core.write_launcher(app, dict(core.GAMES[app], dxvk=["dxgi.maxFrameRate = 72"]), str(anchor))
