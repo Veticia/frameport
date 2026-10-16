@@ -820,3 +820,46 @@ def test_direct_mode_triage():
                        ("E/AndroidRuntime( 99): FATAL EXCEPTION: main", "axrb-direct-java-crash")):
         assert want in {f.id for f in triage(text, "EXITED", "com.game.x", kind="axrb").findings}
     assert not [f for f in triage(log, "EXITED", "com.game.x").findings if f.id.startswith("axrb")]
+
+
+def test_settings_merge_rules():
+    from frameport.targets import pc_android
+
+    assert pc_android.merge_settings({"scale": "1"}, {"scale": "0.5", "layer_debug": 1}) == \
+        {"scale": "0.5", "layer_debug": "1"}
+    assert pc_android.merge_settings({"scale": "0.5", "x": "1"}, {"scale": ""}) == {"x": "1"}  # empty = removed
+    for bad in ({"scale": "1;rm"}, {"Bad-Key": "1"}, {"scale": "abc"}):
+        with pytest.raises(ValueError):
+            pc_android.merge_settings({}, bad)
+    assert pc_android.settings_text({"scale": "0.5", "haptic_fix": "1"}) == "scale=0.5\nhaptic_fix=1\n"
+
+
+def test_settings_pushed_into_the_emulator(tmp_path, monkeypatch, win):
+    from frameport.targets import pc_android
+
+    adb, events = FakeAdb(), []
+    monkeypatch.setattr(axrb, "adb", adb)
+    monkeypatch.setattr(axrb, "launcher_dir", lambda: tmp_path / "FramePort" / "axrb")
+    monkeypatch.setattr(axrb, "start_emulator", lambda **k: events.append("start") or True)
+    monkeypatch.setattr(axrb, "stop_emulator", lambda *a, **k: events.append("stop"))
+    dep = {"package": "com.game.x", "kind": "android", "settings": {"layer_debug": "1"}}
+    res = pc_android.set_settings(dep, {"scale": "0.5"})
+    assert res["settings"] == dep["settings"] == {"layer_debug": "1", "scale": "0.5"}
+    local = tmp_path / "FramePort/axrb/games/com.game.x/framebridge.conf"
+    assert local.read_text() == "layer_debug=1\nscale=0.5\n"
+    assert ["push", "W:" + str(local).replace("/", "\\"),
+            "/sdcard/Android/data/com.game.x/files/framebridge.conf"] in adb.calls
+    assert events == ["start", "stop"]  # Android started for it is stopped again
+    pc_android.set_settings(dep, {"layer_debug": "", "scale": ""})  # nothing left: the file is removed
+    assert ["shell", "rm", "-f", "/sdcard/Android/data/com.game.x/files/framebridge.conf"] in adb.calls
+
+
+def test_settings_written_for_direct_mode(tmp_path, monkeypatch):
+    from frameport.targets import pc_android
+
+    monkeypatch.setattr(axrb, "direct_runtime_root", lambda: tmp_path / "rt")
+    monkeypatch.setattr(axrb, "adb", lambda *a, **k: pytest.fail("no adb in direct mode"))
+    dep = {"package": "com.game.x", "kind": "android", "backend": "direct"}
+    pc_android.set_settings(dep, {"scale": "0.6"})
+    conf = tmp_path / "rt/direct/sdcard/Android/data/com.game.x/files/framebridge.conf"
+    assert conf.read_text() == "scale=0.6\n"

@@ -363,7 +363,14 @@ class PcReviveTarget(Target):
         return result, log
 
     def set_settings(self, package, settings):
-        return {"settings": {}}
+        """Quest games in AXRB: FrameBridge settings without a rebuild (pc_android.set_settings). Rift games have
+        no FrameBridge."""
+        dep = self._dep(package)
+        if not is_android(dep):
+            return {"settings": {}}
+        result = pc_android.set_settings(dep, settings)
+        self._save_dep(package, dep)
+        return result
 
     def uninstall(self, package, keep_data=True):
         dep = self._dep(package)

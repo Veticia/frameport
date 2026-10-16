@@ -323,6 +323,70 @@ def dep_backend(dep: dict) -> str:
     return dep.get("backend") or axrb.EMULATOR  # installs before direct mode were all emulator ones
 
 
+# ------------------------------------------------------------------------------------------ FrameBridge settings
+SETTINGS_FILE = "framebridge.conf"  # FrameBridge reads /sdcard/Android/data/<pkg>/files/framebridge.conf after
+SETTING_KEY = re.compile(r"[a-z_]+")  # the build's libframe_settings.so (native/adapter/frame_adapter.c)
+SETTING_VALUE = re.compile(r"-?(?:[0-9]+\.?[0-9]*|\.[0-9]+)")
+
+
+def merge_settings(current: dict, changes: dict) -> dict:
+    """The agent's rules (cmd_set_settings): numbers only, checked before anything is written; an empty value
+    removes the key (back to the build's value)."""
+    out = dict(current)
+    for k, v in changes.items():
+        v = str(v).strip()
+        if not SETTING_KEY.fullmatch(k) or (v and not SETTING_VALUE.fullmatch(v)):
+            raise ValueError(f"bad setting {k}={v}")
+        if v:
+            out[k] = v
+        else:
+            out.pop(k, None)
+    return out
+
+
+def settings_text(settings: dict) -> str:
+    return "".join(f"{k}={v}\n" for k, v in settings.items())
+
+
+def set_settings(dep: dict, changes: dict) -> dict:
+    """Change FrameBridge settings of a game in AXRB without a rebuild: framebridge.conf in the game's external
+    files folder overrides the build's settings at the next start. Direct mode: written into AXRB's runtime folder
+    (direct\\sdcard\\Android\\data\\<pkg>\\files); emulator: pushed with adb (Android is started for it when it
+    isn't running, and stopped again). `dep["settings"]` is updated; the caller saves the record."""
+    package = dep["package"]
+    if not re.fullmatch(r"[A-Za-z0-9_.]+", package):
+        raise ValueError(f"unexpected package name {package!r}")
+    current = merge_settings(dep.get("settings") or {}, changes)
+    text = settings_text(current)
+    if dep_backend(dep) == axrb.DIRECT:
+        root = axrb.direct_runtime_root()
+        if not root:
+            raise RuntimeError("AXRB's direct-mode runtime folder was not found")
+        files = root / "direct" / "sdcard" / "Android" / "data" / package / "files"
+        files.mkdir(parents=True, exist_ok=True)
+        (files / SETTINGS_FILE).write_text(text, encoding="utf-8", newline="\n")
+        where = str(files / SETTINGS_FILE)
+    else:
+        remote = f"/sdcard/Android/data/{package}/files"
+        local = axrb.game_dir(package) / SETTINGS_FILE  # a Windows path adb.exe can read
+        local.parent.mkdir(parents=True, exist_ok=True)
+        local.write_text(text, encoding="utf-8", newline="\n")
+        started = axrb.start_emulator()
+        try:
+            axrb.adb(["shell", "mkdir", "-p", remote], timeout=60)
+            if current:
+                _adb_ok(axrb.adb(["push", winhost.to_windows(local), f"{remote}/{SETTINGS_FILE}"], timeout=120),
+                        "copying the settings")
+            else:
+                axrb.adb(["shell", "rm", "-f", f"{remote}/{SETTINGS_FILE}"], timeout=60)
+        finally:
+            if started:
+                axrb.stop_emulator()
+        where = f"{remote}/{SETTINGS_FILE}"
+    dep["settings"] = current
+    return {"settings": current, "file": where}
+
+
 # ------------------------------------------------------------------------------------------ logs + tests
 EMULATOR_LOGS = (("session.json", "game/session.json", 1 << 16), ("host.err", "game/host.err", 1 << 20),
                  ("host.log", "game/host.log", 1 << 20), ("guest.log", "game/guest.log", 2 << 20),
