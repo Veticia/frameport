@@ -65,7 +65,21 @@ def choose_backend(recipe: Recipe | None, graphics: str = "", override: str | No
                 raise ValueError(f"unknown AXRB backend {choice!r} (direct or emulator)")
             return choice
     graphics = graphics or ""
-    return axrb.DIRECT if graphics.startswith("Vulkan") and "boot.config" not in graphics else axrb.EMULATOR
+    if not (graphics.startswith("Vulkan") and "boot.config" not in graphics):
+        return axrb.EMULATOR
+    # Vulkan: direct mode once it can be had (installed, a local build, or a published AXRB-Emulatorless release);
+    # until then the emulator, which runs Vulkan games too (slower)
+    return axrb.DIRECT if direct_obtainable() else axrb.EMULATOR
+
+
+def direct_obtainable() -> bool:
+    """Whether AXRB's direct mode is installed, built locally (FRAMEPORT_AXRB_DIRECT_DIR) or published."""
+    if axrb.find(axrb.DIRECT):
+        return True
+    try:
+        return bool(axrb.latest(axrb.DIRECT))
+    except Exception:  # noqa: BLE001 - offline: nothing to install it from
+        return False
 
 
 def launch_flags(backend: str, params: dict, profile: dict | None = None) -> list[str]:

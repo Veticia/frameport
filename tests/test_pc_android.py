@@ -265,7 +265,7 @@ def test_pc_only_telemetry_patch():
     assert base.pc_selection(sel) == sel  # kept when the PC target filters the PC recipe again
 
 
-def test_vrapi_vulkan_games_on_the_pc():
+def test_vrapi_vulkan_games_on_the_pc(monkeypatch):
     """Direct-VrApi Vulkan engines (The Climb 2: "Vulkan (VrApi Vulkan system)") go to AXRB's direct mode with the
     VrApi bridge and the PC-only Android Vulkan extensions; GLES VrApi games (Path of the Warrior) don't get them."""
     from frameport.core.models import Analysis
@@ -280,6 +280,7 @@ def test_vrapi_vulkan_games_on_the_pc():
 
     climb, potw = analysis("Vulkan (VrApi Vulkan system)"), analysis("GLES or unknown (no Vulkan declaration)", "Other")
     recipe = {"patch_oculus_unity": {}, "frame.vrapi_bridge": {}, "frame.gl_shim": {}}
+    monkeypatch.setattr(pc_android, "direct_obtainable", lambda: True)
     assert pc_android.choose_backend(Recipe("p", recipe), climb.graphics) == "direct"
     assert pc_android.choose_backend(Recipe("p", recipe), potw.graphics) == "emulator"
     exts = "frame.vk_android_extensions"
@@ -761,8 +762,10 @@ def test_direct_launcher_script_and_arguments(tmp_path, win):
     assert args.endswith('-GameName "Game" -Translator digitalis -PrecomposeProjectionLayers')
 
 
-def test_backend_choice_and_flags():
+def test_backend_choice_and_flags(monkeypatch):
     from frameport.targets import pc_android
+
+    monkeypatch.setattr(pc_android, "direct_obtainable", lambda: True)
 
     plain = Recipe("com.g", {"patch_oculus_unity": {}})
     assert pc_android.choose_backend(plain, "Vulkan (libvulkan)") == "direct"
@@ -979,7 +982,8 @@ def test_direct_mode_triage():
     assert "axrb-direct-no-gles" not in {f.id for f in triage(unreal, "RUNNING", "com.game.x", kind="axrb").findings}
     # Toy Master (Unity 2022.3, GLES) in direct mode, 2026-10-15: Unity's own EGL message, then its SIGTRAP
     toy = ("E/Unity( 4252): Unable to retrieve the default EGL display!\n"
-           "   17.854 82044 E/cpu: thread 4252 (UnityMain): fatal signal 5 (SIGTRAP), code -6, fault addr 278b00001092\n")
+           "   17.854 82044 E/cpu: thread 4252 (UnityMain): fatal signal 5 (SIGTRAP), code -6, "
+           "fault addr 278b00001092\n")
     assert {f.id for f in triage(toy, "EXITED", "com.game.x", kind="axrb").findings} == \
         {"axrb-direct-no-gles", "axrb-direct-guest-crash"}
     # library sweep 2026-10-16: Unreal's message box (Of Lies and Rain) and a Play-services call (NOPE CHALLENGE)
@@ -1043,3 +1047,17 @@ def test_settings_written_for_direct_mode(tmp_path, monkeypatch):
     pc_android.set_settings(dep, {"scale": "0.6"})
     conf = tmp_path / "rt/direct/sdcard/Android/data/com.game.x/files/framebridge.conf"
     assert conf.read_text() == "scale=0.6\n"
+
+
+def test_vulkan_games_use_the_emulator_until_direct_mode_can_be_had(monkeypatch):
+    from frameport.targets import pc_android
+
+    plain = Recipe("com.g", {"patch_oculus_unity": {}})
+    monkeypatch.setattr(axrb, "find", lambda backend=None: None)
+    monkeypatch.setattr(axrb, "latest", lambda backend=None: None)  # no AXRB-Emulatorless release yet
+    assert pc_android.choose_backend(plain, "Vulkan (libvulkan)") == "emulator"
+    monkeypatch.setattr(axrb, "latest", lambda backend=None: (_ for _ in ()).throw(OSError("offline")))
+    assert pc_android.choose_backend(plain, "Vulkan (libvulkan)") == "emulator"
+    monkeypatch.setattr(axrb, "latest", lambda backend=None: {"version": "2.0.0"})
+    assert pc_android.choose_backend(plain, "Vulkan (libvulkan)") == "direct"
+    assert pc_android.choose_backend(plain, "Vulkan (libvulkan)", override="direct") == "direct"
