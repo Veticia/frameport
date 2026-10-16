@@ -136,12 +136,11 @@ def eye_variant(data, scale):
 def prepare_scales():
     src = Path(CORE.REVIVE)
     data = (src / "LibRevive64.dll").read_bytes()
-    # PC setup validates stock 3.2.0 then applies six visibility patches. Accept only that upload, including the
-    # research eye-size redirect if a maintainer supplied it. Normalize only that one exact instruction for hashing.
-    normalized = bytearray(data)
-    if normalized[0x122ab:0x122b3] == b"\xf3\x0f\x10\x25" + struct.pack("<i", 0x4eaa4 - 0x12eb3):
-        normalized[0x122ab:0x122b3] = bytes.fromhex("f30f102515bb0400")
-    if hashlib.sha256(normalized).hexdigest() != "eda2a449d230832c95734a03e8c83eeb531668ce676693f636e19c315765af4e":
+    # PC setup validates stock 3.2.0 and applies REVIVE_PATCHES (src/frameport/fexrift.py): the visibility fixes and
+    # the eye-size redirect to the 1.5 constant. Accept only that upload, or the same without the eye-size redirect.
+    uploaded = {"eda2a449d230832c95734a03e8c83eeb531668ce676693f636e19c315765af4e",    # all six patches
+                "0a3a6733f5decec74abb16b85c1f72783a6f421160753f600ddae4e8cb6482c6"}    # visibility fixes only
+    if hashlib.sha256(data).hexdigest() not in uploaded:
         raise ValueError("Revive eye scale: needs FramePort's patched Revive 3.2.0 upload")
     for scale in (1.0, 1.25, 1.5):
         patched = eye_variant(data, scale)  # validate before replacing any directory

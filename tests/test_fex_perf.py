@@ -420,3 +420,22 @@ def test_profile_dxvk_lines_share_the_one_config(perf, tmp_path):
     anchor.mkdir()
     core.write_launcher(app, dict(core.GAMES[app], dxvk=["dxgi.maxFrameRate = 72"]), str(anchor))
     assert "dxgi.maxFrameRate = 72" in (anchor / "launch.sh").read_text()
+
+
+def test_prepare_scales_accepts_the_real_setup_upload(perf, tmp_path):
+    """Against the real Revive 3.2.0 DLL patched the way `fex setup` uploads it (skipped without Revive)."""
+    from frameport import fexrift as pc
+    from frameport.tools import revive as revive_tool
+
+    try:
+        stock = revive_tool.revive_dir()
+    except Exception:
+        pytest.skip("no Revive install")
+    if not stock or not (Path(stock) / "LibRevive64.dll").is_file():
+        pytest.skip("no Revive install")
+    core, p = perf
+    pc.patch_revive(Path(stock), Path(core.REVIVE))
+    p.prepare_scales()
+    for scale in (1.0, 1.25, 1.5):
+        dll = (Path(p.scale_folder(scale)) / "LibRevive64.dll").read_bytes()
+        assert struct.unpack_from("<f", dll, 0x1229c)[0] == scale
