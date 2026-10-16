@@ -616,7 +616,9 @@ signatures:
     pattern: 'eglInitialize\b.*(?:fail|0x3008)|Failed to initiali[sz]e EGL|Unable to initiali[sz]e (?:EGL|the OpenGL)|EGL_BAD_DISPLAY|Unable to retrieve the default EGL display'
     # Unreal Vulkan builds probe EGL at start too (eglInitialize -> EGL_BAD_DISPLAY in direct mode), then create
     # their Vulkan device: only a session without one is a GLES game (Deadpool VR, 2026-10-15)
-    unless: '(?m)I/vulkan: vkCreateDevice\(.*\) = 0$'
+    # ... and one that died first on something AXRB's direct mode lacks (a dialog window, a framework call) never
+    # got that far: that is the blocker, not EGL (Of Lies and Rain, NOPE CHALLENGE, 2026-10-16)
+    unless: '(?m)I/vulkan: vkCreateDevice\(.*\) = 0$|UnsupportedOperationException: addToDisplayAsUser|^AXRB_SERVICE_UNIMPLEMENTED '
     severity: fatal
     diagnosis: The game draws with OpenGL ES, and AXRB's direct mode only has a Vulkan renderer. Install it for AXRB's emulator instead (the "AXRB mode on this PC" option, pc.axrb_backend backend=emulator, or `frameport install <game> --to pc --axrb-backend emulator`).
     suggest: []
@@ -654,6 +656,20 @@ signatures:
     pattern: 'E/host-fault: |E/fatal: '
     severity: fatal
     diagnosis: axrb-direct.exe itself crashed (its translator or Linux/Binder layer, not the game). That's AXRB's side - report it to AXRB with the diagnostics.
+    suggest: []
+    report: true
+  - id: axrb-direct-dialog-window
+    kind: axrb
+    pattern: 'UnsupportedOperationException: addToDisplayAsUser'
+    severity: fatal
+    diagnosis: The game opened a second Android window (a Dialog, for example Unreal's message box or a Unity plugin's dialog) and AXRB's direct mode can only show the game's own activity, so the game stopped ("Adding window failed"). Seen with Medieval Dynasty, Under Cover and Of Lies and Rain. That's AXRB's side; AXRB's emulator shows dialogs, so `--axrb-backend emulator` may get further (Vulkan games there go through gfxstream).
+    suggest: []
+    report: true
+  - id: axrb-direct-unimplemented-service
+    kind: axrb
+    pattern: '(?m)^AXRB_SERVICE_UNIMPLEMENTED \S+'
+    severity: error
+    diagnosis: The game (or a library in it, often Google Play services) called an Android framework service function AXRB's direct mode doesn't implement yet (the line names it, e.g. IActivityManager.getMyMemoryState for NOPE CHALLENGE); the call throws, and an uncaught one ends the game. That's AXRB's side - report it to AXRB with the diagnostics; AXRB's emulator has the full framework.
     suggest: []
     report: true
   - id: axrb-direct-java-crash

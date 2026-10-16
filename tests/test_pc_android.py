@@ -7,7 +7,7 @@ import re
 import struct
 import subprocess
 import zipfile
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 from test_pc_target import fake_steam, vdf_mod
@@ -866,7 +866,20 @@ def test_install_for_direct_mode(tmp_path, monkeypatch, win):
     saves = inst.runtime / "direct/data/data/com.game.x"
     saves.mkdir(parents=True)
     monkeypatch.setattr(axrb, "direct_runtime_root", lambda: inst.runtime)
+    # ... and the libraries AXRB's prepare_art_session.py staged at Play (its stage_libraries identity: the APK's
+    # path as given + every lib/arm64-v8a entry's name, CRC and size), which AXRB itself never removes
+    with zipfile.ZipFile(game / "com.game.x.apk", "a") as z:
+        z.writestr("lib/arm64-v8a/libgame.so", b"\x7fELF" + b"0" * 60)
+    with zipfile.ZipFile(game / "com.game.x.apk") as z:
+        libs = [(e.filename, e.CRC, e.file_size) for e in z.infolist() if e.filename.startswith("lib/arm64-v8a/")]
+    apk_win = str(PureWindowsPath("W:" + str(game / "com.game.x.apk").replace("/", "\\")))
+    staged = inst.runtime / "direct/installed" / hashlib.sha256(json.dumps([apk_win, libs]).encode()).hexdigest()
+    (staged / "lib/arm64").mkdir(parents=True)
+    other = inst.runtime / "direct/installed/0123"  # another game's
+    other.mkdir()
+    assert pc_android.staged_libraries(game / "com.game.x.apk") == staged
     assert pc_android.uninstall(dep, keep_data=True) and saves.exists() and not game.exists()
+    assert not staged.exists() and other.exists()
     assert pc_android.uninstall(dep, keep_data=False) and not saves.exists()
 
 
@@ -969,6 +982,18 @@ def test_direct_mode_triage():
            "   17.854 82044 E/cpu: thread 4252 (UnityMain): fatal signal 5 (SIGTRAP), code -6, fault addr 278b00001092\n")
     assert {f.id for f in triage(toy, "EXITED", "com.game.x", kind="axrb").findings} == \
         {"axrb-direct-no-gles", "axrb-direct-guest-crash"}
+    # library sweep 2026-10-16: Unreal's message box (Of Lies and Rain) and a Play-services call (NOPE CHALLENGE)
+    # end the game before its Vulkan device; Unreal's EGL probe must not be blamed then
+    dialog = ("E/libEGL( 4253): eglTerminateImpl:296 error 3008 (EGL_BAD_DISPLAY)\n"
+              "E/WindowManager( 4242): \tat com.epicgames.unreal.MessageBox01$a.run(Unknown Source:4)\n"
+              "E/WindowManager( 4242): Caused by: java.lang.UnsupportedOperationException: addToDisplayAsUser\n")
+    assert {f.id for f in triage(dialog, "EXITED", "com.game.x", kind="axrb").findings} == {"axrb-direct-dialog-window"}
+    service = ("E/libEGL( 4242): validate_display:575 error 3008 (EGL_BAD_DISPLAY)\n"
+               "AXRB_SERVICE_UNIMPLEMENTED android.app.IActivityManager.getMyMemoryState\n"
+               "E/AndroidRuntime( 4255): FATAL EXCEPTION: GoogleApiHandler\n")
+    found = triage(service, "EXITED", "com.game.x", kind="axrb").findings
+    assert {f.id for f in found} == {"axrb-direct-unimplemented-service", "axrb-direct-java-crash"}
+    assert "getMyMemoryState" in next(f.evidence for f in found if f.id == "axrb-direct-unimplemented-service")
     for text, want in (("E/vulkan: vulkan-1.dll is not installed: the guest has no GPU", "axrb-direct-no-vulkan"),
                        ("Direct mode is missing C:\\x\\sysroot/system/lib64.", "axrb-direct-incomplete"),
                        ("  1.0 1 E/host-fault: axrb-direct.exe + 0x1234", "axrb-direct-host-fault"),

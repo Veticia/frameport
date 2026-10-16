@@ -16,6 +16,7 @@ AXRB's own run script (run_windows_game.ps1 / run_direct_game.ps1). See docs/PC_
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -297,7 +298,7 @@ def asset_lines(package: str, data_dir: Path | None, files: list[str] | None, re
     if mount_args_length(lines) > MOUNT_ARGS_BUDGET:
         raise RuntimeError(f"{len(lines)} content files with paths this long don't fit on the command line of "
                            "AXRB's direct mode; move the game's data to the drive FramePort is on, or to a folder "
-                           "with a shorter path")
+                           "with a shorter path, or install it for AXRB's emulator (--axrb-backend emulator)")
     return lines
 
 
@@ -333,6 +334,7 @@ def _install_direct(inst: axrb.Install, package: str, apk: Path, data_dir: Path 
     game.mkdir(parents=True, exist_ok=True)
     target = game / f"{package}.apk"
     tmp = target.with_name(target.name + ".part")
+    _drop_staged(target)  # the libraries AXRB extracted from the build this one replaces
     shutil.copyfile(apk, tmp)  # the converted copy in FramePort's output folder is removed after an install
     tmp.replace(target)
     listed = game / "assets.txt"
@@ -689,11 +691,37 @@ def uninstall(dep: dict, keep_data: bool = True) -> bool:
             axrb.stop_emulator()
 
 
+def staged_libraries(apk: Path) -> Path | None:
+    """The folder AXRB's prepare_art_session.py extracts the APK's arm64 libraries into at every Play
+    (<runtime>\\direct\\installed\\<sha256 of the APK's path and its lib/arm64-v8a names, CRCs and sizes>), or None.
+    AXRB never removes one: each uninstall or new build left 100-500 MB behind (5 GB after the 25 games of the
+    2026-10-16 library sweep)."""
+    root = axrb.direct_runtime_root()
+    if not root or not apk.is_file():
+        return None
+    try:
+        with zipfile.ZipFile(apk) as archive:
+            manifest = [(e.filename, e.CRC, e.file_size) for e in archive.infolist()
+                        if e.filename.startswith("lib/arm64-v8a/") and not e.is_dir()]
+        # the path as FramePort's launcher hands it over: Join-Path $PSScriptRoot "games\<pkg>" + "<pkg>.apk"
+        identity = hashlib.sha256(json.dumps([winhost.to_windows(apk), manifest]).encode()).hexdigest()
+    except (OSError, ValueError, zipfile.BadZipFile):
+        return None
+    return root / "direct" / "installed" / identity
+
+
+def _drop_staged(apk: Path) -> None:
+    staged = staged_libraries(apk)
+    if staged and staged.is_dir() and not staged.is_symlink():
+        shutil.rmtree(staged, ignore_errors=True)
+
+
 def _uninstall_direct(dep: dict, keep_data: bool) -> bool:
     """Direct mode: FramePort's copy of the APK and its content list; with keep_data False also the game's Android
     data in AXRB's runtime folder (direct\\data\\data\\<pkg> = /data/data, direct\\sdcard\\Android\\data\\<pkg>)."""
     package = dep["package"]
     try:
+        _drop_staged(axrb.game_dir(package) / f"{package}.apk")
         shutil.rmtree(axrb.game_dir(package), ignore_errors=True)  # content\ holds hard links: the data stays
     except axrb.AxrbError:
         return False
