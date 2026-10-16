@@ -177,9 +177,10 @@ def test_pc_selection_keeps_ovrport_and_apk_fixes_only():
                "frame.gl_shim": {}, "frame.sdl_clipboard": {}, "frame.a32_bridge": {}, "device.files": {},
                "frame.hw_video_decode": {}, "frame.ovr_stable_user": {}, "frame.launcher": {}}
     assert set(pc_selection(patches)) == {"patch_oculus_unity", "frame.ovrstubs", "frame.swapchain_limit",
-                                          "frame.vk_sanitize", "frame.ovr_stable_user", "frame.launcher"}
+                                          "frame.vk_sanitize", "frame.gl_shim", "frame.ovr_stable_user",
+                                          "frame.launcher"}
     r1 = {"patches": patches}
-    r2 = {"patches": dict(patches, **{"frame.gl_shim": {"x": 1}, "device.hide_navbar": {}})}  # Frame-only changes
+    r2 = {"patches": dict(patches, **{"frame.sdl_clipboard": {"x": 1}, "device.hide_navbar": {}})}  # Frame-only
     assert pipeline.pc_recipe_fingerprint(r1) == pipeline.pc_recipe_fingerprint(r2)
     assert pipeline.recipe_fingerprint(r1) != pipeline.recipe_fingerprint(r2)
     r3 = {"patches": dict(patches, **{"frame.unity_text_input": {}})}  # an APK fix both builds get
@@ -193,8 +194,9 @@ PC_FIXES = ["frame.ovr_stable_user", "frame.unreal_ovrp_entrypoints", "frame.ava
             "frame.unreal_quest_keymap", "frame.unreal_thumb_touch", "frame.unreal_skip_obb_check",
             "frame.unreal_skip_obb_delivery", "frame.nodebug", "frame.meta_permissions", "frame.launcher",
             "frame.adapter", "frame.ovrplatformcompat", "frame.ovrstubs", "frame.swapchain_limit"]
-PC_EXPERIMENTAL = ["frame.vk_sanitize", "frame.vrapi_bridge", "frame.unity_tls_key_pool", "frame.eos_keychain_loop"]
-FRAME_ONLY = ["frame.gl_shim", "frame.unity_gl_shim", "frame.unreal_gl_shim", "frame.sdl_clipboard",
+PC_EXPERIMENTAL = ["frame.vk_sanitize", "frame.vrapi_bridge", "frame.unity_tls_key_pool", "frame.eos_keychain_loop",
+                   "frame.gl_shim", "frame.unity_multipass"]
+FRAME_ONLY = ["frame.unity_gl_shim", "frame.unreal_gl_shim", "frame.sdl_clipboard",
               "frame.godot_clipboard", "frame.vivox_audio_route", "frame.a32_bridge", "frame.hw_video_decode",
               "frame.zink_shader_fix", "frame.gl_multiview_fbo", "device.files", "device.hide_navbar",
               "device.steam_gamepad", "device.text_input_window"]
@@ -355,7 +357,7 @@ def test_install_into_axrb(tmp_path, monkeypatch, win):
     monkeypatch.setattr(axrb, "write_launcher", lambda **k: tmp_path / "FramePort/axrb/fp-axrb-run.ps1")
     monkeypatch.setattr(axrb, "adb", adb)
     monkeypatch.setattr(pc_android, "powershell_win", lambda: r"C:\Windows\powershell.exe")
-    recipe = Recipe("com.game.x", {"patch_oculus_unity": {}, "frame.gl_shim": {}, "frame.ovrstubs": {}})
+    recipe = Recipe("com.game.x", {"patch_oculus_unity": {}, "frame.sdl_clipboard": {}, "frame.ovrstubs": {}})
     res = pc_android.install("com.game.x", "Game X", apk, data, recipe, Reporter(), record_dir=tmp_path / "rec",
                              appid=lambda exe, title: 0x80001234)
     assert res == {"ok": True, "appid": 0x80001234, "activity": "com.game.x/com.unity3d.player.UnityPlayerActivity",
@@ -407,7 +409,7 @@ def test_pc_outdated_for_android_follows_the_pc_build():
     from frameport.ui import components as C
 
     dep = {"kind": "android", "recipe": {"patches": ["frame.ovrstubs", "patch_oculus_unity"]}}
-    g = {"recipe": {"patches": {"patch_oculus_unity": {}, "frame.ovrstubs": {}, "frame.gl_shim": {}}}}
+    g = {"recipe": {"patches": {"patch_oculus_unity": {}, "frame.ovrstubs": {}, "frame.sdl_clipboard": {}}}}
     assert not C.pc_outdated(g, dep)  # Frame-only patches don't matter on the PC
     g["recipe"]["patches"]["patch_oculus_unreal"] = {}
     assert C.pc_outdated(g, dep)
@@ -724,7 +726,7 @@ def test_backend_patch_goes_into_the_pc_selection():
 
     p = get("pc.axrb_backend")
     assert p.on_pc and p.stage == "install" and p.CHOICES[0] == ("", "Automatic")
-    assert pc_selection({"pc.axrb_backend": {"backend": "direct"}, "frame.gl_shim": {}}) == {
+    assert pc_selection({"pc.axrb_backend": {"backend": "direct"}, "frame.sdl_clipboard": {}}) == {
         "pc.axrb_backend": {"backend": "direct"}}
 
 

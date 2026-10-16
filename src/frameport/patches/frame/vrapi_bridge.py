@@ -54,6 +54,10 @@ class GlShim(Patch):
     order = 61
     requires = ("frame.vrapi_bridge",)
     experimental = True
+    # also in builds for this PC: its eglGetProcAddress wrapper hands out GPU timer-query stand-ins when the driver
+    # has none (AXRB's emulator: Path of the Warrior crashed on a NULL glGenQueriesEXT), and hiding multiview helps
+    # there too (gfxstream drops draws into multiview framebuffers); its GLSL fixes are additive
+    on_pc = "experimental"
 
     def detect(self, a):
         if a.direct_vrapi and a.uses_glad_gl and "GLES" in a.graphics and "arm64-v8a" in a.abis:
@@ -87,6 +91,7 @@ class GlShim(Patch):
 
 
 class UnityGlShim(GlShim):
+    on_pc = False  # its MSRTT stand-ins work around Zink; not tried in AXRB
     id = "frame.unity_gl_shim"
     title = "GL shim for Unity (no multisampled render-to-texture)"
     description = (
@@ -110,6 +115,7 @@ class UnityGlShim(GlShim):
 
 
 class UnrealGlShim(GlShim):
+    on_pc = False
     id = "frame.unreal_gl_shim"
     title = "GL shim for Unreal (no multisampled render-to-texture)"
     description = (
