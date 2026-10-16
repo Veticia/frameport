@@ -101,11 +101,11 @@
     "status": "likely",
     "graphics": "d3d11",
     "env": {},
-    "ime_patch": null,
+    "ime_patch": "off",
     "fp_mem": "off",
     "bigcache_mb": 256,
     "dxvk": [],
-    "notes": "same profile as First Contact (x64, D3D11, LibOVR/OpenVR); Media Foundation videos need a playback test"
+    "notes": "IME fix OFF: the generic finder matched member +0x100 in this UE 4.10 build and the patched game never submitted a frame; unpatched it renders (Frame headless 2026-10-16: 202 frames / 105 s, 1.9 fps while loading, headset not yet checked). Media Foundation videos need a playback test"
   },
   "defector": {
     "title": "Defector",

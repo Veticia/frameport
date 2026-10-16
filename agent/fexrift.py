@@ -536,7 +536,7 @@ def load_games():
             continue
         info = {k: v for k, v in info.items() if not k.startswith("_")}
         patch = info.get("ime_patch")
-        if patch and isinstance(patch.get("rva"), str):
+        if isinstance(patch, dict) and isinstance(patch.get("rva"), str):   # or "off": skip the finder (profile)
             info["ime_patch"] = dict(patch, rva=int(patch["rva"], 0))
         games[app] = info
     return games
@@ -896,7 +896,10 @@ def cmd_install(args):
     if not verified and info.get("status") != "likely" and not args.get("force_unverified"):
         raise FexError(f"{app} isn't verified for this mode (verified: {', '.join(GAMES)}); static checks: "
                        f"{json.dumps(checks)}. Install it anyway with force_unverified.")
-    if patch:
+    if info.get("ime_patch") == "off":
+        # profile says the finder's match is wrong for this build (Chronos, UE 4.10: patched it never rendered)
+        res["ime_patch"] = "off (profile)"
+    elif patch:
         res["ime_patch"] = apply_byte_patch(target, patch)
     elif info.get("ime_patch"):
         res["ime_patch"] = apply_byte_patch(exe, info["ime_patch"])

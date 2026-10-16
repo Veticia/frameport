@@ -75,3 +75,8 @@ def test_signed_in_needs_a_user_id_folder(monkeypatch, tmp_path):
     assert not fx.signed_in(str(sessions))
     (sessions / "1368740236322643-1275611841").mkdir()                  # the real shape: <user id>-<n>
     assert fx.signed_in(str(sessions))
+
+
+def test_ime_patch_off_in_profile(monkeypatch, tmp_path):
+    fx = load_copy(monkeypatch, tmp_path)
+    assert fx.GAMES["chronos"]["ime_patch"] == "off"
