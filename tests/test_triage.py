@@ -560,3 +560,14 @@ def test_meta_entitlement_quest():
                "I Unity   : ovr_Entitlement_GetIsViewerEntitled", "I Unity   : User is entitled"):
         assert "meta-entitlement" not in {x.id for x in triage(ok + "\n" + LOG_OK, "RUNNING").findings}
     assert triage("E Unity   : Entitlement check failed\n" + LOG_OK, "RUNNING").verdict == "pass"
+
+
+def test_missing_quest_foveation_image_is_diagnostic():
+    message = "OVRPlugin: foveationImage = 0x0, width = 0, height = 0"
+    result = triage(message, "EXITED")
+    finding = next(f for f in result.findings if f.id == "quest-foveation-image-missing")
+    assert finding.severity == "info" and finding.question
+    assert finding.suggest == ["adapter.hide_fb_foveation"]
+    assert "adapter.hide_fb_foveation" not in result.suggestions()
+    result = triage(message + "\nFrameBridge: hide_fb_foveation: filtering dispatcher extensions", "EXITED")
+    assert "quest-foveation-image-missing" not in {f.id for f in result.findings}
