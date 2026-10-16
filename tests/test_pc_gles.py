@@ -17,10 +17,10 @@ def test_gles_games_get_half_size_eyes_and_multipass_on_the_pc():
     recipe = {"frame.adapter": {}, "adapter.scale": {"value": 1.2}}
     sel = base.pc_selection(recipe, gles)
     assert sel["adapter.scale"] == {"value": 0.5} and "frame.unity_multipass" in sel
-    assert sel["adapter.projection_only"] == {"value": 1}  # AXRB rejects multi-layer GLES frames
+    assert sel["adapter.projection_only"] == {"value": 2}  # AXRB rejects multi-layer GLES frames: quads drawn in
     assert sel["adapter.scale_max"] == {"value": 1}
     from frameport.patches.frame.adapter import settings_text
-    assert b"projection_only=1" in settings_text(sel)
+    assert b"projection_only=2" in settings_text(sel)
     assert base.pc_selection(sel, gles) == sel  # idempotent
     assert base.pc_selection({"frame.adapter": {}}, gles)["adapter.scale"] == {"value": 0.5}
     assert base.pc_selection({"frame.adapter": {}, "adapter.scale": {"value": 0.6}}, gles)["adapter.scale"] == {

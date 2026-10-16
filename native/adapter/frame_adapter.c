@@ -100,7 +100,8 @@ static int foveation_eye_enabled, foveation_eye_supported;
 static int hide_space_warp = 0;
 // projection_only: frames with a projection layer and more layers submit the projection layer alone (AXRB 1.0.4's
 // emulator rejects every multi-layer GLES frame with -2: its GLES path has no layer batches; Accounting+'s OVROverlay
-// quads made almost every frame fail). The other layers (menus, overlays drawn as quads) are not shown.
+// quads made almost every frame fail). The other layers (menus, overlays drawn as quads) are not shown; with
+// projection_only=2 (GLES) the quads after the projection layer are drawn into its eye images first (quad_compose_gl.c).
 static int projection_only = 0;
 // scale_max: the maximum eye size reported is the scaled recommended one too (games that size their eye buffers from
 // the maximum or scale the recommendation up: Accounting+'s Unity 2017 OVRPlugin made 896x1024 from a 448x504
@@ -183,7 +184,7 @@ static void read_settings(const char *path) {
         if (sscanf(line, "foveation_storage_fix=%f", &value) == 1) foveation_storage_fix = value != 0;
         if (sscanf(line, "foveation_eye=%f", &value) == 1) foveation_eye = value != 0;
         if (sscanf(line, "hide_space_warp=%f", &value) == 1) hide_space_warp = value != 0;
-        if (sscanf(line, "projection_only=%f", &value) == 1) projection_only = value != 0;
+        if (sscanf(line, "projection_only=%f", &value) == 1) projection_only = value >= 2 ? 2 : value != 0;
         if (sscanf(line, "scale_max=%f", &value) == 1) scale_max = value != 0;
         if (sscanf(line, "strip_color_bias=%f", &value) == 1) strip_color_bias = (int)value;
         if (sscanf(line, "fade_quad=%f", &value) == 1) fade_quad = value > 0 ? (int)value : 0;
@@ -283,7 +284,9 @@ static void initialize(void) {
     if (proximity_emul) LOG("per-game: proximity_emul=%d (finger proximity from capacitive touch: %s)", proximity_emul,
                             proximity_emul > 1 ? "thumb + index" : "thumb");
     if (hide_space_warp) LOG("per-game: hide_space_warp=1 (XR_FB_space_warp hidden, space warp info removed)");
-    if (projection_only) LOG("per-game: projection_only=1 (frames with more layers submit the projection layer alone)");
+    if (projection_only)
+        LOG("per-game: projection_only=%d (frames with more layers submit the projection layer alone%s)", projection_only,
+            projection_only == 2 ? ", quads drawn into it" : "");
     if (strip_color_bias) LOG("per-game: strip_color_bias=%d (layer color scale/bias removed)", strip_color_bias);
     if (fade_quad) LOG("per-game: fade_quad=%d (colour-scale fades drawn as a black quad%s)", fade_quad,
                        fade_quad > 1 ? "; the layer's own scale removed" : "");
@@ -993,6 +996,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrDestroySpace(XrSpace space) {
 #include "layer_emul_gl.c"
 #include "cube_standin.c"
 #include "snapshot_gl.c"
+#include "quad_compose_gl.c"
 #include "surface_swapchain.c"
 #include "fade_quad.c"
 
@@ -1630,6 +1634,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEndFrame(XrSession session, const XrFrameEndInf
             if (!l || l->type != XR_TYPE_COMPOSITION_LAYER_PROJECTION) continue;
             static int logged;
             if (!logged++) LOG("projection_only: %u layers -> the projection layer alone", info->layerCount);
+            qc_compose(info, i);
             single = *info;
             single.layerCount = 1;
             single.layers = &info->layers[i];

@@ -62,6 +62,29 @@ def test_service_command_sets_only_monados_settings(win):
     assert "$env:XRT_COMPOSITOR_NULL = '1'" in xr_sim.service_command(d, "x", headless=True)
 
 
+def test_tracked_head_uses_monados_qwerty_builder(win, monkeypatch):
+    d = fake_monado(win / "m")
+    cmd = xr_sim.service_command(d, "x", tracked=True)
+    assert "$env:QWERTY_ENABLE = '1'" in cmd and "$env:SIMULATED_ENABLE = '0'" in cmd
+    assert "$env:SIMULATED_ENABLE = '1'" not in cmd  # the later value wins in the env dict, not twice in the command
+    assert "QWERTY_ENABLE" not in xr_sim.service_command(d, "x")
+    monkeypatch.delenv(xr_sim.HEAD_ENV_FLAG, raising=False)
+    assert xr_sim.tracked_head(True) and not xr_sim.tracked_head(False)
+    monkeypatch.setenv(xr_sim.HEAD_ENV_FLAG, "simulated")
+    assert not xr_sim.tracked_head(True)
+    monkeypatch.setenv(xr_sim.HEAD_ENV_FLAG, "tracked")
+    assert xr_sim.tracked_head(False)
+
+
+def test_cli_sim_head_follows_the_axrb_backend():
+    from frameport import cli
+
+    emu, direct = {"kind": "android", "backend": "emulator"}, {"kind": "android", "backend": "direct"}
+    assert cli._sim_wants_tracked_head([emu]) and cli._sim_wants_tracked_head([{"kind": "android"}])  # old installs
+    assert not cli._sim_wants_tracked_head([direct]) and not cli._sim_wants_tracked_head([emu, direct])
+    assert not cli._sim_wants_tracked_head([]) and not cli._sim_wants_tracked_head([emu, {"kind": "rift"}])
+
+
 def test_launcher_prefix_and_steamvr_shim():
     assert xr_sim.launcher_prefix({}) == ""
     pre = xr_sim.launcher_prefix({"XR_RUNTIME_JSON": r"C:\M\openxr_monado.json", "A": "it's"})

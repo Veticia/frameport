@@ -308,7 +308,10 @@ def _install_emulator(inst: axrb.Install, package: str, apk: Path, data_dir: Pat
     try:
         axrb.ensure_runtime_apk(app=inst.app)
         reporter.stage("Install the game into AXRB's Android")
-        _adb_ok(axrb.adb(["install", "--no-incremental", "-r", winhost.to_windows(apk)], timeout=900),
+        # -g: runtime permissions granted at install, as Lepton does on the Frame. Without it a game asking for one
+        # (BattleSisters: the microphone, a few seconds into its menu) opens Android's permission dialog over its
+        # activity, which nobody sees or answers in the headset: Unity pauses for good.
+        _adb_ok(axrb.adb(["install", "--no-incremental", "-r", "-g", winhost.to_windows(apk)], timeout=900),
                 "installing the game")
         activity = resolve_activity(package)
         sent = 0 if apk_only or not data_dir else push_data(package, Path(data_dir), data_files, reporter)

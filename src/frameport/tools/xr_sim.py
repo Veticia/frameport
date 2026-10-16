@@ -32,6 +32,12 @@ SERVICE_ENV = {"SIMULATED_ENABLE": "1", "SIMULATED_LEFT": "ml2", "SIMULATED_RIGH
                "XRT_COMPOSITOR_DEFAULT_FRAMERATE": str(FPS)}
 # No window at all (Monado's "null" compositor): frames are paced and accepted, nothing is shown or capturable.
 HEADLESS_ENV = {"XRT_COMPOSITOR_NULL": "1", "XRT_COMPOSITOR_NULL_FPS": str(FPS)}
+# Monado's qwerty builder instead: its head reports POSITION_TRACKED (the simulated head is valid but never tracked),
+# so AXRB 1.0.4's host bridge (the emulator backend, which only knows AXRB_TEST_SYNTHETIC_HMD=1 and applies it only
+# to a head without valid flags) sets its LOCAL origin and the guest gets tracked head poses. Its controllers are
+# WMR ones, which AXRB's suggested bindings don't cover: the hands stay inactive.
+TRACKED_HEAD_ENV = {"SIMULATED_ENABLE": "0", "QWERTY_ENABLE": "1"}
+HEAD_ENV_FLAG = "FRAMEPORT_PC_XR_SIM_HEAD"  # "tracked" / "simulated": overrides the automatic choice
 WINDOW_TITLE = "Monado"  # its compositor window: "Monado (Windowed)" = the simulated HMD's display, both eyes
 
 
@@ -88,8 +94,19 @@ def client_env(monado: Path | None = None) -> dict[str, str]:
     return {"XR_RUNTIME_JSON": winhost.to_windows(monado / "openxr_monado.json"), "AXRB_TEST_SYNTHETIC_HMD": "2"}
 
 
-def service_env(headless: bool = False) -> dict[str, str]:
-    return {**SERVICE_ENV, **(HEADLESS_ENV if headless else {})}
+def tracked_head(auto: bool = False) -> bool:
+    """Run Monado's qwerty head (TRACKED_HEAD_ENV): FRAMEPORT_PC_XR_SIM_HEAD=tracked|simulated, else `auto` (the
+    caller's choice: games on AXRB's emulator backend, whose host bridge has no synthetic head for a valid pose)."""
+    value = os.environ.get(HEAD_ENV_FLAG, "").strip().lower()
+    if value in ("tracked", "qwerty"):
+        return True
+    if value in ("simulated", "sim"):
+        return False
+    return auto
+
+
+def service_env(headless: bool = False, tracked: bool = False) -> dict[str, str]:
+    return {**SERVICE_ENV, **(TRACKED_HEAD_ENV if tracked else {}), **(HEADLESS_ENV if headless else {})}
 
 
 def _ps_quote(s: str) -> str:
@@ -116,11 +133,11 @@ def launcher_prefix(env: dict[str, str]) -> str:
     return ps_env(env) + (NO_STEAMVR_SHIM if "XR_RUNTIME_JSON" in env else "")
 
 
-def service_command(monado: Path, log_win: str, headless: bool = False) -> str:
+def service_command(monado: Path, log_win: str, headless: bool = False, tracked: bool = False) -> str:
     """The PowerShell command that runs monado-service.exe and waits for it; its log (Monado logs to stderr) goes to
     log_win, stdout next to it."""
     exe = winhost.to_windows(monado / "bin" / "monado-service.exe")
-    return (ps_env(service_env(headless))
+    return (ps_env(service_env(headless, tracked))
             + f"$p = Start-Process -FilePath {_ps_quote(exe)} -WindowStyle Hidden -PassThru -Wait "
             f"-RedirectStandardError {_ps_quote(log_win)} -RedirectStandardOutput {_ps_quote(log_win + '.out')}; "
             "exit $p.ExitCode")
@@ -144,6 +161,7 @@ class Service:
     pid: int | None  # the hidden PowerShell that holds monado-service.exe; None = one we didn't start
     log: Path
     monado: Path
+    tracked: bool = False  # qwerty head (TRACKED_HEAD_ENV); False for a service we didn't start (unknown)
     capture_prefix: str | None = None  # Windows path prefix for AXRB's host bridge frame captures
 
     def env(self) -> dict[str, str]:
@@ -162,7 +180,7 @@ def active_env() -> dict[str, str]:
     return _active.env() if _active else {}
 
 
-def start(headless: bool = False, wait: float = 60) -> Service:
+def start(headless: bool = False, wait: float = 60, tracked: bool = False) -> Service:
     """Start Monado's service hidden (nothing inherited from FramePort) and wait until its pipe is open. A service
     that is already running is used as it is (and left running by stop())."""
     monado = monado_dir()
@@ -175,11 +193,11 @@ def start(headless: bool = False, wait: float = 60) -> Service:
     log.unlink(missing_ok=True)
     from . import axrb  # its WMI start: the service must not hold FramePort's (or WSL's interop) pipes
 
-    pid = axrb.spawn_detached(service_command(monado, winhost.to_windows(log), headless))
+    pid = axrb.spawn_detached(service_command(monado, winhost.to_windows(log), headless, tracked))
     end = time.time() + wait
     while time.time() < end:
         if pipe_open():
-            return Service(pid, log, monado)
+            return Service(pid, log, monado, tracked)
         text = log.read_text(errors="replace") if log.is_file() else ""
         if re.search(r"Server exiting|ERROR \[p_create_system\]", text):
             break
@@ -202,22 +220,24 @@ def capture_dir() -> Path:
 
 
 @contextlib.contextmanager
-def running(on: bool, headless: bool = False, reporter=None, captures: bool = True):
+def running(on: bool, headless: bool = False, reporter=None, captures: bool = True, tracked: bool = False):
     """Monado up for the `with` block when `on` (callers decide with enabled()), else nothing; active_env() names it
-    meanwhile. With captures, AXRB's host bridge also saves a few frames of what the game submits to capture_dir()."""
+    meanwhile. With captures, AXRB's host bridge also saves a few frames of what the game submits to capture_dir().
+    `tracked`: Monado's qwerty head instead of the simulated one (see tracked_head())."""
     global _active
     if not on:
         yield None
         return
     if reporter:
         reporter.stage("Starting the simulated headset (Monado)")
-    service = start(headless)
+    service = start(headless, tracked=tracked)
     if captures:
         capture_dir().mkdir(parents=True, exist_ok=True)
         service.capture_prefix = winhost.to_windows(capture_dir()) + "\\" + time.strftime("%Y%m%d-%H%M%S-")
     _active = service
     if reporter:
         reporter.log(f"Monado: {service.monado} (log {service.log})"
+                     + ("; head: qwerty (tracked)" if service.tracked else "")
                      + (f"; frame captures: {capture_dir()}" if captures else ""))
     try:
         yield service

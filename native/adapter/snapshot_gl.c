@@ -17,6 +17,9 @@ SNAP_GL_FUNCS(SNAP_DECLARE)
 #undef SNAP_DECLARE
 static EGLContext (*s_eglGetCurrentContext)(void);
 
+// The swapchain image tracking also serves projection_only=2 (quad_compose_gl.c).
+#define snap_tracking() (snapshot || projection_only == 2)
+
 static struct {
     XrSwapchain handle;
     uint32_t width, height, array_size, count, last_acquired;
@@ -48,7 +51,7 @@ static int snap_find(XrSwapchain handle, int create) {
 }
 
 static void snap_on_create(XrSwapchain handle, const XrSwapchainCreateInfo *info) {
-    if (!snapshot || !info) return;
+    if (!snap_tracking() || !info) return;
     pthread_mutex_lock(&snap_lock);
     int i = snap_find(handle, 1);
     if (i >= 0) {
@@ -60,7 +63,7 @@ static void snap_on_create(XrSwapchain handle, const XrSwapchainCreateInfo *info
 }
 
 static void snap_on_destroy(XrSwapchain handle) {
-    if (!snapshot) return;
+    if (!snap_tracking()) return;
     pthread_mutex_lock(&snap_lock);
     int i = snap_find(handle, 0);
     if (i >= 0) snap_chains[i].handle = XR_NULL_HANDLE;
@@ -68,7 +71,7 @@ static void snap_on_destroy(XrSwapchain handle) {
 }
 
 static void snap_on_enumerate(XrSwapchain handle, uint32_t count, const XrSwapchainImageBaseHeader *images) {
-    if (!snapshot || !images || !count || images->type != (XrStructureType)1000024002) return;  // OPENGL_ES_KHR
+    if (!snap_tracking() || !images || !count || images->type != (XrStructureType)1000024002) return;  // OPENGL_ES_KHR
     pthread_mutex_lock(&snap_lock);
     int i = snap_find(handle, 1);
     if (i >= 0) {
@@ -81,7 +84,7 @@ static void snap_on_enumerate(XrSwapchain handle, uint32_t count, const XrSwapch
 }
 
 static void snap_on_acquire(XrSwapchain handle, uint32_t index) {
-    if (!snapshot) return;
+    if (!snap_tracking()) return;
     pthread_mutex_lock(&snap_lock);
     int i = snap_find(handle, 0);
     if (i >= 0) snap_chains[i].last_acquired = index;

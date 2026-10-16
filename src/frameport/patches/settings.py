@@ -45,7 +45,8 @@ SETTINGS = [
     ("projection_only", "int", 0, "Main picture only",
      "Frames that carry more than the game's main picture (menus or overlays as extra layers) submit the main "
      "picture alone. For runtimes that refuse such frames: AXRB's emulator on this PC rejects every multi-layer "
-     "OpenGL ES frame (on by default there for GLES games). The extra layers don't show."),
+     "OpenGL ES frame. The extra layers don't show; 2 (OpenGL ES games, the default on this PC) draws the flat "
+     "panels that come after the main picture into it first, so menus and messages drawn as panels still show."),
     ("scale_max", "int", 0, "Cap the eye size",
      "With a resolution scale below 1, the largest eye size the game is told about is the scaled one too, for games "
      "that size their eye pictures from the maximum (for example Unity 2017 games). On by default on this PC for "
@@ -240,6 +241,10 @@ SETTINGS = [
      "Unity's built-in Oculus frame loop (frame.unity_oculus_check): don't pass Unity's physics-step pose update on, "
      "so the hands use the frame's display-time poses. Fixes hands trailing the controllers in some games (for "
      "example Sniper Elite VR); in others it makes the hands lag (for example BattleSisters)."),
+    ("ovrp_trace", "int", 0, "Unity frame loop: diagnostics (log)",
+     "Unity's built-in Oculus frame loop (frame.unity_oculus_check): every 5 s, logs how many frame updates, waits, "
+     "begins and ends went through and which one is in progress (thread, frame, for how long), to see where a game "
+     "that stops after a few frames waits. No effect on the game."),
     ("gl_hide_multiview", "int", 1, "GL shim: hide multiview",
      "GL shim only: hide GL_OVR_multiview so all passes use single-view shaders. For GLES games whose multiview "
      "shaders fail on single-view render targets (for example Path of the Warrior)."),
@@ -445,6 +450,8 @@ UI: dict[str, dict] = {
     "ovrp_hold_physics": dict(group="troubleshooting", level="advanced", label="Steadier hands (older Unity)",
                 help="For older Unity games whose hands trail the controllers (for example Sniper Elite "
                      "VR). In others the hands lag.", control=("switch",)),
+    "ovrp_trace": dict(group="troubleshooting", level="advanced", label="Unity frame loop diagnostics (log)",
+                help="Logs where an older Unity game's frame loop waits. No effect on the game.", control=("switch",)),
     "cube_standin": dict(group="troubleshooting", level="advanced", label="Stand in for cube layers",
                 help="Keeps games running that use a 360° cube layer the Frame lacks (for example Budget Cuts "
                      "Ultimate). Leave it on.", control=("switch",)),
@@ -565,6 +572,7 @@ class AdapterSetting(Patch):
             "gl_mv_debug": lambda a: bool((a.extra or {}).get("gl_multiview_libs")) and ap.is_gles(a),
             "ovrp_begin_gate": lambda a: a.engine == "Unity" and "libOVRPlugin.so" in a.libs,
             "ovrp_hold_physics": lambda a: a.engine == "Unity" and "libOVRPlugin.so" in a.libs,
+            "ovrp_trace": lambda a: a.engine == "Unity" and "libOVRPlugin.so" in a.libs,
             "vk_shader_fix": lambda a: a.engine == "Unreal",  # read by the Vulkan shim, which only Unreal games get
             "vk_hide_fdm": lambda a: a.engine == "Unreal",  # Unreal's Vulkan isn't always detected (Metro Awakening)
             "vk_query_slots": lambda a: a.engine == "Unreal" and ap.is_vulkan(a),

@@ -2,7 +2,7 @@
 
 # Patches
 
-Every patch and game setting FramePort knows: 173 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
+Every patch and game setting FramePort knows: 174 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
 
 Each entry says what the patch does, whether it changes the APK or only the install, when FramePort suggests it, its options, the catalog games whose recipe names it and the launch-test signatures that suggest it. Patches that are on by default are on for every game, so the catalog rarely names them.
 
@@ -12,7 +12,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 
 - [Patches from OVRPort](#group-overport) (25)
 - [Steam Frame patches](#group-frame) (56)
-- [Game settings](#group-adapter) (70)
+- [Game settings](#group-adapter) (71)
 - [Files and settings on the Frame](#group-device) (9)
 - [PC VR (Proton and Revive)](#group-pcvr) (13)
 
@@ -137,6 +137,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Vulkan format workaround](#adapter-mutable_fix) | `adapter.mutable_fix` | Game settings |  |
 | [Unity frame loop: wait for skipped frames](#adapter-ovrp_begin_gate) | `adapter.ovrp_begin_gate` | Game settings | 1 |
 | [Steadier hands (older Unity)](#adapter-ovrp_hold_physics) | `adapter.ovrp_hold_physics` | Game settings | 1 |
+| [Unity frame loop diagnostics (log)](#adapter-ovrp_trace) | `adapter.ovrp_trace` | Game settings |  |
 | [See your room](#adapter-passthrough_emul) | `adapter.passthrough_emul` | Game settings |  |
 | [Steadier head tracking](#adapter-pose_consistency) | `adapter.pose_consistency` | Game settings | 1 |
 | [Pose timing diagnostics (log)](#adapter-pose_debug) | `adapter.pose_debug` | Game settings |  |
@@ -1771,6 +1772,20 @@ For older Unity games whose hands trail the controllers (for example Sniper Elit
 
 > Unity's built-in Oculus frame loop (frame.unity_oculus_check): don't pass Unity's physics-step pose update on, so the hands use the frame's display-time poses. Fixes hands trailing the controllers in some games (for example Sniper Elite VR); in others it makes the hands lag (for example BattleSisters).
 
+### <a id="adapter-ovrp_trace"></a>Unity frame loop diagnostics (log)
+
+Logs where an older Unity game's frame loop waits. No effect on the game.
+
+- `adapter.ovrp_trace` · also in builds for this PC (AXRB)
+- **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
+- **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
+- **Options:**
+  - Value: int, default `0`.
+  - Game settings → Troubleshooting → "Unity frame loop diagnostics (log)" (advanced).
+- **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
+
+> Unity's built-in Oculus frame loop (frame.unity_oculus_check): every 5 s, logs how many frame updates, waits, begins and ends went through and which one is in progress (thread, frame, for how long), to see where a game that stops after a few frames waits. No effect on the game.
+
 ### <a id="adapter-passthrough_emul"></a>See your room
 
 Shows the Frame's cameras where the game expects passthrough.
@@ -1858,7 +1873,7 @@ Shows only the game's main picture, without menus or overlays drawn as extra lay
   - Game settings → Troubleshooting → "Main picture only" (advanced).
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
 
-> Frames that carry more than the game's main picture (menus or overlays as extra layers) submit the main picture alone. For runtimes that refuse such frames: AXRB's emulator on this PC rejects every multi-layer OpenGL ES frame (on by default there for GLES games). The extra layers don't show.
+> Frames that carry more than the game's main picture (menus or overlays as extra layers) submit the main picture alone. For runtimes that refuse such frames: AXRB's emulator on this PC rejects every multi-layer OpenGL ES frame. The extra layers don't show; 2 (OpenGL ES games, the default on this PC) draws the flat panels that come after the main picture into it first, so menus and messages drawn as panels still show.
 
 ### <a id="adapter-proximity_emul"></a>Animate fingers from touch
 

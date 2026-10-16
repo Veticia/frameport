@@ -179,6 +179,11 @@
   "title": "Steadier hands (older Unity)",
   "group": "Game settings"
  },
+ "adapter.ovrp_trace": {
+  "anchor": "adapter-ovrp_trace",
+  "title": "Unity frame loop diagnostics (log)",
+  "group": "Game settings"
+ },
  "adapter.passthrough_emul": {
   "anchor": "adapter-passthrough_emul",
   "title": "See your room",

@@ -296,7 +296,15 @@ What FramePort does for GLES games on this PC (all in the PC build / launcher, n
   script would; the run script then gets `-OwnsEmulator` and shuts it down), sets `debug.axrb.image_transport=adb`
   (`FRAMEPORT_AXRB_IMAGE_TRANSPORT=default` leaves AXRB's choice) and `debug.wm.disable_deprecated_target_sdk_dialog=1`.
 - `pc_selection` with a GLES analysis: FrameBridge `scale` at most 0.5 (FrameBridge's minimum), `scale_max=1` (the
-  maximum eye size reported is the scaled one too), `projection_only=1` (see below).
+  maximum eye size reported is the scaled one too), `projection_only=2`: AXRB's emulator refuses every GLES frame with
+  more than one layer (`xrEndFrame` -2), so FrameBridge submits the projection layer alone after drawing the quad
+  layers that follow it into its eye images (`native/adapter/quad_compose_gl.c`, on the game's GL context, per eye at
+  the eye's view and FOV, blending by the quad's flags); `projection_only=1` only drops them.
+- Game installs use `adb install -g` (runtime permissions granted, as Lepton does on the Frame): Android's permission
+  dialog over the game's activity pauses Unity for good (BattleSisters asks for the microphone in its menu).
+- The VrApi bridge copies the game's eye textures into the OpenXR images with `glBlitFramebuffer` when the context
+  has no `glCopyImageSubData` (the emulator's GLES translator is "OpenGL ES 3.1" without `GL_EXT_copy_image`; its stub
+  only logs `libEGL: called unimplemented OpenGL ES API`, so every eye reached the runtime black).
 - `frame.unity_multipass` (experimental on the PC, `pc_detect` for Unity GLES + Oculus XR Plugin): gfxstream lists
   `GL_OVR_multiview2` but its encoder finds a multiview framebuffer incomplete and drops every draw
   (`GL2Encoder.cpp:s_glDrawElements … GL error 0x506 checkFramebufferCompleteness`): both eyes black.
@@ -312,11 +320,21 @@ Per game (AXRB 1.0.4 emulator, Monado simulated HMD at 72 Hz, FramePort's PC bui
 | Game | Build / settings | Furthest | Frame rate / time | Blocker |
 |---|---|---|---|---|
 | Lucky's Tale 1.0.55 (Unity 2019.4 + Oculus XR Plugin, GLES) | PC build + `frame.unity_multipass`, `scale=0.5`, adb route | **title scene drawn in both eyes** (Monado window captured) | 30.5-30.8 fps, image-send 14.5 ms | none headless; needs the headset (picture through SteamVR at its resolution, controllers) |
-| Accounting+ 1.24.35 (Unity 2017.4 built-in Oculus, GLES) | PC build (`frame.unity_oculus_check`), `projection_only`, old-SDK dialog off | **stance selection screen drawn in both eyes** | 10 fps, image-send 82 ms: its OVRPlugin makes 896×1024 eye buffers whatever FrameBridge's scale/max say | its quads (OVROverlay) are dropped by `projection_only` (AXRB rejects every multi-layer GLES frame with -2); eye size only shrinks with the PC runtime's resolution |
-| Path of the Warrior 21.11.10 (VrApi-direct GLES, own engine; from the `PATCHED/` copy) | VrApi bridge + GL shim (timer-query stand-ins) | VR session FOCUSED, 72 fps of empty frames, no crash in 150 s | – | under `--sim` only: Monado's simulated HMD reports position valid but not tracked, AXRB's host then never sets its LOCAL origin (`local_origin_flags` 0), so `xrLocateSpace(VIEW, LOCAL)` has no flags and the bridge's `EnterVrMode` gives up after 30 s ("no tracked head pose before deadline"). Before the stand-ins: SIGSEGV at pc 0 in `EgHalGrTimestampQueryGL` (NULL `glad_glGenQueriesEXT`). Needs a real headset run |
-| BattleSisters 1.2.4 (Unity 2019.4 built-in VR, GLES) | PC build (ovrpshim frame loop), `scale=0.5` | OpenXR session, 3 frames submitted (448×512), then UnityMain and the render thread both wait in futexes (debuggerd stacks) | – | hang after the first frames, not diagnosed yet (guest stacks are only translator frames) |
+| Accounting+ 1.24.35 (Unity 2017.4 built-in Oculus, GLES) | PC build (`frame.unity_oculus_check`), `projection_only`, old-SDK dialog off | **stance selection screen drawn in both eyes** | 10 fps, image-send 82 ms: its OVRPlugin makes 896×1024 eye buffers whatever FrameBridge's scale/max say | its quads (OVROverlay) were dropped by `projection_only=1` (AXRB rejects every multi-layer GLES frame with -2); rebuilt with `projection_only=2` (2026-10-16, qwerty head): same screen at 9.9 fps, no regression (its controller pointers are missing there because qwerty's controllers are inactive); eye size only shrinks with the PC runtime's resolution |
+| Path of the Warrior 21.11.10 (VrApi-direct GLES, own engine; from the `PATCHED/` copy) | VrApi bridge (blit copies) + GL shim (timer-query stand-ins), `scale=0.5`, `projection_only=2`, `--sim` with Monado's qwerty head | **its first screen drawn in both eyes**: the "Please ensure that your Oculus Touch Controllers are properly connected" panel (a VrApi cylinder → quad, drawn into the projection) | 38 fps, image-send ~15 ms | the simulator's controllers: Monado's qwerty builder (needed for a tracked head here, see `--sim` notes) has WMR controllers, which AXRB's bindings don't cover. Found on the way: (1) the simulated head: no tracked pose, `EnterVrMode` gave up after 30 s; (2) every frame -2 (projection + the cylinder quad); (3) black eyes: no `glCopyImageSubData` in the emulator's GLES. Before the stand-ins: SIGSEGV at pc 0 in `EgHalGrTimestampQueryGL` (NULL `glad_glGenQueriesEXT`). Needs a headset: controllers past this screen, gameplay |
+| BattleSisters 1.2.4 (Unity 2019.4 built-in VR, GLES) | PC build (ovrpshim frame loop), `scale=0.5`, installed with `-g`, `--sim` with Monado's qwerty head | **main menu drawn in both eyes** (Continue / New game / Level select hub / Last Bastion / Settings) | 31 fps for 90 s, no stall | none headless. The "hang after 3 frames" was Android's permission dialog: a few seconds into its menu the game asks for a runtime permission (microphone), `GrantPermissionsActivity` became the resumed activity over the game, Unity paused (AAudio pause, no Update2/WaitToBeginFrame/BeginFrame/EndFrame in progress per `ovrp_trace`) and nobody can answer it; not the ovrpshim frame wait and not AXRB's pacing. Fixed by installing with `adb install -g` (as Lepton does). Needs a headset: controllers, gameplay |
 
-`--sim` notes: AXRB's opt-in host capture (`AXRB_CAPTURE_PREFIX`) only starts at sequence 2000 in 1.0.4 (hard-coded;
+`--sim` notes: AXRB 1.0.4's emulator host only reads `AXRB_TEST_SYNTHETIC_HMD=1` (direct mode's `=2` is newer) and
+applies it only to a head *without* valid flags; Monado's simulated head is valid but not tracked, so the host never
+sets its LOCAL origin and VrApi games never get a tracked head. For games on the emulator backend `frameport test
+--sim` therefore runs Monado's **qwerty** builder (`SIMULATED_ENABLE=0`, `QWERTY_ENABLE=1`: its head reports
+POSITION_TRACKED; host.err `AXRB OpenXR: LOCAL origin in tracking world=(0.000 1.600 0.000)`). Its controllers are
+WMR ones, which AXRB's suggested bindings (Touch/Index/Vive) don't cover: no hands. `FRAMEPORT_PC_XR_SIM_HEAD=simulated`
+keeps the simulated head (and its ml2 controllers), `=tracked` forces qwerty. Monado's `remote` builder (tracked head +
+Index controllers) would cover both but listens on 0.0.0.0:4242 (a firewall prompt), so it isn't used. FrameBridge's
+`ovrp_trace=1` (ovrpshim, Unity 2017-2019 legacy frame loop) logs every 5 s how many Update2/WaitToBeginFrame/
+BeginFrame/EndFrame calls went through and which one is in progress (thread, frame, how long): where a stalled game
+waits. AXRB's opt-in host capture (`AXRB_CAPTURE_PREFIX`) only starts at sequence 2000 in 1.0.4 (hard-coded;
 `AXRB_CAPTURE_FIRST_SEQUENCE` isn't read), which GLES games at 10-30 fps don't reach in a test: use the Monado
 window captures and FrameBridge `snapshot=N`. AXRB's guest log only keeps warnings plus AXRB's own tags: read
 `adb logcat -d` for FrameBridge/OVRPlugin lines. `debuggerd -b <pid>` works from `adb shell` (stacks).
@@ -369,6 +387,10 @@ without changing the system's OpenXR runtime or touching SteamVR:
   (WMI, like AXRB's scripts; ready when its pipe `\\.\pipe\<%TEMP%>\monado_comp_ipc` exists), passes the environment to
   the AXRB launch (`pc_android.launch_test(extra_env=…)`, default `xr_sim.active_env()`), stops the service afterwards
   (an already running Monado is used and left running). Service log: `<data>/logs/xr-sim-service.log`.
+- **Head per backend:** when every game tested is on AXRB's emulator backend, the service runs Monado's qwerty builder
+  instead of the simulated one (a tracked head; AXRB 1.0.4's emulator host has no synthetic head for Monado's
+  untracked one, see the GLES section's `--sim` notes); its controllers stay inactive in AXRB.
+  `FRAMEPORT_PC_XR_SIM_HEAD=tracked|simulated` overrides the choice. An already running Monado is used as it is.
 - **Limits:** the simulated head wobbles slowly and the controllers hold still with no buttons pressed, so it proves
   startup, frame submission and what is drawn, not gameplay; the windowed compositor opens a visible window on the
   desktop; frame pacing is Monado's, not a headset's.
