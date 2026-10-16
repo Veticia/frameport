@@ -103,6 +103,50 @@ list should reach `axrb-direct.exe` as a file (FramePort's hard links only work 
 FramePort's folder; drafted as an upstream issue). Needs a headset: picture and latency through SteamVR, sound,
 controllers (the simulated ones hold still), Batman beyond its region menu.
 
+### VrApi-direct games (2026-10-16, direct mode, Monado simulated HMD, Dynarmic, no headset)
+
+Games whose engine calls VrApi itself (no OVRPlugin), so OVRPort can't translate them: they need a `libvrapi.so`
+that translates VrApi to OpenXR. Two candidates: FramePort's `frame.vrapi_bridge` (OVRPort's translator + FramePort's
+changes) and OVRPort's own `patch_vrapi_openxr` (the unpatched translator; only in experimental CLI builds made with
+`-PwithVrApi=true`, e.g. the `OVRPort-CLI-1.2.5-experimental-5e7df52.jar` AXRB's v1.0.0/1.0.1 releases attached;
+AXRB's own profile for The Climb 2 uses it with `-PrecomposeProjectionLayers`). Only converted copies of both games
+were at hand, so the comparison swapped the one file (OVRPort's = the v1.2.5 build from the 2026-10-02 Frame tests).
+
+| Game (engine, graphics) | VrApi route | Reached | fps | Picture | Blocker / notes |
+|---|---|---|---|---|---|
+| The Climb 2 2.2 (CryEngine, Vulkan VrApi) | FramePort's bridge | first-start menu (gender/skin selection) in ~60 s | 69.8 / 69.8 | menu, both hands and controllers, both eyes (AXRB layer captures + Monado's window) | needs AXRB's HostWindow fix (below, AXRB's side) + `frame.vk_android_extensions`; crash only during AXRB's stop (forgiven by triage); no `-PrecomposeProjectionLayers` needed |
+| The Climb 2 2.2 | OVRPort's translator | the same menu | 70.2 / 70.2 | identical | same blockers; passes AXRB's AHB device-extension request through unchanged (worked only because `libfp_vkext.so` lists AHB) |
+| Path of the Warrior (own engine, **GLES** VrApi) | - | not run | - | - | GLES: direct mode can't run it; the emulator (1.0.4) had a copy signed with another key installed by another test, so it wasn't replaced. OVRPort's translator can't run it anywhere (no GLES path: `cannot locate symbol "vrapi_GetTextureSwapChainHandle"`, Frame test 2026-10-02); FramePort's bridge has one |
+
+**Default for PC builds: FramePort's bridge** (`frame.vrapi_bridge`, now `on_pc = True`; recipes keep it as they
+are, nothing to switch). Both translators give the same picture and frame rate in direct mode, but OVRPort's needs
+an unpublished experimental CLI (stable jars list `patch_vrapi_openxr` but fail), has no GLES path (POTW, every GLES
+VrApi game on the emulator) and lacks the device-extension filter; FramePort's is the same code the Frame builds
+use, so one recipe serves both.
+
+Blockers found on the way (in order):
+1. **No window for NativeActivity** (AXRB's side, drafted upstream): CryEngine's `EngineActivity` takes its surface
+   with `Window.takeSurface`; direct mode's `HostWindow.attach` only bridges SurfaceViews (`AXRB_AOSP_HOST_SURFACES
+   0`), so `APP_CMD_INIT_WINDOW` never comes and the game waits after `Loading plug-in CryHTTP` (triage
+   `axrb-direct-no-native-window`). A ~40-line HostWindow patch (`mTakeSurfaceCallback` → `registerSurface` +
+   `surfaceCreated/Changed`, bootstrap dex rebuilt with AXRB's `build_art_bootstrap.py` into a test copy of the
+   local build) fixed it. Likely the same for every NativeActivity engine.
+2. **Quest Vulkan device extensions**: CryEngine checks its list before vkCreateDevice and gave up
+   (`CrySystem initialization failed!`): AXRB's runtime asks for `VK_ANDROID_external_memory_android_hardware_buffer`
+   also in direct mode, and the game requires `VK_EXT_fragment_density_map` (NVIDIA's Windows driver has neither).
+   The bridge now leaves runtime extensions no device offers out; `frame.vk_android_extensions` lists the missing
+   Quest ones to the renderer (AXRB drops them at vkCreateDevice). Triage `axrb-direct-vulkan-extensions`.
+3. **Simulator only**: Monado's head lacks POSITION_TRACKED, so AXRB's host never made its LOCAL origin and the
+   bridge never got a tracked head (empty frames, `initial recenter: head flags=0x0`) → `--sim` sets AXRB's
+   `AXRB_TEST_SYNTHETIC_HMD=2`.
+4. The analysis called The Climb 2 "GLES or unknown" (no manifest declaration) → analysis 20: engines importing
+   `vrapi_CreateSystemVulkan` are "Vulkan (VrApi Vulkan system)", so it goes to direct mode automatically.
+
+Debugging aid: `FRAMEPORT_AXRB_TEST_ENV="AXRB_DIRECT_TRACE=syscall,vulkan;AXRB_CAPTURE_FIRST_SEQUENCE=4500"` passes
+variables to a launch test's AXRB processes (`AXRB_DIRECT_DUMP` only works in AXRB's own VM mode, not with ART).
+Needs a headset: the picture through SteamVR, controllers past the first menu (the simulated ones hold still),
+climbing, sound; and a released AXRB-Emulatorless with the window fix.
+
 ## Spike results (2026-10-10, Windows 11 26200, i7-14700K, RTX 4080 SUPER, 64 GB; headless)
 
 | Step | Result |
