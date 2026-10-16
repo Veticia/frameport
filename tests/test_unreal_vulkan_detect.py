@@ -20,7 +20,8 @@ def _apk(tmp_path, *, key="com.epicgames.ue4.GameActivity.bSupportsVulkan", valu
     manifest = build_axml([
         ("start", "manifest", [("package", "str", "com.example.unrealgame")]),
         ("start", "application", []),
-        ("start", "meta-data", [("name", "str", "com.epicgames.ue4.GameActivity.bHasOBBFiles"), ("value", "bool", True)]),
+        ("start", "meta-data", [("name", "str", "com.epicgames.ue4.GameActivity.bHasOBBFiles"),
+                                ("value", "bool", True)]),
         ("end", "meta-data"),
         *meta,
         ("end", "application"),
