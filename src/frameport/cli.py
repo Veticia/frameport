@@ -509,6 +509,18 @@ def install(package: Optional[str] = typer.Argument(None), all_: bool = typer.Op
         target.add_to_library(shortcuts, printing_reporter(False))
 
 
+def _sim_wants_tracked_head(deployments: list[dict]) -> bool:
+    """--sim: Monado's tracked (qwerty) head when every game tested is an Android one on AXRB's emulator backend.
+    Its host bridge (1.0.4) has no synthetic head for Monado's valid-but-untracked simulated one (direct mode has:
+    AXRB_TEST_SYNTHETIC_HMD=2), so the guest's LOCAL space never gets an origin and VrApi games never see a tracked
+    head (tools/xr_sim.TRACKED_HEAD_ENV)."""
+    from .targets import pc_android
+
+    android = [d for d in deployments if d.get("kind") == pc_android.KIND]
+    return bool(android) and len(android) == len(deployments) and all(
+        pc_android.dep_backend(d) != pc_android.axrb.DIRECT for d in android)
+
+
 @app.command()
 def test(package: Optional[str] = typer.Argument(None), all_: bool = typer.Option(False, "--all", help=ALL_HELP),
          frame: Optional[str] = typer.Option(None, help=FRAME_HELP),
@@ -525,9 +537,12 @@ def test(package: Optional[str] = typer.Argument(None), all_: bool = typer.Optio
         raise typer.BadParameter("--sim only works with --to pc")
     target = _target(frame, to=to)
     _set_axrb_backend(target, axrb_backend)
-    installed = {g["package"] for g in target.installed()}
-    with xr_sim.running(to == "pc" and xr_sim.enabled(sim), reporter=printing_reporter(False)):
-        for pkg in _pkgs(package, all_):
+    games = {g["package"]: g for g in target.installed()}
+    installed = set(games)
+    pkgs = _pkgs(package, all_)
+    with xr_sim.running(to == "pc" and xr_sim.enabled(sim), reporter=printing_reporter(False),
+                        tracked=xr_sim.tracked_head(_sim_wants_tracked_head([games[p] for p in pkgs if p in games]))):
+        for pkg in pkgs:
             if pkg not in installed:
                 typer.echo(f"{pkg}: not installed on {target.label}", err=True)
                 continue

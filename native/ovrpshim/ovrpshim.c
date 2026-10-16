@@ -34,6 +34,9 @@ static pthread_once_t once = PTHREAD_ONCE_INIT;
 // physics update back made the hands lag and the gate made loading screens stutter, so both are off unless the recipe
 // turns them on (ovrp_begin_gate=1, ovrp_hold_physics=1).
 static int begin_gate, hold_physics;
+// ovrp_trace=1 (diagnostics): every 5 s, how many frame-loop calls went through and which are in progress (thread,
+// frame index, for how long): shows where the main and render threads wait when a game stops after a few frames.
+static int trace;
 
 static void read_conf_file(const char *path) {
     FILE *f = fopen(path, "r");
@@ -42,6 +45,7 @@ static void read_conf_file(const char *path) {
     while (fgets(line, sizeof(line), f)) {
         if (!strncmp(line, "ovrp_begin_gate=", 16)) begin_gate = atoi(line + 16);
         if (!strncmp(line, "ovrp_hold_physics=", 18)) hold_physics = atoi(line + 18);
+        if (!strncmp(line, "ovrp_trace=", 11)) trace = atoi(line + 11);
     }
     fclose(f);
 }
@@ -73,8 +77,56 @@ static void read_conf(void) {
     if (env && *env) read_conf_file(env);
 }
 
+// ---------------------------------------------------------------- ovrp_trace
+#include <unistd.h>
+static long long now_ns(void);
+enum { T_PHYSICS, T_RENDER, T_WAIT, T_BEGIN, T_END, T_COUNT };
+static const char *const trace_names[T_COUNT] = {"Update2(physics)", "Update2(render)", "WaitToBeginFrame",
+                                                 "BeginFrame", "EndFrame"};
+static struct { long long since; int frame, tid, last_frame, last_result; long calls; } traced[T_COUNT];
+
+static void trace_enter(int k, int frame) {
+    if (!trace) return;
+    traced[k].frame = frame;
+    traced[k].tid = gettid();
+    __atomic_store_n(&traced[k].since, now_ns(), __ATOMIC_RELEASE);
+}
+
+static void trace_exit(int k, int result) {
+    if (!trace) return;
+    __atomic_store_n(&traced[k].since, 0, __ATOMIC_RELEASE);
+    traced[k].last_frame = traced[k].frame;
+    traced[k].last_result = result;
+    __atomic_add_fetch(&traced[k].calls, 1, __ATOMIC_RELAXED);
+}
+
+static void *trace_watch(void *arg) {
+    (void)arg;
+    for (;;) {
+        sleep(5);
+        char line[700];
+        size_t used = 0;
+        long long now = now_ns();
+        for (int k = 0; k < T_COUNT && used < sizeof(line) - 120; ++k) {
+            long long since = __atomic_load_n(&traced[k].since, __ATOMIC_ACQUIRE);
+            used += (size_t)snprintf(line + used, sizeof(line) - used, " %s %ld (last frame %d: %d)", trace_names[k],
+                                     __atomic_exchange_n(&traced[k].calls, 0, __ATOMIC_RELAXED), traced[k].last_frame,
+                                     traced[k].last_result);
+            if (since)
+                used += (size_t)snprintf(line + used, sizeof(line) - used, " [IN frame %d, tid %d, %lld ms]",
+                                         traced[k].frame, traced[k].tid, (now - since) / 1000000);
+        }
+        LOG("ovrp trace 5s:%s", line);
+    }
+    return NULL;
+}
+
 static void init(void) {
     read_conf();
+    if (trace) {
+        pthread_t watcher;
+        if (!pthread_create(&watcher, NULL, trace_watch, NULL)) pthread_detach(watcher);
+    }
     void *ovrp = dlopen("libOVRPlugin.so", RTLD_NOW | RTLD_NOLOAD);
     if (!ovrp) ovrp = dlopen("libOVRPlugin.so", RTLD_NOW);
     if (ovrp) {
@@ -134,7 +186,9 @@ EXPORT int fpov_Update2(int step, int frame_index, double prediction_seconds) {
     if (step == STEP_RENDER && real_wait && frame_index != last_waited) {
         last_waited = frame_index;
         if (last_wait_begun(frame_index)) {
+            trace_enter(T_WAIT, frame_index);
             int r = real_wait(frame_index);
+            trace_exit(T_WAIT, r);
             if (logged++ < 3) LOG("ovrp frame loop shim: waited for frame %d: %d", frame_index, r);
         } else if (skipped++ < 20 || skipped % 1000 == 0) {
             LOG("ovrp frame loop shim: frame %d: the last waited frame wasn't begun within %d ms, not waiting "
@@ -143,7 +197,10 @@ EXPORT int fpov_Update2(int step, int frame_index, double prediction_seconds) {
         mouse_click_frame();
     }
     if (hold_physics && step == STEP_PHYSICS && rendered) return last_result;  // see above: keeps the display-time poses
+    const int traced_step = step == STEP_RENDER ? T_RENDER : T_PHYSICS;
+    trace_enter(traced_step, frame_index);
     int r = real_update2 ? real_update2(step, frame_index, prediction_seconds) : -1000;  // ovrpFailure
+    trace_exit(traced_step, r);
     if (step == STEP_RENDER) rendered = 1, last_result = r;
     return r;
 }
@@ -173,7 +230,9 @@ EXPORT int fpov_BeginFrame(long frame, long b, long c, long d) {
         remap_from = remap_to = -1;
     }
     pthread_mutex_unlock(&begin_lock);
+    trace_enter(T_BEGIN, (int)index);
     int r = real ? real(index, b, c, d) : -1000;
+    trace_exit(T_BEGIN, r);
     if (index != frame && logged++ < 20)
         LOG("ovrp frame loop shim: begin frame %ld as waited frame %ld: %d", frame, index, r);
     pthread_mutex_lock(&begin_lock);
@@ -186,11 +245,15 @@ EXPORT int fpov_BeginFrame(long frame, long b, long c, long d) {
 
 EXPORT int fpov_EndFrame(long frame, long b, long c, long d) {
     static PFN_FrameCall real;
+    pthread_once(&once, init);
     if (!real) real = ovrp_fn("ovrp_EndFrame");
     pthread_mutex_lock(&begin_lock);
     if ((int)frame == remap_from) frame = remap_to;
     pthread_mutex_unlock(&begin_lock);
-    return real ? real(frame, b, c, d) : -1000;
+    trace_enter(T_END, (int)frame);
+    int r = real ? real(frame, b, c, d) : -1000;
+    trace_exit(T_END, r);
+    return r;
 }
 
 // ---------------------------------------------------------------- input diagnostics (pass-through)

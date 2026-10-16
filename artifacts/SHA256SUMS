@@ -5,7 +5,7 @@ c9c3da5cac224c38e2210b781bd12b7f97e02bd6b0ebb0ef85543e4ea4b76671  ./arm64-v8a/li
 18d8d917e83a6d87008f41908eb478dff635e798844e125abd1e8a5cf31805e2  ./arm64-v8a/liba32stub.so
 d6337034fb0bdcca7ef9b7063d85b7586b8508b63b435959e8fffaba0691091c  ./arm64-v8a/libfp_langpack.so
 69102b128e00fa1809489a7308e09c1505f563bf7091bbdd3fe5a58e4cc96c2c  ./arm64-v8a/libfp_luajit.so
-321da502e0f8f46f0880aad39fe6b84bdef88f925164568814cf704a1b31a577  ./arm64-v8a/libfp_ovrp.so
+e2465e8960b4dd591d303e30c9d80b8a7c7c7eeff53736419c7105a697725732  ./arm64-v8a/libfp_ovrp.so
 40defdaddcda53bd2649eb48076fae1622bfc2bfc88e9e03c94fc8b45af2a4f2  ./arm64-v8a/libfp_ovrtrace.so
 0167c2fde5dfde62897f9d85afc4fc8e97784e988b5b8df6cea8c407240b3424  ./arm64-v8a/libfp_tkeys.so
 e8c0965c188665a4e565e4a3af983ef1866d1cf9225665cc90d8df286bc96ef3  ./arm64-v8a/libfp_vk.so
@@ -14,11 +14,11 @@ e8c0965c188665a4e565e4a3af983ef1866d1cf9225665cc90d8df286bc96ef3  ./arm64-v8a/li
 5432674a59d02f411cd853a5dc57e3fa547d1ac518f25bf433fc54c43677177a  ./arm64-v8a/libfpglmv.so
 8a8f6b1da8952cb3933a5b53558424a5fc56043b2527a16bb6dd62a00d2de01a  ./arm64-v8a/libframe_xrshim.so
 227626fcd96ea31a5c4fbd006e971b40f9b5a1e10d1bb30456f0a2792fa2c9e2  ./arm64-v8a/libglshim.so
-1600c1f0fd26403dafb6936e07daa66f3c10d97c7f635a2a636c0cc5c575ebd7  ./arm64-v8a/libopenxr_loader_generic.so
+34ae4e6757adf83942d179a098ae91b4da187fead17e02a3a65dd6507daf2073  ./arm64-v8a/libopenxr_loader_generic.so
 1feaeafad467c4cafdf2b018a4d84b0bee200c3f711697b4ce97e66a3ba256ca  ./arm64-v8a/libovrplatformcompat.so
-71b3df219f331bcb42a483550e35371475b1aa886762ddcf5d0d739d74c51ead  ./arm64-v8a/libvrapi.so
+f7f8349b0d3e9a29305b4d2aa1eb3ec6b394feff4d3e2ea07b8a65f6df1d15f9  ./arm64-v8a/libvrapi.so
 71b3df219f331bcb42a483550e35371475b1aa886762ddcf5d0d739d74c51ead  ./arm64-v8a/libvrapi_foveation.so
-35ea99ddf6312805b88cfb0a0145180950519217c67bd758e601f40f05953c5b  ./armeabi-v7a/libopenxr_loader_generic.so
+c7dea9e3435f36e281341121a9e43102f008cc08bba08191c21bac14912e6b87  ./armeabi-v7a/libopenxr_loader_generic.so
 1871eae093432d277da4bc751bf5f3269dfcf11f9168260b0c3caadb0dedb19d  ./dex/oculusos-stubs.dex
 b634ab5640e258563c536e658cad87080553df6f34f62269a21d554844e58bfe  ./hevc/COPYING.FFmpeg
 141de01f0d40b97d4f9a720db5ab8ea442f6aa35db5272048899292884994a1c  ./hevc/libstagefrighthw.so

@@ -434,6 +434,8 @@ def test_install_into_axrb(tmp_path, monkeypatch, win):
     assert events == ["start", "runtime", "stop"]
     pushes = [c for c in adb.calls if c[0] == "push"]
     assert len(pushes) == 1 and pushes[0][2] == "/sdcard/Android/obb/com.game.x/patch.1.com.game.x.obb"
+    installs = [c for c in adb.calls if c[0] == "install"]
+    assert len(installs) == 1 and "-g" in installs[0]  # runtime permissions granted (no dialog over the game)
     dep = json.loads((tmp_path / "rec" / "deployment.json").read_text())
     assert dep["kind"] == "android" and dep["recipe"]["patches"] == ["frame.ovrstubs", "patch_oculus_unity"]
     assert dep["backend"] == "emulator" and dep["flags"] == []

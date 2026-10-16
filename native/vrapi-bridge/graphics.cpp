@@ -8,7 +8,9 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <new>
 
@@ -752,6 +754,59 @@ bool acquireJobs(std::array<CopyJob, kMaxCopyJobs>& jobs, uint32_t count) {
     return true;
 }
 
+// glCopyImageSubData is OpenGL ES 3.2 (or GL_EXT/OES_copy_image). The Android emulator's GLES translator (AXRB's
+// emulator on a PC: "OpenGL ES 3.0"/"3.1" without either extension) only has a stub that logs "called unimplemented
+// OpenGL ES API" and copies nothing: every eye image reached the runtime black (Path of the Warrior). Without it the
+// copy is a glBlitFramebuffer (ES 3.0) per array layer: the same texels for the same formats (the twin RGBA8/sRGB
+// formats of ensureOutputGl would be converted by a blit; that combination only arises when the runtime lacks the
+// app's format).
+bool glCopyImageAvailable() {
+    static int state = -1;  // one driver per process
+    if (state < 0) {
+        const char* version = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+        const char* ext = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
+        int major = 0, minor = 0;
+        if (version) std::sscanf(version, "OpenGL ES %d.%d", &major, &minor);
+        state = major > 3 || (major == 3 && minor >= 2) ||
+                (ext && (std::strstr(ext, "GL_EXT_copy_image") || std::strstr(ext, "GL_OES_copy_image")));
+        OVP_LOG("GLES eye copies: %s (%s)", state ? "glCopyImageSubData" : "glBlitFramebuffer, no glCopyImageSubData",
+                version ? version : "no GL version");
+    }
+    return state == 1;
+}
+
+void blitCopyGl(GLuint source, GLuint destination, GLenum target, GLsizei width, GLsizei height, GLsizei layers) {
+    GLint readFbo = 0, drawFbo = 0;
+    GLboolean mask[4] = {GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE};
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &readFbo);
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &drawFbo);
+    glGetBooleanv(GL_COLOR_WRITEMASK, mask);
+    const GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST), discard = glIsEnabled(GL_RASTERIZER_DISCARD);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_RASTERIZER_DISCARD);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    GLuint fbo[2] = {0, 0};  // per call: framebuffers aren't shared between the app's contexts
+    glGenFramebuffers(2, fbo);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo[0]);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo[1]);
+    for (GLsizei layer = 0; layer < std::max<GLsizei>(layers, 1); ++layer) {
+        if (target == GL_TEXTURE_2D_ARRAY) {
+            glFramebufferTextureLayer(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, source, 0, layer);
+            glFramebufferTextureLayer(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, destination, 0, layer);
+        } else {
+            glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, source, 0);
+            glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, destination, 0);
+        }
+        glBlitFramebuffer(0, 0, width, height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    }
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, static_cast<GLuint>(readFbo));
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, static_cast<GLuint>(drawFbo));
+    glDeleteFramebuffers(2, fbo);
+    glColorMask(mask[0], mask[1], mask[2], mask[3]);
+    if (scissor) glEnable(GL_SCISSOR_TEST);
+    if (discard) glEnable(GL_RASTERIZER_DISCARD);
+}
+
 bool submitCopiesGl(std::array<CopyJob, kMaxCopyJobs>& jobs, uint32_t count) {
     ovp::Runtime& s = ovp::runtime();
 #ifdef OVP_GL_DIAG  // build with -DOVP_GL_DIAG for app GL state + eye image readback probes
@@ -791,12 +846,17 @@ bool submitCopiesGl(std::array<CopyJob, kMaxCopyJobs>& jobs, uint32_t count) {
         const GLuint destination = chain->glOutputImages[jobs[i].outputIndex].image;
         const GLenum target = chain->arrayLayers > 1 ? GL_TEXTURE_2D_ARRAY : GL_TEXTURE_2D;
         while (glGetError() != GL_NO_ERROR) {}  // don't blame the copy for errors the app left behind
-        glCopyImageSubData(source, target, 0, 0, 0, 0, destination, target, 0, 0, 0, 0,
-                           static_cast<GLsizei>(chain->width), static_cast<GLsizei>(chain->height),
-                           static_cast<GLsizei>(chain->arrayLayers));
+        if (glCopyImageAvailable()) {
+            glCopyImageSubData(source, target, 0, 0, 0, 0, destination, target, 0, 0, 0, 0,
+                               static_cast<GLsizei>(chain->width), static_cast<GLsizei>(chain->height),
+                               static_cast<GLsizei>(chain->arrayLayers));
+        } else {
+            blitCopyGl(source, destination, target, static_cast<GLsizei>(chain->width),
+                       static_cast<GLsizei>(chain->height), static_cast<GLsizei>(chain->arrayLayers));
+        }
         const GLenum error = glGetError();
         static int errors;
-        if (error != GL_NO_ERROR && errors++ < 5) OVP_ERROR("glCopyImageSubData failed: 0x%x", error);
+        if (error != GL_NO_ERROR && errors++ < 5) OVP_ERROR("GL eye image copy failed: 0x%x", error);
 #ifdef OVP_GL_DIAG
         static int probes;
         if (probes < 4000 && (probes++ % 360) == 0) {

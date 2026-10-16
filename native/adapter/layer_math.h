@@ -126,4 +126,23 @@ static inline int lm_face_visible(int face, XrVector3f forward, float cos_limit)
 // Cosine of the angle between the face's centre direction and `forward` (unit): sort key, larger = closer to view.
 static inline float lm_face_score(int face, XrVector3f forward) { return lm_dot(lm_face_dir(face, 0, 0), forward); }
 
+// Clip-space corners of a quad layer seen from one eye (projection_only=2 draws quads into the projection image):
+// `quad` = the quad's pose in the projection layer's space, `size` its extent in metres, `eye` + `fov` the view's
+// pose and angles in that space. out[0..3] = bottom-left, bottom-right, top-left, top-right (a triangle strip),
+// each x, y, z, w with w = depth in front of the eye (GL then interpolates the texture coordinates
+// perspective-correctly and clips what lies behind the eye); z = 0 (no depth test).
+static inline void lm_quad_clip(XrPosef quad, XrExtent2Df size, XrPosef eye, XrFovf fov, float out[4][4]) {
+    const float tl = tanf(fov.angleLeft), tr = tanf(fov.angleRight), tu = tanf(fov.angleUp), td = tanf(fov.angleDown);
+    const XrPosef to_eye = lm_pose_mul(lm_pose_inv(eye), quad);
+    for (int i = 0; i < 4; ++i) {
+        XrVector3f c = {(i & 1 ? 0.5f : -0.5f) * size.width, (i & 2 ? 0.5f : -0.5f) * size.height, 0};
+        XrVector3f r = lm_rotate(to_eye.orientation, c);
+        float x = r.x + to_eye.position.x, y = r.y + to_eye.position.y, z = r.z + to_eye.position.z;
+        out[i][0] = (2 * x + (tr + tl) * z) / (tr - tl);
+        out[i][1] = (2 * y + (tu + td) * z) / (tu - td);
+        out[i][2] = 0;
+        out[i][3] = -z;
+    }
+}
+
 #endif

@@ -81,6 +81,31 @@ int main(void) {
     CHECK(NEAR(fabsf(back.orientation.w), fabsf(a.orientation.w))
           && NEAR(lm_angle(lm_qmul(back.orientation, lm_qconj(a.orientation))), 0));
     CHECK(NEAR(lm_angle(lm_axis_angle(0, 1, 0, 0.5f)), 0.5f));
+    // quad into a projection image (projection_only=2): a 2x2 m quad 1 m ahead of an eye with a symmetric 90° FOV
+    // fills the view exactly (NDC = clip / w = ±1); bottom-left first, top-right last
+    float clip[4][4];
+    XrFovf fov90 = {-LM_PI / 4, LM_PI / 4, LM_PI / 4, -LM_PI / 4};
+    XrPosef ident = {{0, 0, 0, 1}, {0, 0, 0}}, ahead1 = {{0, 0, 0, 1}, {0, 0, -1}};
+    lm_quad_clip(ahead1, (XrExtent2Df){2, 2}, ident, fov90, clip);
+    CHECK(NEAR(clip[0][3], 1) && NEAR(clip[0][0] / clip[0][3], -1) && NEAR(clip[0][1] / clip[0][3], -1));
+    CHECK(NEAR(clip[3][0] / clip[3][3], 1) && NEAR(clip[3][1] / clip[3][3], 1) && NEAR(clip[1][0], 1));
+    CHECK(NEAR(clip[2][1], 1) && NEAR(clip[2][0], -1) && clip[0][2] == 0);
+    // the eye moved 1 m to the right: the quad's centre is left of the view's centre, its right edge at the centre
+    XrPosef right_eye = {{0, 0, 0, 1}, {1, 0, 0}};
+    lm_quad_clip(ahead1, (XrExtent2Df){2, 2}, right_eye, fov90, clip);
+    CHECK(NEAR(clip[1][0] / clip[1][3], 0) && NEAR(clip[0][0] / clip[0][3], -2));
+    // an asymmetric FOV (more to the left) moves the view's centre: the quad's centre is right of the image centre
+    XrFovf asym = {-0.9f, 0.5f, 0.6f, -0.6f};
+    lm_quad_clip(ahead1, (XrExtent2Df){0.01f, 0.01f}, ident, asym, clip);
+    CHECK(clip[0][0] / clip[0][3] > 0.1f && NEAR(clip[0][1] / clip[0][3] + clip[3][1] / clip[3][3], 0));
+    // behind the eye: w < 0 (GL clips it away)
+    XrPosef behind = {{0, 0, 0, 1}, {0, 0, 1}};
+    lm_quad_clip(behind, (XrExtent2Df){1, 1}, ident, fov90, clip);
+    CHECK(clip[0][3] < 0 && clip[3][3] < 0);
+    // a quad turned 90° about Y is seen edge-on: left and right corners at the same x
+    XrPosef turned = {lm_axis_angle(0, 1, 0, LM_PI / 2), {0, 0, -2}};
+    lm_quad_clip(turned, (XrExtent2Df){1, 1}, ident, fov90, clip);
+    CHECK(fabsf(clip[0][0] / clip[0][3]) < 0.3f && NEAR(clip[0][3] + clip[1][3], 4));
     puts("ok");
     return 0;
 }
