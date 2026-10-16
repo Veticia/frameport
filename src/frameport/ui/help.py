@@ -19,6 +19,12 @@ class _Translated(dict):
 
 
 HELP: dict[str, str] = _Translated({
+    "mr_room": "Mixed-reality games use walls and furniture from a saved room. Scan your room in the headset, use "
+               "your play area for walls only, or import a recorded scan.",
+    "mr_alignment": "Room positions belong to the play area where they were recorded. If SteamVR changes it, "
+                    "scan again or use the new boundary to line up virtual walls with your room.",
+    "mr_scanner": "The scanner turns a recorded depth-mesh dump into a room. FramePort installs it when you "
+                  "build a recorded scan.",
     "steam_library": "Now waits until Steam can restart safely. Later saves shortcuts for the next Steam start. "
                      "Off uses FramePort Play without Steam per-game integration; existing shortcuts stay.",
     # ---- game status / library
