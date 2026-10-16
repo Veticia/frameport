@@ -2,7 +2,7 @@
 
 # Patches
 
-Every patch and game setting FramePort knows: 170 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
+Every patch and game setting FramePort knows: 171 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
 
 Each entry says what the patch does, whether it changes the APK or only the install, when FramePort suggests it, its options, the catalog games whose recipe names it and the launch-test signatures that suggest it. Patches that are on by default are on for every game, so the catalog rarely names them.
 
@@ -11,7 +11,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 ## Groups
 
 - [Patches from OVRPort](#group-overport) (25)
-- [Steam Frame patches](#group-frame) (55)
+- [Steam Frame patches](#group-frame) (56)
 - [Game settings](#group-adapter) (68)
 - [Files and settings on the Frame](#group-device) (9)
 - [PC VR (Proton and Revive)](#group-pcvr) (13)
@@ -96,6 +96,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Unreal: thumb follows the capacitive touches](#frame-unreal_thumb_touch) | `frame.unreal_thumb_touch` | Steam Frame patches | 7 |
 | [Vermillion: paint canvases in the scene](#frame-vermillion_scene_canvas) | `frame.vermillion_scene_canvas` | Steam Frame patches | 1 |
 | [Vivox voice chat: skip Android 12 audio routing](#frame-vivox_audio_route) | `frame.vivox_audio_route` | Steam Frame patches | 1 |
+| [Vulkan: list Android's external-memory extensions (this PC)](#frame-vk_android_extensions) | `frame.vk_android_extensions` | Steam Frame patches |  |
 | [Vulkan: drop invalid render-pass pointers](#frame-vk_sanitize) | `frame.vk_sanitize` | Steam Frame patches | default · 1 |
 | [VrApi → OpenXR bridge](#frame-vrapi_bridge) | `frame.vrapi_bridge` | Steam Frame patches | 3 |
 | [Quiet Meta's VrApi loader (OpenXR games)](#frame-vrapi_stub) | `frame.vrapi_stub` | Steam Frame patches | 2 |
@@ -1165,6 +1166,19 @@ Lets games with Vivox voice chat start on the Frame (they'd crash on an Android 
 
 > Vivox's voice-chat SDK (for example Green Hell VR) checks the audio route with Android 12 methods (AudioManager communication devices) without checking the Android version; Lepton runs Android 11, so the game crashes at start with a NoSuchMethodError. Those Vivox methods return at once instead (an in-place edit of classes.dex); voice chat keeps the default audio route.
 
+### <a id="frame-vk_android_extensions"></a>Vulkan: list Android's external-memory extensions (this PC)
+
+On this PC only: lets games that draw with Vulkan themselves (for example The Climb 2) start in AXRB's direct mode.
+
+- `frame.vk_android_extensions` · also in builds for this PC (AXRB)
+- **Changes:** Changes the APK (a rebuild and reinstall apply it).
+- **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
+- **Suggested by launch-test signatures:**
+  - `axrb-direct-vulkan-extensions` (fatal): CryEngine found its Vulkan device without extensions every Quest has (VK_EXT_fragment_density_map, Android's external memory) and gave up before creating it; the PC's graphics driver doesn't have them. "Vulkan - list Android's external-memory extensions (this PC)" lists them for the game in builds for this PC, and AXRB leaves them out again when the device is created.
+- **Source:** [patches/frame/vk_android_extensions.py](../src/frameport/patches/frame/vk_android_extensions.py)
+
+> Only in builds for this PC (AXRB's direct mode). Direct mode gives the game the Windows graphics driver's Vulkan device, which lacks extensions every Quest has: Android's external memory (VK_KHR_external_memory_fd, VK_ANDROID_external_memory_android_hardware_buffer, VK_EXT_queue_family_foreign) and VK_EXT_fragment_density_map. Engines that call VrApi with Vulkan themselves, such as CryEngine in The Climb 2, refuse to create their device without them ("CrySystem initialization failed" right after "Renderer initialization"). The game's renderer gets them listed (libfp_vkext.so); AXRB leaves them out again when the device is created.
+
 ### <a id="frame-vk_sanitize"></a>Vulkan: drop invalid render-pass pointers
 
 Cleans up graphics data that crashes some Unreal games on the Frame.
@@ -1185,7 +1199,7 @@ Cleans up graphics data that crashes some Unreal games on the Frame.
 
 Lets games built on Meta's oldest VR interface run on the Frame.
 
-- `frame.vrapi_bridge` · experimental · also in builds for this PC (AXRB, experimental)
+- `frame.vrapi_bridge` · experimental · also in builds for this PC (AXRB)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** The engine calls libvrapi.so directly; OVRPort can't translate it.
 - **Conflicts with:** [`frame.vrapi_stub`](#frame-vrapi_stub)

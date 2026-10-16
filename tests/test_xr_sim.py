@@ -42,7 +42,8 @@ def test_finds_the_portable_monado(win, monkeypatch):
     other = fake_monado(win / "elsewhere")
     monkeypatch.setenv("FRAMEPORT_MONADO_DIR", str(other))  # the folder with `install`, or `install` itself
     assert xr_sim.monado_dir() == other
-    assert xr_sim.client_env() == {"XR_RUNTIME_JSON": "W:" + str(other / "openxr_monado.json").replace("/", "\\")}
+    assert xr_sim.client_env() == {"XR_RUNTIME_JSON": "W:" + str(other / "openxr_monado.json").replace("/", "\\"),
+                                     "AXRB_TEST_SYNTHETIC_HMD": "2"}  # a tracked head + LOCAL origin for AXRB
 
 
 def test_missing_monado_is_explained(win):
@@ -99,7 +100,7 @@ def test_a_running_service_is_used_and_left_alone(win, monkeypatch):
     monkeypatch.setattr(axrb, "spawn_detached", lambda cmd: pytest.fail("started a second service"))
     monkeypatch.setattr(winhost, "run_win", lambda *a, **k: pytest.fail("stopped someone else's service"))
     with xr_sim.running(True, captures=False):
-        assert set(xr_sim.active_env()) == {"XR_RUNTIME_JSON"}
+        assert set(xr_sim.active_env()) == {"XR_RUNTIME_JSON", "AXRB_TEST_SYNTHETIC_HMD"}
 
 
 def test_failed_start_is_cleaned_up(win, monkeypatch):

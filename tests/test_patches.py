@@ -636,6 +636,19 @@ def test_stand_ins_count_only_when_the_loader_links_them(monkeypatch):
     assert detect.missing_ovr_symbols(libs) == set()
 
 
+def test_vrapi_vulkan_from_engine_imports(monkeypatch):
+    """A direct-VrApi engine that creates VrApi's Vulkan system renders with Vulkan (The Climb 2's
+    libCryOculusMobileVR.so); libvrapi.so's own exports and GLES engines (Path of the Warrior) don't count."""
+    from frameport.analysis import detect
+
+    imports = {b"cry": {"vrapi_Initialize", "vrapi_CreateSystemVulkan"}, b"potw": {"vrapi_Initialize"},
+               b"vrapi": {"vrapi_CreateSystemVulkan"}}
+    monkeypatch.setattr(detect.elf, "is_elf", lambda d: True)
+    monkeypatch.setattr(detect.elf, "dyn_symbols", lambda d, defined: set() if defined else imports[d])
+    assert detect.vrapi_vulkan({"libCryOculusMobileVR.so": b"cry", "libvrapi.so": b"vrapi"})
+    assert not detect.vrapi_vulkan({"libpotw.so": b"potw", "libvrapi.so": b"vrapi"})
+
+
 def test_start_activity_after_overport_conversion(tmp_path):
     """OVRPort gives every MAIN activity LAUNCHER + VR categories (WiiCompiled: LauncherActivity and QuestActivity),
     so the VR activity must come from the original APK's analysis; only it may stay a launcher."""

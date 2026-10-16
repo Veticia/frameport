@@ -81,7 +81,11 @@ def client_env(monado: Path | None = None) -> dict[str, str]:
     monado = monado or monado_dir()
     if not monado:
         raise XrSimError(NOT_FOUND)
-    return {"XR_RUNTIME_JSON": winhost.to_windows(monado / "openxr_monado.json")}
+    # AXRB_TEST_SYNTHETIC_HMD=2 (AXRB's host bridge, test-only): a fixed standing head and a valid LOCAL origin.
+    # Monado's simulated head has no POSITION_TRACKED bit, so the bridge never sets up its LOCAL origin and reports
+    # every head pose in LOCAL with flags 0; VrApi games (The Climb 2) then never get a tracked head and only submit
+    # empty frames.
+    return {"XR_RUNTIME_JSON": winhost.to_windows(monado / "openxr_monado.json"), "AXRB_TEST_SYNTHETIC_HMD": "2"}
 
 
 def service_env(headless: bool = False) -> dict[str, str]:

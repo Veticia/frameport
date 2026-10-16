@@ -103,6 +103,8 @@ SUMMARIES = {
     "frame.avatar_stub": "Lets games start that would stop at Meta's avatars (for example BlazeRush). No Meta "
                          "avatars.",
     "frame.vrapi_bridge": "Lets games built on Meta's oldest VR interface run on the Frame.",
+    "frame.vk_android_extensions": "On this PC only: lets games that draw with Vulkan themselves (for example The "
+                                   "Climb 2) start in AXRB's direct mode.",
     "frame.blazerush": "Makes BlazeRush's menus and controllers work without Meta's avatars, and lets its shader "
                        "fixes take effect.",
     "frame.a32_bridge": "Runs a 32-bit game (Gear VR, Oculus Go, early Quest) on the Frame, which only runs "

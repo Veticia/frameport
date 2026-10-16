@@ -10,7 +10,7 @@ SHIM = "libglshim.so"
 
 class VrApiBridge(Patch):
     id = "frame.vrapi_bridge"
-    on_pc = "experimental"
+    on_pc = True  # The Climb 2 renders in AXRB's direct mode (2026-10-16, headless)
     title = "VrApi → OpenXR bridge"
     description = (
         "Replaces libvrapi.so with a VrApi→OpenXR bridge (Android-XR-Bridge/OVRPort fork, GPL-3.0, patched for the "
@@ -58,6 +58,9 @@ class GlShim(Patch):
     # has none (AXRB's emulator: Path of the Warrior crashed on a NULL glGenQueriesEXT), and hiding multiview helps
     # there too (gfxstream drops draws into multiview framebuffers); its GLSL fixes are additive
     on_pc = "experimental"
+
+    def pc_keeps(self, a):
+        return "GLES" in a.graphics  # Vulkan VrApi games (The Climb 2) go to AXRB's direct mode without it
 
     def detect(self, a):
         if a.direct_vrapi and a.uses_glad_gl and "GLES" in a.graphics and "arm64-v8a" in a.abis:

@@ -109,6 +109,11 @@ class Patch:
         in the recipe, which both builds share): pc_selection adds it."""
         return False
 
+    def pc_keeps(self, analysis: Analysis) -> bool:
+        """For an on_pc patch in the recipe: False when the build for this PC leaves it out for this game anyway
+        (pc_selection, given the analysis)."""
+        return True
+
     def apply(self, ctx: ApkContext) -> bool:  # apk stage; returns True when something changed
         raise NotImplementedError
 
@@ -170,6 +175,7 @@ def pc_selection(patches: dict, analysis: Analysis | None = None) -> dict:
     out = {pid: params for pid, params in patches.items()
            if pid in REGISTRY and (REGISTRY[pid].category == "overport" or REGISTRY[pid].on_pc)}
     if analysis is not None:
+        out = {pid: params for pid, params in out.items() if REGISTRY[pid].pc_keeps(analysis)}
         for patch in all_patches():
             if patch.id not in out and patch.pc_detect(analysis):
                 out[patch.id] = {}

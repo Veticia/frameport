@@ -25,7 +25,10 @@ folder) and picks per game:
 
 - **Choice** (`targets/pc_android.choose_backend`): `--axrb-backend direct|emulator` on `frameport install --to pc`,
   else the recipe's `pc.axrb_backend` (device category, `on_pc`: part of the PC build's selection, no-op on the
-  Frame), else **direct for `graphics` Vulkan, emulator for GLES / unknown**. `deployment.json` records `backend`
+  Frame), else **direct for `graphics` Vulkan, emulator for GLES / unknown**. Unreal games never declare
+  `android.hardware.vulkan`; since analysis version 20 their manifest meta-data
+  `com.epicgames.{ue4,unreal}.GameActivity.bSupportsVulkan` = true makes them "Vulkan (Unreal bSupportsVulkan)"
+  (UE 4.25+ Quest builds, e.g. Deadpool VR, Pinball FX VR, Myst; false or missing = GLES: Espire 1, Vader Immortal). `deployment.json` records `backend`
   and the launcher `flags`; installs from before have none (= emulator). Switching leaves the other backend's copy
   and saves alone.
 - **Per-game options** (`pc.axrb_backend` params → `run_direct_game.ps1` switches): `translator` (`dynarmic` =
@@ -95,6 +98,16 @@ median of the last summaries. What is drawn was judged from Monado's window and 
 | PowerWash Simulator VR 2.5.0 (Unity 2020.3, Vulkan) | in game: the garage hub (~3-4 min; at 90 s still its loading logo) | 70.5 / 69.8 | garage in both eyes, both hands drawn at the simulated controllers | none; Meta multiplayer callbacks throw NullReferenceExceptions (no Meta services, harmless so far) |
 | LEGO Bricktales 2.1 (Unity, Vulkan, URP) | scene `Diorama_Hub_Startup` loaded (~3 min) | 72 / 72 | intro text panel ("You want to free the simulation? Follow the white rabbit.") on black, both eyes | stop slow: the game didn't finish its activity shutdown in 25 s (`axrb-direct-slow-stop`); Meta achievements fail (no Meta services, harmless) |
 | Toy Master 1.1.2 (Unity 2022.3, **GLES**) | activity created, then crash in 18 s | - | - | not a Vulkan game: "Vulkan (Unity boot.config)" came from the Oculus plugin's `xr-vulkan-*` keys; Unity: "Unable to retrieve the default EGL display!" + SIGTRAP. Automatic choice now sends such games to the emulator |
+| Marvel's Deadpool VR 1.0.40 (UE 4.27, Vulkan; `frame.vk_sanitize` in the build) | first-run LANGUAGE menu (~3 min; at 90 s still loading at 1-2 fps) | 64 (FrameBridge pacing) | game-drawn stereo menu, both eyes | none; AXRB transcodes ASTC to BC on the GPU; stop slow (`axrb-direct-slow-stop`) |
+| Pinball FX VR 1.9 (UE 5.3, Vulkan, 7 GB OBB) | 3D lobby with the Terms & Conditions panel (~4 min) | ~60 (FrameBridge pacing) | arcade hall + panel in both eyes | none of the emulator's blockers (gfxstream `vkAllocateMemory` SIGSEGV, and Refract's FRSQRTE SIGILL / ASTC layout probe / promoted extension names) showed up in direct mode (no SIGILL under Dynarmic, no ASTC or device-loss failure; AXRB stores ASTC as BC); OVRPlugin's xrPerfSettingsSetPerformanceLevelEXT unsupported (harmless) |
+| Myst 3.3.0 (UE 5.3, Vulkan) | loading screen (book), then its starfield intro | 72 | stereo, both eyes | a white splash quad at first (texture not shown yet), then normal |
+| Metro Awakening 1.0-916944 (UE 5.2, Vulkan) | splash art, then the USER DATA COLLECTION consent screen with the laser pointer | 72 | stereo, both eyes | stop slow (`axrb-direct-slow-stop`) |
+
+Unreal Vulkan games: before analysis version 20 every Unreal game was "GLES or unknown" (Unreal never declares
+`android.hardware.vulkan`), so the automatic choice sent them to the emulator; now `GameActivity.bSupportsVulkan`
+picks direct mode (Myst and Metro above were installed without `--axrb-backend`). Unreal probes EGL before it
+creates its Vulkan device, which tripped `axrb-direct-no-gles`; the signature now needs no Vulkan device. None of
+the four needed a recipe change for the PC.
 
 Integration bugs found and fixed on the way: AXRB's trap message never reached FramePort's log; the content list
 overflowed the command line (Batman); Unity's EGL failure and SIGTRAP weren't triaged; long sessions lost their
@@ -102,6 +115,50 @@ start-up milestones; the boot.config Vulkan label picked direct mode for GLES ga
 list should reach `axrb-direct.exe` as a file (FramePort's hard links only work when the data is on the drive of
 FramePort's folder; drafted as an upstream issue). Needs a headset: picture and latency through SteamVR, sound,
 controllers (the simulated ones hold still), Batman beyond its region menu.
+
+### VrApi-direct games (2026-10-16, direct mode, Monado simulated HMD, Dynarmic, no headset)
+
+Games whose engine calls VrApi itself (no OVRPlugin), so OVRPort can't translate them: they need a `libvrapi.so`
+that translates VrApi to OpenXR. Two candidates: FramePort's `frame.vrapi_bridge` (OVRPort's translator + FramePort's
+changes) and OVRPort's own `patch_vrapi_openxr` (the unpatched translator; only in experimental CLI builds made with
+`-PwithVrApi=true`, e.g. the `OVRPort-CLI-1.2.5-experimental-5e7df52.jar` AXRB's v1.0.0/1.0.1 releases attached;
+AXRB's own profile for The Climb 2 uses it with `-PrecomposeProjectionLayers`). Only converted copies of both games
+were at hand, so the comparison swapped the one file (OVRPort's = the v1.2.5 build from the 2026-10-02 Frame tests).
+
+| Game (engine, graphics) | VrApi route | Reached | fps | Picture | Blocker / notes |
+|---|---|---|---|---|---|
+| The Climb 2 2.2 (CryEngine, Vulkan VrApi) | FramePort's bridge | first-start menu (gender/skin selection) in ~60 s | 69.8 / 69.8 | menu, both hands and controllers, both eyes (AXRB layer captures + Monado's window) | needs AXRB's HostWindow fix (below, AXRB's side) + `frame.vk_android_extensions`; crash only during AXRB's stop (forgiven by triage); no `-PrecomposeProjectionLayers` needed |
+| The Climb 2 2.2 | OVRPort's translator | the same menu | 70.2 / 70.2 | identical | same blockers; passes AXRB's AHB device-extension request through unchanged (worked only because `libfp_vkext.so` lists AHB) |
+| Path of the Warrior (own engine, **GLES** VrApi) | - | not run | - | - | GLES: direct mode can't run it; the emulator (1.0.4) had a copy signed with another key installed by another test, so it wasn't replaced. OVRPort's translator can't run it anywhere (no GLES path: `cannot locate symbol "vrapi_GetTextureSwapChainHandle"`, Frame test 2026-10-02); FramePort's bridge has one |
+
+**Default for PC builds: FramePort's bridge** (`frame.vrapi_bridge`, now `on_pc = True`; recipes keep it as they
+are, nothing to switch). Both translators give the same picture and frame rate in direct mode, but OVRPort's needs
+an unpublished experimental CLI (stable jars list `patch_vrapi_openxr` but fail), has no GLES path (POTW, every GLES
+VrApi game on the emulator) and lacks the device-extension filter; FramePort's is the same code the Frame builds
+use, so one recipe serves both.
+
+Blockers found on the way (in order):
+1. **No window for NativeActivity** (AXRB's side, drafted upstream): CryEngine's `EngineActivity` takes its surface
+   with `Window.takeSurface`; direct mode's `HostWindow.attach` only bridges SurfaceViews (`AXRB_AOSP_HOST_SURFACES
+   0`), so `APP_CMD_INIT_WINDOW` never comes and the game waits after `Loading plug-in CryHTTP` (triage
+   `axrb-direct-no-native-window`). A ~40-line HostWindow patch (`mTakeSurfaceCallback` → `registerSurface` +
+   `surfaceCreated/Changed`, bootstrap dex rebuilt with AXRB's `build_art_bootstrap.py` into a test copy of the
+   local build) fixed it. Likely the same for every NativeActivity engine.
+2. **Quest Vulkan device extensions**: CryEngine checks its list before vkCreateDevice and gave up
+   (`CrySystem initialization failed!`): AXRB's runtime asks for `VK_ANDROID_external_memory_android_hardware_buffer`
+   also in direct mode, and the game requires `VK_EXT_fragment_density_map` (NVIDIA's Windows driver has neither).
+   The bridge now leaves runtime extensions no device offers out; `frame.vk_android_extensions` lists the missing
+   Quest ones to the renderer (AXRB drops them at vkCreateDevice). Triage `axrb-direct-vulkan-extensions`.
+3. **Simulator only**: Monado's head lacks POSITION_TRACKED, so AXRB's host never made its LOCAL origin and the
+   bridge never got a tracked head (empty frames, `initial recenter: head flags=0x0`) → `--sim` sets AXRB's
+   `AXRB_TEST_SYNTHETIC_HMD=2`.
+4. The analysis called The Climb 2 "GLES or unknown" (no manifest declaration) → analysis 20: engines importing
+   `vrapi_CreateSystemVulkan` are "Vulkan (VrApi Vulkan system)", so it goes to direct mode automatically.
+
+Debugging aid: `FRAMEPORT_AXRB_TEST_ENV="AXRB_DIRECT_TRACE=syscall,vulkan;AXRB_CAPTURE_FIRST_SEQUENCE=4500"` passes
+variables to a launch test's AXRB processes (`AXRB_DIRECT_DUMP` only works in AXRB's own VM mode, not with ART).
+Needs a headset: the picture through SteamVR, controllers past the first menu (the simulated ones hold still),
+climbing, sound; and a released AXRB-Emulatorless with the window fix.
 
 ## Spike results (2026-10-10, Windows 11 26200, i7-14700K, RTX 4080 SUPER, 64 GB; headless)
 
@@ -137,12 +194,18 @@ One recipe serves both builds; `patches/base.pc_selection(patches, analysis)` pi
   `frame.asset_files_stub`, `frame.ovr_trace`, `frame.blazerush`, `frame.unity_oculus_check` (with its ovrpshim),
   `frame.unity_text_input`, `frame.unreal_quest_precompile`, `frame.unreal_quest_keymap`,
   `frame.unreal_thumb_touch`, `frame.unreal_skip_obb_check`, `frame.unreal_skip_obb_delivery`, `frame.nodebug`,
-  `frame.meta_permissions`, `frame.launcher`.
+  `frame.meta_permissions`, `frame.launcher`, and `frame.vrapi_bridge` (VrApi → OpenXR through OVRPort's loader,
+  so AXRB's runtime; seen working in direct mode with The Climb 2, see "VrApi-direct games" below; the **GL shim
+  stays off**: it fixes Mesa/Zink GLSL strictness, and the bridge doesn't need it — only `frame.gl_shim` requires
+  the bridge, not the other way round).
 - **Experimental on the PC** (`on_pc = "experimental"`, kept but not yet seen working in AXRB): `frame.vk_sanitize`
-  (the Vulkan shim; gfxstream / the host driver instead of Lepton's Fossilize), `frame.vrapi_bridge` (VrApi → OpenXR
-  through OVRPort's loader, so AXRB's runtime; the **GL shim stays off**: it fixes Mesa/Zink GLSL strictness, and
-  the bridge doesn't need it — only `frame.gl_shim` requires the bridge, not the other way round),
-  `frame.unity_tls_key_pool`, `frame.eos_keychain_loop`.
+  (the Vulkan shim; gfxstream / the host driver instead of Lepton's Fossilize), `frame.unity_tls_key_pool`,
+  `frame.eos_keychain_loop`.
+- **PC-only APK fix** `frame.vk_android_extensions` (`pc_detect`: direct-VrApi games whose engine creates VrApi's
+  Vulkan system, analysis `graphics` "Vulkan (VrApi Vulkan system)"): the renderer's
+  `vkEnumerateDeviceExtensionProperties` import goes to `libfp_vkext.so`, which also lists the Quest device
+  extensions the PC's driver lacks (VK_EXT_fragment_density_map, Android external memory); AXRB's vkCreateDevice
+  leaves them out again.
 - **FrameBridge** (`frame.adapter`) with its settings in `lib/<abi>/libframe_settings.so`: it wraps OVRPort's loader
   the same way in AXRB (scale, haptic_fix, pose_time_fix, rect_clamp, profile_remap, ...). Left out
   (`settings.PC_DENY`): `sync_guard` (a race in the Frame's vrclient.so), `focus_hold` / `focus_hold_ms` (the
@@ -208,7 +271,8 @@ Shadow); an AXRB issue for the Pinball crash.
 ## Open (needs the owner + a headset)
 
 - A game in the headset through SteamVR (picture, audio, controllers; Steam Frame controllers: AXRB #20).
-- Pinball FX VR's Vulkan crash with the host attached (AXRB's demo game: likely an AXRB/emulator issue if it repeats).
+- Pinball FX VR's Vulkan crash with the host attached happens in the emulator only; in direct mode it reaches its lobby
+  headless. Needs the headset: picture/latency through SteamVR, controllers, a table played.
 - Play from the PC's Steam library (shortcut → launcher script → AXRB).
 
 ## Testing without a headset (Monado's simulated HMD, 2026-10-15)

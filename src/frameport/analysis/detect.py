@@ -43,7 +43,11 @@ IL2CPP_METADATA = "assets/bin/Data/Managed/Metadata/global-metadata.dat"
 # 17: headset (the Meta headset a VR app was made for: Gear VR / Go games run through frame.a32_bridge) (2026-10)
 # 18: headset "quest" also for 32-bit apps that require 6DoF head tracking (Santa Cruz builds, e.g. Sports
 #     Scramble: Touch controllers on the a32 bridge) (2026-10)
-ANALYSIS_VERSION = 19
+# 19: unreal_obb_delivery also from obfuscated DownloaderActivity predicates (#159 Medal of Honor) (2026-10)
+# 20: Unreal's Vulkan RHI from the manifest meta-data GameActivity.bSupportsVulkan (Unreal games never declare
+#     android.hardware.vulkan, so every Unreal Vulkan game was "GLES or unknown"; AXRB direct mode is Vulkan only),
+#     and "Vulkan (VrApi Vulkan system)" for direct-VrApi engines that import vrapi_CreateSystemVulkan (The Climb 2)
+ANALYSIS_VERSION = 20
 
 
 # Android versions by API level (for messages); the Frame's Lepton container runs Android 11 (API 30)
@@ -85,6 +89,18 @@ def cryengine_project(data: bytes) -> bool:
 
 
 UE_VERIFY_OBB_KEY = ".GameActivity.bVerifyOBBOnStartUp"
+
+
+UE_SUPPORTS_VULKAN_KEY = ".GameActivity.bSupportsVulkan"
+
+
+def unreal_vulkan(meta: dict) -> bool:
+    """Unreal packaged the game with its Vulkan RHI (Project Settings > Android > Support Vulkan): UnrealBuildTool
+    writes `com.epicgames.{ue4,unreal}.GameActivity.bSupportsVulkan` into the manifest, and on a Vulkan device (every
+    Quest) GameActivity starts the Vulkan RHI, GLES only as a fallback. GLES-only builds write false (UE 4.21+) or
+    nothing (older). Only a real boolean true counts, as GameActivity reads it with Bundle.getBoolean."""
+    return any(k.startswith("com.epicgames.") and k.endswith(UE_SUPPORTS_VULKAN_KEY) and v is True
+               for k, v in meta.items())
 
 
 def unreal_verify_obb(meta: dict) -> bool:
@@ -287,12 +303,17 @@ def analyze(path: Path, deep: bool = True, data_bytes: int | None = None) -> Ana
         direct_vrapi = any("libvrapi.so" in elf.needed(b) for n, b in lib_bytes.items()
                            if elf.is_elf(b) and n not in ("libOVRPlugin.so", "libvrapi.so"))
     vulkan_declared = b"android.hardware.vulkan" in manifest or _uses_feature(manifest, "android.hardware.vulkan")
+    meta = axml.meta_data(manifest)
     if vulkan_declared:
         graphics = "Vulkan (declared in manifest)"
+    elif engine == "Unreal" and unreal_vulkan(meta):
+        graphics = "Vulkan (Unreal bSupportsVulkan)"
     elif engine == "Unity" and "vulkan" in boot.lower():
         graphics = "Vulkan (Unity boot.config)"
     elif engine == "CryEngine" and re.search(r'(?im)^\s*r_Driver\s*=\s*"?vk"?\s*(?:;.*)?$', system_cfg):
         graphics = "Vulkan (CryEngine system.cfg)"
+    elif direct_vrapi and vrapi_vulkan(lib_bytes):
+        graphics = "Vulkan (VrApi Vulkan system)"
     else:
         graphics = "GLES or unknown (no Vulkan declaration)"
 
@@ -323,7 +344,6 @@ def analyze(path: Path, deep: bool = True, data_bytes: int | None = None) -> Ana
     manifest_strings = axml.Axml(manifest).strings()
     features = _features(manifest)
     used_perms, _ = axml.used_and_declared_permissions(manifest)
-    meta = axml.meta_data(manifest)
     return Analysis(
         package=package,
         version=version,
@@ -517,6 +537,14 @@ def _uses_feature(manifest: bytes, feature: str) -> bool:
 
 # Platform SDK enum helpers, e.g. ovrPeerConnectionState_ToString (BlazeRush): OVRPort's loader lacks several
 OVR_TO_STRING = re.compile(r"^ovr[A-Z][A-Za-z0-9]*_ToString$")
+
+
+def vrapi_vulkan(lib_bytes: dict[str, bytes]) -> bool:
+    """An engine library that calls VrApi directly creates VrApi's Vulkan system (vrapi_CreateSystemVulkan): the game
+    renders with Vulkan even without a manifest declaration (The Climb 2's CryEngine). GLES VrApi games (Path of the
+    Warrior) never import it. Only the game's own libraries count, not libvrapi.so or OVRPlugin."""
+    return any(elf.is_elf(b) and "vrapi_CreateSystemVulkan" in elf.dyn_symbols(b, False)
+               for n, b in lib_bytes.items() if n not in ("libvrapi.so", "libOVRPlugin.so"))
 
 
 def missing_ovr_symbols(lib_bytes: dict[str, bytes]) -> set[str]:
