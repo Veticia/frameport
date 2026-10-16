@@ -222,7 +222,9 @@ without changing the system's OpenXR runtime or touching SteamVR:
 - **Seeing what is drawn:** the windowed compositor ("Monado (Windowed)", 1264×681, both eyes side by side without
   distortion) can be saved with `native/xrsimprobe/xr_sim_capture.cpp` (`PrintWindow`, works behind other windows;
   `xr_sim.capture(path)`), and `--sim` also sets AXRB's own opt-in `AXRB_CAPTURE_PREFIX` (4 PPM readbacks of the
-  submitted layers, 5 s apart, from frame 300) into `<data>/logs/xr-sim/`. Monado itself has no screenshot function;
+  submitted layers, 5 s apart, from frame 300) into `<data>/logs/xr-sim/`. A launch test that reached RUNNING saves
+  Monado's window there too, just before it stops the game (`<time>-<pkg>-headset.bmp`, `pc_android.sim_capture`),
+  and every AXRB launch test reports the frame rate from AXRB's `AXRB.Perf` summaries (game submits / bridge). Monado itself has no screenshot function;
   `XRT_WINDOW_PEEK` and `XRT_DEBUG_GUI` exist but only show windows.
 - **Use:** `frameport test <pkg> --to pc --sim` (or `FRAMEPORT_PC_XR_SIM=1`): starts `monado-service.exe` hidden
   (WMI, like AXRB's scripts; ready when its pipe `\\.\pipe\<%TEMP%>\monado_comp_ipc` exists), passes the environment to

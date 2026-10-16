@@ -433,8 +433,8 @@ def launch_test(dep: dict, reporter: Reporter, seconds: int = 45, triage=None, e
     before = time.time()
     q = axrb._ps_quote
     # --- xr-sim hook (tools/xr_sim.py): env + SteamVR-registration shim before the launcher call
-    sim = xr_sim.launcher_prefix(xr_sim.active_env() if extra_env is None else extra_env)
-    pid = axrb.spawn_detached(sim + axrb.logged(
+    sim_env = xr_sim.active_env() if extra_env is None else extra_env
+    pid = axrb.spawn_detached(xr_sim.launcher_prefix(sim_env) + axrb.logged(
         f"& {q(dep['launcher_win'])} -Package {q(package)} -Activity {q(dep['activity'])} "
         f"-GameName {q(dep['title'])} -CaptureGuestLog " + " ".join(dep.get("flags") or ()),
         winhost.to_windows(log)))
@@ -454,6 +454,8 @@ def launch_test(dep: dict, reporter: Reporter, seconds: int = 45, triage=None, e
             break
     if seen and state == "NEVER_STARTED":
         state = "EXITED"
+    if state == "RUNNING":
+        sim_capture(sim_env, package, reporter)
     if axrb.pid_running(pid):
         try:  # AXRB's script sees the game stop, cleans up (and shuts Android down if it started it)
             axrb.adb(["shell", "am", "force-stop", package], timeout=30)
@@ -480,6 +482,21 @@ def direct_state(out_text: str, launcher_running: bool) -> str | None:
     return None if launcher_running else "NEVER_STARTED"
 
 
+def sim_capture(env: dict, package: str, reporter: Reporter) -> Path | None:
+    """Under the simulated headset (env names Monado's runtime): save its window, both eyes as a headset gets them,
+    to the xr-sim captures folder, so a test shows what the game drew at its end. None without the simulator or the
+    capture tool; a failed capture never fails the test."""
+    if "XR_RUNTIME_JSON" not in (env or {}) or not xr_sim.capture_exe():
+        return None
+    try:
+        path = xr_sim.capture(xr_sim.capture_dir() / f"{time.strftime('%Y%m%d-%H%M%S')}-{package}-headset.bmp")
+    except (xr_sim.XrSimError, OSError, subprocess.SubprocessError) as exc:
+        reporter.log(f"simulated headset view not saved: {exc}")
+        return None
+    reporter.log(f"simulated headset view: {path}")
+    return path
+
+
 def _launch_test_direct(dep: dict, reporter: Reporter, seconds: int, triage, extra_env: dict | None = None):
     reporter.stage("Launch test (this PC, AXRB direct mode)")
     inst = axrb.find(axrb.DIRECT)
@@ -493,8 +510,8 @@ def _launch_test_direct(dep: dict, reporter: Reporter, seconds: int, triage, ext
     out = logs / "game" / "direct.out"
     before = time.time()
     q = axrb._ps_quote
-    sim = xr_sim.launcher_prefix(xr_sim.active_env() if extra_env is None else extra_env)
-    pid = axrb.spawn_detached(sim + axrb.logged(
+    sim_env = xr_sim.active_env() if extra_env is None else extra_env
+    pid = axrb.spawn_detached(xr_sim.launcher_prefix(sim_env) + axrb.logged(
         f"& {q(dep['launcher_win'])} -Package {q(package)} -Activity {q(dep['activity'])} "
         f"-GameName {q(dep['title'])} " + " ".join(dep.get("flags") or ()), winhost.to_windows(log)))
     state, deadline, watch_end = "NEVER_STARTED", time.time() + 300, None  # ART's first start is slow (no JIT)
@@ -512,6 +529,8 @@ def _launch_test_direct(dep: dict, reporter: Reporter, seconds: int, triage, ext
         if watch_end and time.time() >= watch_end:
             state = "RUNNING"
             break
+    if state == "RUNNING":
+        sim_capture(sim_env, package, reporter)
     if axrb.pid_running(pid):  # AXRB's own Stop: the bridge window closes, the game pauses, stops and saves
         try:
             axrb.stop_game(inst, pid)
