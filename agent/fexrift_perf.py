@@ -356,6 +356,9 @@ def stop_launcher(child):
                 child.wait(timeout=5)
 
 
+START_WAIT = 180   # seconds the bench waits for the game's process after starting its launcher
+
+
 def bench_run(args, launcher, vr):
     seconds = args.get("seconds", 120)
     if type(seconds) is not int or not 1 <= seconds <= 120:
@@ -374,15 +377,27 @@ def bench_run(args, launcher, vr):
     try:
         old_handler = signal.signal(signal.SIGTERM, interrupted)
         vr_set("power", "pauseCompositorOnStandby", "b", False)
-        vr_set("power", "turnOffScreensTimeout", "f", float(seconds + 10))
+        vr_set("power", "turnOffScreensTimeout", "f", float(seconds + START_WAIT + 10))
         # Save the initial frame index so stale scene frames in the compositor ring are excluded.
         initial = {r["index"] for r in vr.timings()}
         with open(os.devnull, "wb") as sink:
             child = subprocess.Popen([launcher], stdin=subprocess.DEVNULL, stdout=sink, stderr=sink,
                                      start_new_session=True, close_fds=True)
         guard_write(screen=screen, pgid=getattr(child, "pid", None))
+        # The launcher starts Meta's runtime and waits for it (60-100 s under FEX) before the game: the window
+        # starts when the game's process appears, not at the launch.
+        wait_end = time.monotonic() + START_WAIT
+        while not [q for q, (_, cmd) in processes().items() if args["exe"].lower() in cmd.lower()]:
+            if time.monotonic() > wait_end:
+                raise ValueError(f"benchmark: the game didn't start within {START_WAIT} s; inspect launch.log")
+            if child.poll() is not None:
+                raise ValueError("benchmark launcher exited before the game started; inspect launch.log")
+            level = vr.activity()
+            if level == 1 or recent_steam_input(CORE.STEAM):
+                raise ValueError(f"benchmark stopped: owner interaction (activity {level})")
+            time.sleep(1)
         before, previous = {}, time.monotonic()
-        deadline = started + seconds
+        deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:
             # Before the launch the headset must be in standby (3); the game itself then wakes the compositor
             # (activity leaves standby), so during the run only real use stops it: 1 = user interaction (worn or

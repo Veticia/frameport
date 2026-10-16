@@ -44,7 +44,7 @@ try:
 except ImportError:  # Windows: pc_revive loads this file for its VDF code only (GitHub #131)
     fcntl = None
 
-AGENT_VERSION = 93
+AGENT_VERSION = 94
 HOME = os.path.expanduser("~")
 STEAM = os.path.join(HOME, ".local/share/Steam")
 ANCHORS = os.path.join(HOME, "Applications/quest-frame")
@@ -8123,7 +8123,8 @@ def cmd_fex_bench(args):
         dep = deployment(pkg)
         if dep and dep.get("kind") == "frame_fex" and dep.get("app") == app:
             return fex_helper("bench", {"app": app, "seconds": seconds,
-                                        "launcher": os.path.join(ANCHORS, pkg, "launch.sh")}, timeout=seconds + 30)
+                                        "launcher": os.path.join(ANCHORS, pkg, "launch.sh")},
+                              timeout=seconds + 240)   # + the wait for the game to start (START_WAIT)
     raise AgentError("install this FEX game before benchmarking")
 
 

@@ -1095,7 +1095,7 @@ def fex_bench(app_name: str = typer.Argument("oculus-first-contact", metavar="AP
               frame: Optional[str] = typer.Option(None, help=FRAME_HELP)):
     """One bounded headless performance run on an idle Frame; stops the game and restores display power settings."""
     t = _fex_target(frame)
-    typer.echo(json.dumps(t.frame.agent("fex_bench", app=app_name, seconds=seconds, timeout=seconds + 40),
+    typer.echo(json.dumps(t.frame.agent("fex_bench", app=app_name, seconds=seconds, timeout=seconds + 250),
                           separators=(",", ":")))
 
 

@@ -370,7 +370,7 @@ def test_cli_settings_and_bench_routing(monkeypatch):
     assert calls[-1] == ("fex_settings", {"app": "test-app", "values": {"cores": None}})
     result = runner.invoke(cli.app, ["fex", "bench", "test-app", "--seconds", "3"])
     assert result.exit_code == 0 and result.output.count("\n") == 1
-    assert calls[-1] == ("fex_bench", {"app": "test-app", "seconds": 3, "timeout": 43})
+    assert calls[-1] == ("fex_bench", {"app": "test-app", "seconds": 3, "timeout": 253})
     count = len(calls)
     assert runner.invoke(cli.app, ["fex", "bench", "test-app", "--seconds", "121"]).exit_code == 2
     assert runner.invoke(cli.app, ["fex", "settings", "test-app", "broken"]).exit_code == 2
@@ -393,7 +393,7 @@ def test_agent_perf_commands_use_installed_launcher(monkeypatch, tmp_path):
     agent.cmd_fex_settings({"app": "test-app"})
     assert calls[-1] == ("settings_get", {"app": "test-app"}, 60)
     agent.cmd_fex_bench({"app": "test-app", "seconds": 5})
-    assert calls[-1] == ("bench", {"app": "test-app", "seconds": 5, "launcher": str(anchor / "launch.sh")}, 35)
+    assert calls[-1] == ("bench", {"app": "test-app", "seconds": 5, "launcher": str(anchor / "launch.sh")}, 245)
     count = len(calls)
     with pytest.raises(agent.AgentError):
         agent.cmd_fex_bench({"app": "test-app", "seconds": 121})
