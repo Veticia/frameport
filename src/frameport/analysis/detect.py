@@ -44,7 +44,9 @@ IL2CPP_METADATA = "assets/bin/Data/Managed/Metadata/global-metadata.dat"
 # 18: headset "quest" also for 32-bit apps that require 6DoF head tracking (Santa Cruz builds, e.g. Sports
 #     Scramble: Touch controllers on the a32 bridge) (2026-10)
 # 20: unity_appui_vibrator (Unity App UI's activity uses Android 12's VibratorManager: frame.unity_appui_vibrator,
-#     GitHub #297) (2026-10)
+#     GitHub #297); gms_folded_sdk_checks (Play services' Android 12 checks folded to true by R8:
+#     frame.gms_platform_version, GitHub #310); usb_midi_watcher (kshoji's USB MIDI driver polls the missing USB
+#     service: frame.usb_midi_watcher, GitHub #297) (2026-10)
 ANALYSIS_VERSION = 20
 
 
@@ -247,6 +249,14 @@ def analyze(path: Path, deep: bool = True, data_bytes: int | None = None) -> Ana
         # Unity App UI's activity gets Android 12's VibratorManager in onCreate: crashes in Lepton (Android 11)
         unity_appui_vibrator = any(b"Lcom/unity3d/player/appui/" in d and b"Landroid/os/VibratorManager;" in d
                                    and b"vibrator_manager" in d for d in dexes)
+        # kshoji's USB MIDI driver polls Android's USB service, which Lepton lacks (frame.usb_midi_watcher)
+        usb_midi_watcher = any(b"Ljp/kshoji/driver/midi/device/MidiDeviceConnectionWatcher$MidiDeviceConnectionWatchThread;"
+                               in d for d in dexes)
+        # Play services' PlatformVersion.isAtLeastS() & co. folded to `return true` (minSdk 31+ builds): crash on
+        # Android 11 (frame.gms_platform_version)
+        from ..patches.frame.gms_platform_version import has_folded_checks
+
+        gms_folded_sdk_checks = has_folded_checks(dexes)
         # Epic Online Services' keychain (it can retry without end when it can't write: frame.eos_keychain_loop)
         eos_keychain = any(b"Lcom/epicgames/mobile/eossdk/EOSSDK;" in d and b"resetKeychain" in d for d in dexes)
         # bHaptics asks for an Android 12 permission; the prompt interrupts the game (frame.bhaptics_permission)
@@ -387,6 +397,8 @@ def analyze(path: Path, deep: bool = True, data_bytes: int | None = None) -> Ana
             "godot_clipboard": godot_clipboard,
             "vivox_api31": vivox_api31,
             "unity_appui_vibrator": unity_appui_vibrator,
+            "gms_folded_sdk_checks": gms_folded_sdk_checks,
+            "usb_midi_watcher": usb_midi_watcher,
             "eos_keychain": eos_keychain,
             "bhaptics_permission": bhaptics_permission,
             "media_codec": media_codec,
