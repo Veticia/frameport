@@ -526,9 +526,31 @@ def _launch_test_direct(dep: dict, reporter: Reporter, seconds: int, triage, ext
     return _report(text, state, package, before, reporter, triage, "direct mode")
 
 
+# AXRB's runtime logs a summary of the game's frames every ~5 s: "AXRB.Perf end-frame: rate=63.7/s ..." (guest), and
+# the bridge one of what it hands the PC's OpenXR runtime: "AXRB.Perf host-fresh-submit: rate=62.9/s ..."
+PERF_RATE = re.compile(r"AXRB\.Perf (end-frame|host-fresh-submit): rate=([\d.]+)/s")
+
+
+def frame_rates(text: str, last: int = 6) -> dict[str, float]:
+    """{"game": fps, "host": fps}: the median of the last few AXRB.Perf summaries (the first ones include loading)."""
+    seen: dict[str, list[float]] = {}
+    for kind, rate in PERF_RATE.findall(text):
+        seen.setdefault("game" if kind == "end-frame" else "host", []).append(float(rate))
+    out = {}
+    for name, rates in seen.items():
+        tail = sorted(rates[-last:])
+        out[name] = tail[len(tail) // 2]
+    return out
+
+
 def _report(text: str, state: str, package: str, before: float, reporter: Reporter, triage, note: str):
     result = triage(text, state, package, kind="axrb") if triage else None
     reporter.check("Game process", state == "RUNNING", f"{state} ({round(time.time() - before)}s, {note})")
+    rates = frame_rates(text)
+    if rates:
+        reporter.check("Frame rate", True, ", ".join(f"{k} {v:g} fps" for k, v in
+                                                     (("game submits", rates.get("game")),
+                                                      ("bridge to the PC's runtime", rates.get("host"))) if v))
     if result:
         for m in result.milestones:
             reporter.check(m, True)

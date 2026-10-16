@@ -827,6 +827,19 @@ def test_long_content_lists_go_through_hard_links(tmp_path, monkeypatch, win):
     assert copy.read_bytes() == b"x" and lines[0].endswith(names[0]) and "\\\\wsl" not in lines[0]
 
 
+def test_frame_rates_from_axrb_perf_lines():
+    """Launch tests report the rate from AXRB's 5-second summaries (Batman under Monado, 2026-10-15)."""
+    from frameport.targets import pc_android
+
+    text = "\n".join(
+        [f"I/AXRB.Perf( 4290): AXRB.Perf end-frame: rate={r}/s avg=0.113ms max=1.561ms samples=315" for r in
+         (3.0, 58.9, 62.4, 62.9, 64.1, 64.1, 63.7)]
+        + ["AXRB.Perf host-fresh-submit: rate=62.9/s avg=15.889ms max=31.773ms samples=315",
+           "AXRB.Perf host-end-frame: rate=63.7/s avg=0.197ms"])
+    assert pc_android.frame_rates(text) == {"game": 63.7, "host": 62.9}
+    assert pc_android.frame_rates("no perf lines") == {}
+
+
 def test_direct_logs_and_state(tmp_path, monkeypatch):
     from frameport.targets import pc_android
 
