@@ -71,5 +71,7 @@ def test_signed_in_needs_a_user_id_folder(monkeypatch, tmp_path):
     (sessions / "_oaf").mkdir(parents=True)
     (sessions / "_oaf" / "data.sqlite").write_text("x")          # what the runtime alone creates
     assert not fx.signed_in(str(sessions))
-    (sessions / "1368740236322643").mkdir()
+    (sessions / "x1368").mkdir()
+    assert not fx.signed_in(str(sessions))
+    (sessions / "1368740236322643-1275611841").mkdir()                  # the real shape: <user id>-<n>
     assert fx.signed_in(str(sessions))

@@ -432,9 +432,10 @@ def cmd_setup(args):
 
 
 def signed_in(sessions):
-    """A Meta sign-in = a session folder named by the numeric Meta user id (sessions/<id>/). Meta's app framework
-    creates sessions/_oaf as soon as the runtime starts, signed in or not (seen on the Frame, 2026-10-15)."""
-    return os.path.isdir(sessions) and any(n.isdigit() and os.path.isdir(os.path.join(sessions, n))
+    """A Meta sign-in = a session folder named after the numeric Meta user id (sessions/<id>-<n>/, seen in a signed-in
+    prefix 2026-10-09). Meta's app framework creates sessions/_oaf as soon as the runtime starts, signed in or not
+    (seen on the Frame, 2026-10-15)."""
+    return os.path.isdir(sessions) and any(re.fullmatch(r"\d+(-\d+)*", n) and os.path.isdir(os.path.join(sessions, n))
                                            for n in os.listdir(sessions))
 
 

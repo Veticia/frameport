@@ -338,7 +338,7 @@ def test_login_archive(tmp_path):
         fexrift.login_archive(pfx, ["oculus-first-contact"], tmp_path / "l0.tar")
     user.mkdir(parents=True, exist_ok=True)
     (user / "token").write_text("secret")
-    (user / "1234567890").mkdir()
+    (user / "1234567890-1275611841").mkdir()
     meta = pfx / "drive_c/Program Files/Meta Horizon"
     (meta / "CoreData").mkdir(parents=True)
     (meta / "CoreData" / "x").write_text("1")
