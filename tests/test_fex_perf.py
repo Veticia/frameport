@@ -478,3 +478,21 @@ def test_bench_guarded_restores_display_when_the_measurement_dies(perf, monkeypa
     else:
         assert g["bench_guarded"]({"app": "x"}, "/fake/launch.sh") == {"frames": 3}
     assert not Path(g["guard_path"]()).exists()
+
+
+def test_vr_set_runs_each_write_in_its_own_process(perf, monkeypatch):
+    core, p = perf
+    g = core.COMMANDS["bench"].__globals__
+    calls = []
+
+    def run(argv, **k):
+        calls.append(argv)
+        ok = json.loads(argv[-1])["value"] is not None
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"ok": True, "result": {"error": 0 if ok else 1}}))
+    monkeypatch.setattr(p.subprocess, "run", run)
+    monkeypatch.setitem(g, "CORE", SimpleNamespace(HERE="/a", cmd_vrsetting=lambda a: pytest.fail("in-process")))
+    g["vr_set"]("power", "pauseCompositorOnStandby", "b", False)
+    g["vr_set"]("power", "turnOffScreensTimeout", "f", 30.0)
+    assert len(calls) == 2 and all(c[-2] == "vrsetting" for c in calls)
+    with pytest.raises(ValueError, match="refused"):
+        g["vr_set"]("power", "x", "b", None)

@@ -332,7 +332,9 @@ def recent_steam_input(steam, now=None):
 
 
 def vr_set(section, key, kind, value):
-    result = CORE.cmd_vrsetting({"section": section, "key": key, "kind": kind, "value": value})
+    # In its own process: cmd_vrsetting in the process that holds VR()'s SteamVR connection segfaulted on the
+    # second call (reproduced on the Frame 2026-10-16) after the first had turned the display's standby pause off.
+    result = vrsetting_subprocess(section, key, kind, value)
     if result.get("error"):
         raise ValueError(f"SteamVR refused {section}/{key}")
 
@@ -456,9 +458,15 @@ def guard_write(**kw):
 
 
 def vrsetting_subprocess(section, key, kind, value):
+    """fexrift.py vrsetting in a fresh process: {"error": code} from SteamVR, or {"error": "..."} if it failed."""
     arg = json.dumps({"section": section, "key": key, "kind": kind, "value": value})
-    subprocess.run([sys.executable, "-I", os.path.join(CORE.HERE, "fexrift.py"), "vrsetting", arg],
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
+    p = subprocess.run([sys.executable, "-I", os.path.join(CORE.HERE, "fexrift.py"), "vrsetting", arg],
+                       capture_output=True, text=True, timeout=60)
+    try:
+        out = json.loads(p.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return {"error": f"vrsetting exited {p.returncode}"}
+    return out.get("result", {}) if out.get("ok") else {"error": out.get("error", "failed")}
 
 
 def crash_cleanup():
