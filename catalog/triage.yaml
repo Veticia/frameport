@@ -620,6 +620,21 @@ signatures:
     severity: fatal
     diagnosis: The game draws with OpenGL ES, and AXRB's direct mode only has a Vulkan renderer. Install it for AXRB's emulator instead (the "AXRB mode on this PC" option, pc.axrb_backend backend=emulator, or `frameport install <game> --to pc --axrb-backend emulator`).
     suggest: []
+  - id: axrb-direct-no-native-window
+    kind: axrb
+    pattern: '(?m)^AXRB_AOSP_HOST_SURFACES 0'
+    unless: 'APP_CMD_INIT_WINDOW|AXRB_AOSP_TAKEN_SURFACE|AXRB\.Space|session state='
+    severity: warning
+    diagnosis: The game's activity got no window in AXRB's direct mode. NativeActivity games (CryEngine, other own engines) take their surface with Window.takeSurface, which AXRB's direct mode doesn't serve yet (it only hands SurfaceViews one), so they wait for APP_CMD_INIT_WINDOW forever and never start VR (The Climb 2 stopped after "Loading plug-in CryHTTP"). That's AXRB's side; AXRB's emulator may run the game.
+    suggest: []
+    report: true
+  - id: axrb-direct-vulkan-extensions
+    kind: axrb
+    pattern: 'Renderer initialization[\s\S]{0,600}?CrySystem initialization failed'
+    unless: 'fp_vkext: listing'
+    severity: fatal
+    diagnosis: CryEngine found its Vulkan device without extensions every Quest has (VK_EXT_fragment_density_map, Android's external memory) and gave up before creating it; the PC's graphics driver doesn't have them. "Vulkan - list Android's external-memory extensions (this PC)" lists them for the game in builds for this PC, and AXRB leaves them out again when the device is created.
+    suggest: [frame.vk_android_extensions]
   - id: axrb-direct-unhandled-instruction
     kind: axrb
     pattern: 'fatal signal 4 \(SIGILL\)|unhandled synchronous signal 4 '

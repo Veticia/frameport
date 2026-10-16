@@ -510,3 +510,27 @@ def test_obb_and_cube_advice_describes_limits():
     advice = next(f for f in cube.findings if f.id == "cube-swapchain-refused")
     assert "GLES" in advice.diagnosis
     assert "For a Vulkan game, the current build cannot stand in" in advice.diagnosis
+
+
+def test_axrb_direct_crash_after_the_tests_stop_is_forgiven():
+    """The Climb 2 in AXRB's direct mode: frames for the whole test, then a SIGSEGV after AXRB's own stop."""
+    log = "\n".join(["===== direct.out", "AXRB_AOSP_ACTIVITY_CREATED com.crytek.cryengine.EngineActivity",
+                     "===== direct.log", "AXRB_AOSP_ACTIVITY_CREATED com.crytek.cryengine.EngineActivity",
+                     "I/Cry( 4252): [HMD][MobileOculus] ovr_Shutdown finished", "AXRB_AOSP_ACTIVITIES_STOPPED",
+                     "  108.109 81152 E/cpu: thread 4262 (Main): fatal signal 11 (SIGSEGV), code 2, fault addr 52"])
+    res = triage(log, "RUNNING", "com.crytek.climb2", kind="axrb")
+    assert [f.id for f in res.findings] == ["axrb-direct-crash-at-stop"] and res.verdict == "pass"
+    early = log.replace("AXRB_AOSP_ACTIVITIES_STOPPED\n", "") + "\nAXRB_AOSP_ACTIVITIES_STOPPED"
+    late = triage(early, "RUNNING", "com.crytek.climb2", kind="axrb")
+    assert "axrb-direct-guest-crash" in [f.id for f in late.findings]
+
+
+def test_axrb_direct_cryengine_without_android_vulkan_extensions():
+    log = ("I/Cry( 4252): Renderer initialization\n"
+           "I/Cry( 4252): Device Extensions to enable: VK_EXT_queue_family_foreign\n"
+           "I/Cry( 4252): Messagebox: cap: Engine initialization failed!  text:CrySystem initialization failed!\n"
+           "AXRB_AOSP_HOST_SURFACES 0\nI/Cry( 4252): App Event: APP_CMD_INIT_WINDOW")
+    ids = [f.id for f in triage(log, "EXITED", "com.crytek.climb2", kind="axrb").findings]
+    assert "axrb-direct-vulkan-extensions" in ids and "axrb-direct-no-native-window" not in ids
+    stuck = "AXRB_AOSP_HOST_SURFACES 0\nI/Cry( 4252): Loading plug-in CryHTTP"
+    assert "axrb-direct-no-native-window" in [f.id for f in triage(stuck, "RUNNING", "p", kind="axrb").findings]

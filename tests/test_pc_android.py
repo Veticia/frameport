@@ -189,8 +189,9 @@ PC_FIXES = ["frame.ovr_stable_user", "frame.unreal_ovrp_entrypoints", "frame.ava
             "frame.unity_oculus_check", "frame.unity_text_input", "frame.unreal_quest_precompile",
             "frame.unreal_quest_keymap", "frame.unreal_thumb_touch", "frame.unreal_skip_obb_check",
             "frame.unreal_skip_obb_delivery", "frame.nodebug", "frame.meta_permissions", "frame.launcher",
-            "frame.adapter", "frame.ovrplatformcompat", "frame.ovrstubs", "frame.swapchain_limit"]
-PC_EXPERIMENTAL = ["frame.vk_sanitize", "frame.vrapi_bridge", "frame.unity_tls_key_pool", "frame.eos_keychain_loop"]
+            "frame.adapter", "frame.ovrplatformcompat", "frame.ovrstubs", "frame.swapchain_limit",
+            "frame.vrapi_bridge"]
+PC_EXPERIMENTAL = ["frame.vk_sanitize", "frame.unity_tls_key_pool", "frame.eos_keychain_loop"]
 FRAME_ONLY = ["frame.gl_shim", "frame.unity_gl_shim", "frame.unreal_gl_shim", "frame.sdl_clipboard",
               "frame.godot_clipboard", "frame.vivox_audio_route", "frame.a32_bridge", "frame.hw_video_decode",
               "frame.zink_shader_fix", "frame.gl_multiview_fbo", "device.files", "device.hide_navbar",
@@ -256,6 +257,72 @@ def test_pc_only_telemetry_patch():
     assert telemetry not in base.pc_selection({"patch_oculus_unity": {}})  # no analysis: only the recipe
     sel = base.pc_selection({"patch_oculus_unity": {}}, audio)
     assert base.pc_selection(sel) == sel  # kept when the PC target filters the PC recipe again
+
+
+def test_vrapi_vulkan_games_on_the_pc():
+    """Direct-VrApi Vulkan engines (The Climb 2: "Vulkan (VrApi Vulkan system)") go to AXRB's direct mode with the
+    VrApi bridge and the PC-only Android Vulkan extensions; GLES VrApi games (Path of the Warrior) don't get them."""
+    from frameport.core.models import Analysis
+    from frameport.patches import base
+    from frameport.targets import pc_android
+
+    def analysis(graphics, engine="CryEngine"):
+        return Analysis(package="p", version="1", label="P", abis=["arm64-v8a"], engine=engine, xr="VrApi",
+                        graphics=graphics, direct_vrapi=True, libs=["libvrapi.so"], launcher_activity=None,
+                        has_info_category=False, meta_permissions=[], uses_glad_gl=False, unity_msaa_levels=0,
+                        oculus_os_classes=False, is_overport_output=True, debuggable=False, extra={})
+
+    climb, potw = analysis("Vulkan (VrApi Vulkan system)"), analysis("GLES or unknown (no Vulkan declaration)", "Other")
+    recipe = {"patch_oculus_unity": {}, "frame.vrapi_bridge": {}, "frame.gl_shim": {}}
+    assert pc_android.choose_backend(Recipe("p", recipe), climb.graphics) == "direct"
+    assert pc_android.choose_backend(Recipe("p", recipe), potw.graphics) == "emulator"
+    exts = "frame.vk_android_extensions"
+    assert not base.get(exts).applies(climb)  # never in a Steam Frame recipe
+    sel = base.pc_selection(recipe, climb)
+    assert exts in sel and "frame.vrapi_bridge" in sel and "frame.gl_shim" not in sel
+    assert exts not in base.pc_selection(recipe, potw) and "frame.vrapi_bridge" in base.pc_selection(recipe, potw)
+
+
+def test_vk_android_extensions_renames_the_renderer_import(monkeypatch):
+    from frameport.patches import base
+    from frameport.patches.frame import vk_android_extensions as vkx
+
+    class WS:
+        abi, libdir = "arm64-v8a", "lib/arm64-v8a/"
+
+        def __init__(self):
+            self.files = {"lib/arm64-v8a/libCryRenderVulkan.so": b"render", "lib/arm64-v8a/libvrapi.so": b"vrapi",
+                          "lib/arm64-v8a/libCrySystem.so": b"system"}
+
+        def lib(self, name):
+            return self.libdir + name
+
+        def libs(self):
+            return sorted(n[len(self.libdir):] for n in self.files)
+
+        def read_lib(self, name):
+            return self.files[self.lib(name)]
+
+        def has(self, name):
+            return name in self.files
+
+        def put(self, name, data):
+            self.files[name] = data
+
+    imports = {b"render": {"vkEnumerateDeviceExtensionProperties"}, b"vrapi": {"vkEnumerateDeviceExtensionProperties"},
+               b"system": {"dlopen"}}
+    monkeypatch.setattr(vkx.elf, "is_elf", lambda d: True)
+    monkeypatch.setattr(vkx.elf, "dyn_symbols", lambda d, defined: imports.get(d, set()))
+    monkeypatch.setattr(vkx.elf, "rename_imports", lambda d, r: (d + b"+renamed", list(r)))
+    monkeypatch.setattr(vkx.elf, "add_needed", lambda d, lib: d + b"+" + lib.encode())
+    monkeypatch.setattr(vkx, "artifact", lambda abi, name: b"helper")
+    ws = WS()
+    ctx = base.ApkContext(ws, None, {}, None, {})
+    assert vkx.VulkanAndroidExtensions().apply(ctx)
+    assert ws.files["lib/arm64-v8a/libCryRenderVulkan.so"] == b"render+renamed+libfp_vkext.so"
+    assert ws.files["lib/arm64-v8a/libvrapi.so"] == b"vrapi"  # the bridge itself isn't the renderer
+    assert ws.files["lib/arm64-v8a/libfp_vkext.so"] == b"helper"
+    assert len(vkx.RENAMES["vkEnumerateDeviceExtensionProperties"]) == len("vkEnumerateDeviceExtensionProperties")
 
 
 def test_pc_build_extracts_native_libs(tmp_path):

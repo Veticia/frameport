@@ -425,6 +425,18 @@ def game_logs(backend: str | None = None) -> dict[str, str]:
     return out
 
 
+def test_env(extra_env: dict | None = None) -> dict[str, str]:
+    """Environment for a launch test's processes: `extra_env`, else the simulated headset's while one runs, plus
+    FRAMEPORT_AXRB_TEST_ENV ("NAME=value;NAME=value", e.g. AXRB_DIRECT_DUMP=10 for direct mode's periodic thread
+    dumps or AXRB_DIRECT_TRACE=net,files) for debugging a game that stops somewhere."""
+    env = dict(xr_sim.active_env() if extra_env is None else extra_env)
+    for item in os.environ.get("FRAMEPORT_AXRB_TEST_ENV", "").split(";"):
+        name, sep, value = item.strip().partition("=")
+        if sep and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+            env[name] = value
+    return env
+
+
 def launch_test(dep: dict, reporter: Reporter, seconds: int = 45, triage=None, extra_env: dict | None = None):
     """Start the game through FramePort's launcher (= AXRB's run script), watch its Android process, stop it again.
     extra_env: environment for the launcher's processes; default = the simulated headset's while one runs
@@ -441,7 +453,7 @@ def launch_test(dep: dict, reporter: Reporter, seconds: int = 45, triage=None, e
     before = time.time()
     q = axrb._ps_quote
     # --- xr-sim hook (tools/xr_sim.py): env + SteamVR-registration shim before the launcher call
-    sim_env = xr_sim.active_env() if extra_env is None else extra_env
+    sim_env = test_env(extra_env)
     pid = axrb.spawn_detached(xr_sim.launcher_prefix(sim_env) + axrb.logged(
         f"& {q(dep['launcher_win'])} -Package {q(package)} -Activity {q(dep['activity'])} "
         f"-GameName {q(dep['title'])} -CaptureGuestLog " + " ".join(dep.get("flags") or ()),
@@ -518,7 +530,7 @@ def _launch_test_direct(dep: dict, reporter: Reporter, seconds: int, triage, ext
     out = logs / "game" / "direct.out"
     before = time.time()
     q = axrb._ps_quote
-    sim_env = xr_sim.active_env() if extra_env is None else extra_env
+    sim_env = test_env(extra_env)
     pid = axrb.spawn_detached(xr_sim.launcher_prefix(sim_env) + axrb.logged(
         f"& {q(dep['launcher_win'])} -Package {q(package)} -Activity {q(dep['activity'])} "
         f"-GameName {q(dep['title'])} " + " ".join(dep.get("flags") or ()), winhost.to_windows(log)))

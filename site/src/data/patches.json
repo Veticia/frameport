@@ -634,6 +634,11 @@
   "title": "Vivox voice chat: skip Android 12 audio routing",
   "group": "Steam Frame patches"
  },
+ "frame.vk_android_extensions": {
+  "anchor": "frame-vk_android_extensions",
+  "title": "Vulkan: list Android's external-memory extensions (this PC)",
+  "group": "Steam Frame patches"
+ },
  "frame.vk_sanitize": {
   "anchor": "frame-vk_sanitize",
   "title": "Vulkan: drop invalid render-pass pointers",
