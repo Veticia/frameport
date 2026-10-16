@@ -43,7 +43,9 @@ IL2CPP_METADATA = "assets/bin/Data/Managed/Metadata/global-metadata.dat"
 # 17: headset (the Meta headset a VR app was made for: Gear VR / Go games run through frame.a32_bridge) (2026-10)
 # 18: headset "quest" also for 32-bit apps that require 6DoF head tracking (Santa Cruz builds, e.g. Sports
 #     Scramble: Touch controllers on the a32 bridge) (2026-10)
-ANALYSIS_VERSION = 19
+# 20: obb_mount (the game mounts its OBBs as disk images through StorageManager.mountObb, which Lepton can't:
+#     frame.obb_mount_emul, GitHub #308) (2026-10)
+ANALYSIS_VERSION = 20
 
 
 # Android versions by API level (for messages); the Frame's Lepton container runs Android 11 (API 30)
@@ -249,6 +251,12 @@ def analyze(path: Path, deep: bool = True, data_bytes: int | None = None) -> Ana
                                   for d in dexes)
         # video through Android's decoders (frame.hw_video_decode): Java MediaCodec, ExoPlayer/Media3, or libVLC
         media_codec = any(m in d for d in dexes for m in MEDIA_CODEC_MARKERS) or "libvlc.so" in libs
+        # OBBs mounted as disk images (StorageManager.mountObb; Lepton has no loop devices): frame.obb_mount_emul
+        from ..patches.frame.obb_mount import handler_classes
+
+        obb_mount = sorted({c for d in dexes for c in handler_classes(d)}) or (
+            ["other"] if any(b"Landroid/os/storage/StorageManager;" in d and b"\x08mountObb\0" in d for d in dexes)
+            else [])
         from ..patches.frame.unreal_obb_check import has_delivery_check
 
         # Includes obfuscated DownloaderActivity predicates; CRC verification is a separate manifest switch.
@@ -381,6 +389,7 @@ def analyze(path: Path, deep: bool = True, data_bytes: int | None = None) -> Ana
             "sdl_java": sdl_java,
             "godot_clipboard": godot_clipboard,
             "vivox_api31": vivox_api31,
+            "obb_mount": obb_mount,
             "eos_keychain": eos_keychain,
             "bhaptics_permission": bhaptics_permission,
             "media_codec": media_codec,
