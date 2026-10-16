@@ -29,6 +29,16 @@ signatures:
     severity: info
     diagnosis: OVRPlugin sees OVRPort's Quest 2 identity. Quest 3-only graphics options may stay hidden (e.g. Asgard's Wrath 2). Choose Quest 3 under Headset model and rebuild; both the dispatcher name and XR_META_headset_id UUID must change. An intentional Quest 2 selection preserves the original identity.
     suggest: [device.headset_model]
+  - id: mr-no-room
+    pattern: 'FrameBridge[^\r\n]*scene: (?:capture requested -> (?:guardian box|using guardian room)|room from guardian|room [^\r\n]*(?:from guardian|configured/default size|box))'
+    severity: info
+    diagnosis: 'The game is using a simple fallback room. Scan your room for mixed reality, or use Frame > Room > Use my play area for walls without furniture. A recorded scan can be imported until headset capture is available.'
+    suggest: []
+  - id: mr-discovery-unsupported
+    pattern: '(?:Unknown proc addr:\s*xrDiscoverSpacesMETA|(?:MRUK[^\r\n]*)?NoRoomsFound)'
+    severity: warning
+    diagnosis: 'The game cannot discover a Meta room. Enable room layout (adapter.scene_emul), rebuild and reinstall for the updated extension shim, then save a room under Frame > Room.'
+    suggest: [adapter.scene_emul]
   - id: meta-asset-status-error
     pattern: 'Asset status error\s+\(code 100\)'
     severity: error
