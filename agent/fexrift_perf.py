@@ -366,6 +366,8 @@ def bench_run(args, launcher, vr):
     if busy_processes(processes()) or recent_steam_input(CORE.STEAM) or vr.activity() != 3:
         raise ValueError("benchmark refused: game, Wine, container, HMD activity or recent Steam input")
     screen = vr.screen_timeout()  # no setting is changed until both safety checks and this read succeed
+    vrserver_log = os.path.join(CORE.STEAM, "logs", "vrserver.txt")
+    log_start = os.path.getsize(vrserver_log) if os.path.isfile(vrserver_log) else 0
     guard_write(screen=screen)    # before any change: the parent restores from it if this process dies
     child, old_handler = None, None
     settings = settings_get(args)["settings"]
@@ -436,11 +438,21 @@ def bench_run(args, launcher, vr):
                     if old_handler is not None:
                         signal.signal(signal.SIGTERM, old_handler)
     records = list(frames.values())
+    # Without a tracking universe (IMU fallback, e.g. after a boot without the headset worn) Rift games wait at
+    # startup forever: SteamVR's own frames are all a run then counts (seen 2026-10-16, ~1.9/s, game GPU ~0 %).
+    imu_fallback = False
+    try:
+        with open(vrserver_log, errors="replace") as f:
+            f.seek(log_start if os.path.getsize(vrserver_log) >= log_start else 0)
+            imu_fallback = "IMU fallback is active" in f.read(8 << 20)
+    except OSError:
+        pass
     duration = max(0.001, time.monotonic() - started)
     times = [r["system_time"] for r in records]
     span = max(times) - min(times) if len(times) > 1 else 0
     return {"app": args["app"], "seconds": seconds, "elapsed_s": round(duration, 3), "frames": len(records),
-            "valid": len(records) >= 2 and span > 0, "sample_span_s": round(span, 3),
+            "imu_fallback": imu_fallback,   # true: the result says nothing about the game (put the headset on once)
+            "valid": len(records) >= 2 and span > 0 and not imu_fallback, "sample_span_s": round(span, 3),
             "fps": round((len(records) - 1) / span, 2) if span > 0 else None,
             "hitches": sum(r["presents"] >= 3 for r in records),
             "hitches_per_20s": round(20 * sum(r["presents"] >= 3 for r in records) / span, 2) if span > 0 else None,
