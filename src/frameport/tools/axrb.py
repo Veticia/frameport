@@ -727,8 +727,12 @@ def logged(call: str, log_win: str) -> str:
     throw their failure reason), and a final "FP_EXIT <code>" line (the caller can't see the exit code of a process
     started through WMI)."""
     log = _ps_quote(log_win)
-    return (f"try {{ {call} *>> {log}; $c = $(if ($LASTEXITCODE) {{ $LASTEXITCODE }} else {{ 0 }}) }} "
-            f"catch {{ ($_ | Out-String) *>> {log}; $c = 1 }}; \"{EXIT_MARK} $c\" *>> {log}; exit $c")
+    # AXRB's run scripts end with `trap { [Console]::Error.WriteLine(<reason>); exit 1 }`: that bypasses PowerShell's
+    # streams (*>> never sees it), so the console's error writer is swapped for the call and its text logged after
+    return ("$fpErr = [IO.StringWriter]::new(); $fpOld = [Console]::Error; [Console]::SetError($fpErr); "
+            f"try {{ {call} *>> {log}; $c = $(if ($LASTEXITCODE) {{ $LASTEXITCODE }} else {{ 0 }}) }} "
+            f"catch {{ ($_ | Out-String) *>> {log}; $c = 1 }} finally {{ [Console]::SetError($fpOld) }}; "
+            f"if ($fpErr.ToString()) {{ $fpErr.ToString() *>> {log} }}; \"{EXIT_MARK} $c\" *>> {log}; exit $c")
 
 
 def exit_code(log: Path) -> int | None:
@@ -823,8 +827,17 @@ def log_dir(root: Path | None = None) -> Path:
     return (root or runtime_root()) / "output" / "logs"
 
 
-def read_log(path: Path, limit: int = 1 << 20) -> str:
-    """A log written on Windows: Windows PowerShell 5.1's redirection writes UTF-16 with a BOM, others UTF-8."""
+def read_log(path: Path, limit: int = 1 << 20, head: int = 0) -> str:
+    """A log written on Windows: Windows PowerShell 5.1's redirection writes UTF-16 with a BOM, others UTF-8. Its last
+    `limit` characters, and with `head` also its first ones (a long session's start-up lines: direct.out reached
+    10 MB in 3 minutes of LEGO Bricktales, and its tail no longer had the milestones)."""
+    text = _read_text(path)
+    if head and len(text) > head + limit:
+        return text[:head] + "\n[... FramePort: middle of the log left out ...]\n" + text[-limit:]
+    return text[-limit:]
+
+
+def _read_text(path: Path) -> str:
     try:
         data = path.read_bytes()
     except OSError:
@@ -833,7 +846,7 @@ def read_log(path: Path, limit: int = 1 << 20) -> str:
         text = data.decode("utf-16", errors="replace")
     else:
         text = data.decode("utf-8-sig", errors="replace")
-    return text[-limit:]
+    return text
 
 
 def start_emulator(root: Path | None = None, app: Path | None = None, timeout: float = 1200) -> bool:

@@ -613,7 +613,7 @@ signatures:
     suggest: []
   - id: axrb-direct-no-gles
     kind: axrb
-    pattern: 'eglInitialize\b.*(?:fail|0x3008)|Failed to initiali[sz]e EGL|Unable to initiali[sz]e (?:EGL|the OpenGL)|EGL_BAD_DISPLAY'
+    pattern: 'eglInitialize\b.*(?:fail|0x3008)|Failed to initiali[sz]e EGL|Unable to initiali[sz]e (?:EGL|the OpenGL)|EGL_BAD_DISPLAY|Unable to retrieve the default EGL display'
     # Unreal Vulkan builds probe EGL at start too (eglInitialize -> EGL_BAD_DISPLAY in direct mode), then create
     # their Vulkan device: only a session without one is a GLES game (Deadpool VR, 2026-10-15)
     unless: '(?m)I/vulkan: vkCreateDevice\(.*\) = 0$'
@@ -629,9 +629,9 @@ signatures:
     report: true
   - id: axrb-direct-guest-crash
     kind: axrb
-    pattern: 'E/cpu: thread \d+ \(.*\): fatal signal (?:6|7|11) '
+    pattern: 'E/cpu: thread \d+ \(.*\): fatal signal (?:5|6|7|11) '
     severity: fatal
-    diagnosis: The game's own arm64 code crashed in AXRB's direct mode (a SIGSEGV/SIGBUS/SIGABRT; direct.log has the backtrace by library). Often a missing Android service or a translation bug rather than the game; try the other translator (pc.axrb_backend translator=digitalis) or AXRB's emulator, and report it to AXRB with the diagnostics.
+    diagnosis: The game's own arm64 code crashed in AXRB's direct mode (a SIGSEGV/SIGBUS/SIGABRT, or the SIGTRAP Unity raises on a fatal error; direct.log has the backtrace by library). Often a missing Android service or a translation bug rather than the game; try the other translator (pc.axrb_backend translator=digitalis) or AXRB's emulator, and report it to AXRB with the diagnostics.
     suggest: []
     report: true
   - id: axrb-direct-host-fault

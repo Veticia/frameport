@@ -2,6 +2,7 @@
 import hashlib
 import io
 import json
+import os
 import re
 import struct
 import subprocess
@@ -147,6 +148,8 @@ def test_read_log_handles_powershell_utf16(tmp_path):
 def test_logged_call_reports_its_exit_code(tmp_path, win):
     cmd = axrb.logged("& 'x.ps1' -A 1", r"C:\l.log")
     assert "*>> 'C:\\l.log'" in cmd and '"FP_EXIT $c"' in cmd and cmd.endswith("exit $c")
+    # AXRB's trap writes its failure reason straight to the console's stderr: captured and logged too
+    assert cmd.index("[Console]::SetError($fpErr)") < cmd.index("x.ps1") < cmd.index("$fpErr.ToString() *>>")
     log = tmp_path / "l.log"
     log.write_bytes(b"\xff\xfe" + "output\nFP_EXIT 4\n".encode("utf-16-le"))
     assert axrb.exit_code(log) == 4
@@ -689,6 +692,9 @@ def test_backend_choice_and_flags():
     assert pc_android.choose_backend(plain, "Vulkan (libvulkan)") == "direct"
     assert pc_android.choose_backend(plain, "GLES or unknown") == "emulator"  # direct mode has no GLES renderer
     assert pc_android.choose_backend(plain, "") == "emulator"
+    # Unity boot.config's xr-vulkan-* keys are in GLES builds too (Toy Master: EGL crash in direct mode)
+    assert pc_android.choose_backend(plain, "Vulkan (Unity boot.config)") == "emulator"
+    assert pc_android.choose_backend(plain, "Vulkan (declared in manifest)") == "direct"
     chosen = Recipe("com.g", {"pc.axrb_backend": {"backend": "emulator", "translator": "digitalis"}})
     assert pc_android.choose_backend(chosen, "Vulkan (x)") == "emulator"
     assert pc_android.choose_backend(chosen, "Vulkan (x)", override="direct") == "direct"
@@ -788,6 +794,55 @@ def test_install_for_direct_mode(tmp_path, monkeypatch, win):
     assert pc_android.uninstall(dep, keep_data=False) and not saves.exists()
 
 
+def test_long_content_lists_go_through_hard_links(tmp_path, monkeypatch, win):
+    """axrb-direct.exe gets one --mount-ro argument per content file (paths resolved by AXRB, so junctions don't
+    help): Batman's 90 files from a long dump folder overflowed Windows' 32767-character command line. Such lists go
+    through hard links in <game dir>\\content; a short list keeps the files' own paths."""
+    from frameport.targets import pc_android
+
+    monkeypatch.setattr(axrb, "local_appdata", lambda: tmp_path / "Local")
+    data = tmp_path / ("a-very-long-dump-folder-name" * 6) / "obb"
+    data.mkdir(parents=True)
+    names = [f"scenes_{i:03d}_assets_all_with_a_long_name.bundle" for i in range(90)]
+    for n in names:
+        (data / n).write_bytes(b"x")
+    links = tmp_path / "Local/FramePort/axrb/games/com.game.x/content"
+    lines = pc_android.asset_lines("com.game.x", data, names[:3], Reporter())  # fits: the files' own paths
+    assert lines[0] == f"Android/obb/com.game.x/{names[0]}\tW:{str(data / names[0]).replace('/', chr(92))}"
+    assert not links.exists()
+    lines = pc_android.asset_lines("com.game.x", data, None, Reporter())
+    assert len(lines) == 90 and pc_android.mount_args_length(lines) <= pc_android.MOUNT_ARGS_BUDGET
+    assert lines[0] == f"Android/obb/com.game.x/{names[0]}\tW:{str(links).replace('/', chr(92))}\\{names[0]}"
+    assert os.path.samefile(links / names[5], data / names[5])
+    assert pc_android.asset_lines("com.game.x", data, None, Reporter()) == lines  # again: links kept
+    pc_android.asset_lines("com.game.x", data, names[:3], Reporter())  # short again: the links go, the data stays
+    assert not links.exists() and (data / names[0]).read_bytes() == b"x"
+    # no hard links possible (another drive): a clear error instead of Windows' "filename too long"
+    monkeypatch.setattr(os, "link", lambda a, b: (_ for _ in ()).throw(OSError(18, "cross-device link")))
+    with pytest.raises(RuntimeError, match="don't fit on the command line of AXRB's direct mode"):
+        pc_android.asset_lines("com.game.x", data, None, Reporter())
+    assert not links.exists()
+    # a folder Windows reaches only through \\wsl$: copies next to the APK
+    monkeypatch.setattr(winhost, "to_windows", lambda p: ("\\\\wsl.localhost\\U" if "games" not in str(p) else "W:")
+                        + str(p).replace("/", "\\"))
+    lines = pc_android.asset_lines("com.game.x", data, names[:1], Reporter())
+    copy = tmp_path / "Local/FramePort/axrb/games/com.game.x/obb" / names[0]
+    assert copy.read_bytes() == b"x" and lines[0].endswith(names[0]) and "\\\\wsl" not in lines[0]
+
+
+def test_frame_rates_from_axrb_perf_lines():
+    """Launch tests report the rate from AXRB's 5-second summaries (Batman under Monado, 2026-10-15)."""
+    from frameport.targets import pc_android
+
+    text = "\n".join(
+        [f"I/AXRB.Perf( 4290): AXRB.Perf end-frame: rate={r}/s avg=0.113ms max=1.561ms samples=315" for r in
+         (3.0, 58.9, 62.4, 62.9, 64.1, 64.1, 63.7)]
+        + ["AXRB.Perf host-fresh-submit: rate=62.9/s avg=15.889ms max=31.773ms samples=315",
+           "AXRB.Perf host-end-frame: rate=63.7/s avg=0.197ms"])
+    assert pc_android.frame_rates(text) == {"game": 63.7, "host": 62.9}
+    assert pc_android.frame_rates("no perf lines") == {}
+
+
 def test_direct_logs_and_state(tmp_path, monkeypatch):
     from frameport.targets import pc_android
 
@@ -804,6 +859,12 @@ def test_direct_logs_and_state(tmp_path, monkeypatch):
     out = "AXRB_AOSP_BOOTSTRAP\nAXRB_AOSP_ACTIVITY_CREATED com.game.x.Main\n"
     assert pc_android.direct_state(out, True) == "RUNNING" and pc_android.direct_state(out, False) == "EXITED"
     assert pc_android.dep_backend({}) == "emulator"  # installs from before direct mode
+    # a long session (LEGO Bricktales: 10 MB of direct.out in 3 minutes) keeps its start-up milestones
+    (root / "output/logs/game/direct.out").write_text(out + "I/Unity( 1): frame\n" * 400_000)
+    logs = pc_android.game_logs(axrb.DIRECT)
+    assert logs["direct.out"].startswith("AXRB_AOSP_BOOTSTRAP") and logs["direct.out"].endswith("frame\n")
+    assert len(logs["direct.out"]) < 3 << 20 and "middle of the log left out" in logs["direct.out"]
+    assert axrb.read_log(root / "output/logs/game/direct.out", 100) == ("I/Unity( 1): frame\n" * 6)[-100:]
 
 
 def test_direct_mode_triage():
@@ -827,6 +888,11 @@ def test_direct_mode_triage():
     unreal = ("E/libEGL( 4242): eglInitializeImpl:283 error 3008 (EGL_BAD_DISPLAY)\n"
               "   35.775 70748 I/vulkan: vkCreateDevice(2 queue families, 12 extensions) = 0\n")
     assert "axrb-direct-no-gles" not in {f.id for f in triage(unreal, "RUNNING", "com.game.x", kind="axrb").findings}
+    # Toy Master (Unity 2022.3, GLES) in direct mode, 2026-10-15: Unity's own EGL message, then its SIGTRAP
+    toy = ("E/Unity( 4252): Unable to retrieve the default EGL display!\n"
+           "   17.854 82044 E/cpu: thread 4252 (UnityMain): fatal signal 5 (SIGTRAP), code -6, fault addr 278b00001092\n")
+    assert {f.id for f in triage(toy, "EXITED", "com.game.x", kind="axrb").findings} == \
+        {"axrb-direct-no-gles", "axrb-direct-guest-crash"}
     for text, want in (("E/vulkan: vulkan-1.dll is not installed: the guest has no GPU", "axrb-direct-no-vulkan"),
                        ("Direct mode is missing C:\\x\\sysroot/system/lib64.", "axrb-direct-incomplete"),
                        ("  1.0 1 E/host-fault: axrb-direct.exe + 0x1234", "axrb-direct-host-fault"),
