@@ -43,7 +43,9 @@ IL2CPP_METADATA = "assets/bin/Data/Managed/Metadata/global-metadata.dat"
 # 17: headset (the Meta headset a VR app was made for: Gear VR / Go games run through frame.a32_bridge) (2026-10)
 # 18: headset "quest" also for 32-bit apps that require 6DoF head tracking (Santa Cruz builds, e.g. Sports
 #     Scramble: Touch controllers on the a32 bridge) (2026-10)
-ANALYSIS_VERSION = 19
+# 20: cortopia_org_id (Cortopia's Meta start-up waits for Users.GetOrgScopedID: frame.cortopia_org_id,
+#     GitHub #360) (2026-10)
+ANALYSIS_VERSION = 20
 
 
 # Android versions by API level (for messages); the Frame's Lepton container runs Android 11 (API 30)
@@ -378,6 +380,10 @@ def analyze(path: Path, deep: bool = True, data_bytes: int | None = None) -> Ana
             "text_fields": unity_text_fields(il2cpp_meta) if il2cpp_meta else [],
             # Meta's OVRManager raises MSAA at runtime (frame.unity_runtime_msaa_off); Oculus XR Plugin (multiview)
             "ovr_runtime_msaa": bool(il2cpp_meta) and b"\0useRecommendedMSAALevel\0" in il2cpp_meta,
+            # Cortopia's Meta platform start-up awaits an org-scoped user id OVRPort never answers
+            # (frame.cortopia_org_id, GitHub #360)
+            "cortopia_org_id": bool(il2cpp_meta) and b"\0Cortopia.Scripts.Platform.Meta\0" in il2cpp_meta
+            and b"\0GetOrgScopedID\0" in il2cpp_meta,
             "sdl_java": sdl_java,
             "godot_clipboard": godot_clipboard,
             "vivox_api31": vivox_api31,
