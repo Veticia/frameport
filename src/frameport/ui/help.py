@@ -134,6 +134,9 @@ HELP: dict[str, str] = _Translated({
                   "Android VR games through SteamVR. The first install downloads AXRB and its Android (about 2.5 GB) "
                   "and needs Windows Hypervisor Platform, an NVIDIA or AMD graphics card and 12 GB of memory. Many "
                   "games don't work in AXRB yet.",
+    "pc_android_gles": "This game draws with OpenGL ES. AXRB's emulator copies such pictures to the PC frame by frame, "
+                       "so FramePort renders them at half size: expect about 30 frames per second at best, less with "
+                       "a high SteamVR resolution. Vulkan games don't have this limit.",
     # ---- settings
     "data_folder": "FramePort's tools, library, artwork and your games' signing keys. Back it up: an update needs the "
                    "same key, or the game must be reinstalled and loses its saves.",

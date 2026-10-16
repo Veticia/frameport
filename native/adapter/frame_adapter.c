@@ -98,6 +98,14 @@ static int foveation_eye_enabled, foveation_eye_supported;
 // hide XR_FB_space_warp: games then render every frame themselves (UE5 Application SpaceWarp flickered on the Frame,
 // e.g. Into The Radius 2; OVRPort's patch_disable_space_warp doesn't reach UE5's OpenXR plugin)
 static int hide_space_warp = 0;
+// projection_only: frames with a projection layer and more layers submit the projection layer alone (AXRB 1.0.4's
+// emulator rejects every multi-layer GLES frame with -2: its GLES path has no layer batches; Accounting+'s OVROverlay
+// quads made almost every frame fail). The other layers (menus, overlays drawn as quads) are not shown.
+static int projection_only = 0;
+// scale_max: the maximum eye size reported is the scaled recommended one too (games that size their eye buffers from
+// the maximum or scale the recommendation up: Accounting+'s Unity 2017 OVRPlugin made 896x1024 from a 448x504
+// recommendation). For AXRB's emulator, where every eye pixel is copied.
+static int scale_max = 0;
 static int strip_color_bias = 0;
 // fade_quad.c: draw colour-scale fades (fade to black) as a black quad over the picture; 2 = also remove the scale
 static int fade_quad = 0;
@@ -175,6 +183,8 @@ static void read_settings(const char *path) {
         if (sscanf(line, "foveation_storage_fix=%f", &value) == 1) foveation_storage_fix = value != 0;
         if (sscanf(line, "foveation_eye=%f", &value) == 1) foveation_eye = value != 0;
         if (sscanf(line, "hide_space_warp=%f", &value) == 1) hide_space_warp = value != 0;
+        if (sscanf(line, "projection_only=%f", &value) == 1) projection_only = value != 0;
+        if (sscanf(line, "scale_max=%f", &value) == 1) scale_max = value != 0;
         if (sscanf(line, "strip_color_bias=%f", &value) == 1) strip_color_bias = (int)value;
         if (sscanf(line, "fade_quad=%f", &value) == 1) fade_quad = value > 0 ? (int)value : 0;
         if (sscanf(line, "frame_balance=%f", &value) == 1) frame_balance = value != 0;
@@ -273,6 +283,7 @@ static void initialize(void) {
     if (proximity_emul) LOG("per-game: proximity_emul=%d (finger proximity from capacitive touch: %s)", proximity_emul,
                             proximity_emul > 1 ? "thumb + index" : "thumb");
     if (hide_space_warp) LOG("per-game: hide_space_warp=1 (XR_FB_space_warp hidden, space warp info removed)");
+    if (projection_only) LOG("per-game: projection_only=1 (frames with more layers submit the projection layer alone)");
     if (strip_color_bias) LOG("per-game: strip_color_bias=%d (layer color scale/bias removed)", strip_color_bias);
     if (fade_quad) LOG("per-game: fade_quad=%d (colour-scale fades drawn as a black quad%s)", fade_quad,
                        fade_quad > 1 ? "; the layer's own scale removed" : "");
@@ -459,7 +470,12 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEnumerateViewConfigurationViews(XrInstance inst
             if (h > views[i].maxImageRectHeight) h = views[i].maxImageRectHeight;
             views[i].recommendedImageRectWidth = w ? w : 1;
             views[i].recommendedImageRectHeight = h ? h : 1;
-            LOG("view %u recommended %ux%u", i, views[i].recommendedImageRectWidth, views[i].recommendedImageRectHeight);
+            if (scale_max && scale < 1.0f) {
+                views[i].maxImageRectWidth = views[i].recommendedImageRectWidth;
+                views[i].maxImageRectHeight = views[i].recommendedImageRectHeight;
+            }
+            LOG("view %u recommended %ux%u%s", i, views[i].recommendedImageRectWidth, views[i].recommendedImageRectHeight,
+                scale_max && scale < 1.0f ? " (also the maximum)" : "");
         }
     }
     return result;
@@ -1605,6 +1621,20 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEndFrame(XrSession session, const XrFrameEndInf
                     __atomic_exchange_n(&input_bool_true, 0, __ATOMIC_RELAXED));
             pose_time_report();
             frames = 0; drift_sum = drift_max = 0;
+        }
+    }
+    XrFrameEndInfo single;
+    if (projection_only && info && info->layerCount > 1 && info->layers) {
+        for (uint32_t i = 0; i < info->layerCount; ++i) {
+            const XrCompositionLayerBaseHeader *l = info->layers[i];
+            if (!l || l->type != XR_TYPE_COMPOSITION_LAYER_PROJECTION) continue;
+            static int logged;
+            if (!logged++) LOG("projection_only: %u layers -> the projection layer alone", info->layerCount);
+            single = *info;
+            single.layerCount = 1;
+            single.layers = &info->layers[i];
+            info = &single;
+            break;
         }
     }
     if ((!layer_fix && !swap_eyes && !emulate_passthrough && !flip_quads && !flip_emul && !strip_depth && !fade_quad) || !info || !info->layerCount ||

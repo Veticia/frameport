@@ -35,6 +35,7 @@ static const GLubyte *(*real_glGetStringi)(GLenum, GLuint);
 static void (*real_glGetIntegerv)(GLenum, GLint *);
 static __eglMustCastToProperFunctionPointerType (*real_eglGetProcAddress)(const char *);
 static pthread_once_t once = PTHREAD_ONCE_INIT;
+static int tq_used;  // GPU timer-query stand-ins handed out (below): GL_GPU_DISJOINT_EXT reads answer 0
 
 static int hide_multiview = -1;  // -1: not set (Unity and Unreal keep multiview, everything else hides it)
 static int hide_msrtt = 1;
@@ -628,6 +629,21 @@ static int is_hidden(const char *name) {
     return 0;
 }
 
+// GL_EXT_disjoint_timer_query listed although the driver lacks it: GLAD loaders only look its functions up when the
+// extension is listed, and some engines call them unconditionally (Path of the Warrior on AXRB's emulator, whose
+// gfxstream eglGetProcAddress still returns pointers for the names); the lookups then get the stand-ins below
+// eglGetProcAddress. Decided once a context answers GL_NUM_EXTENSIONS, by whether the driver lists the extension.
+static const char TIMER_QUERY_EXT[] = "GL_EXT_disjoint_timer_query";
+static int added_timer_query = -1;
+static int add_timer_query(void) {
+    if (added_timer_query < 0 && real_glGetIntegerv && real_glGetStringi) {
+        GLint total = 0;
+        real_glGetIntegerv(GL_NUM_EXTENSIONS, &total);
+        if (total > 0) added_timer_query = !ext_supported(TIMER_QUERY_EXT);
+    }
+    return added_timer_query > 0;
+}
+
 // Filtered index table for glGetStringi (built lazily, per process).
 static GLuint *visible;
 static GLint visible_count = -1;
@@ -641,12 +657,17 @@ static void build_table(void) {
         const char *name = (const char *)real_glGetStringi(GL_EXTENSIONS, (GLuint)i);
         if (name && !is_hidden(name)) visible[visible_count++] = (GLuint)i;
     }
-    LOG("extensions: %d of %d visible to the game", visible_count, total);
+    LOG("extensions: %d of %d visible to the game%s", visible_count, total,
+        add_timer_query() ? " (+ GL_EXT_disjoint_timer_query, stand-ins)" : "");
 }
 
 __attribute__((visibility("default"))) void glGetIntegerv(GLenum pname, GLint *data) {
     pthread_once(&once, init);
-    if (pname == GL_NUM_EXTENSIONS && data) { build_table(); if (visible_count >= 0) { *data = visible_count; return; } }
+    if (pname == GL_NUM_EXTENSIONS && data) {
+        build_table();
+        if (visible_count >= 0) { *data = visible_count + add_timer_query(); return; }
+    }
+    if (pname == 0x8FBB /* GL_GPU_DISJOINT_EXT */ && tq_used && data) { *data = 0; return; }
     if (real_glGetIntegerv) real_glGetIntegerv(pname, data);
 }
 
@@ -654,7 +675,10 @@ __attribute__((visibility("default"))) const GLubyte *glGetStringi(GLenum name, 
     pthread_once(&once, init);
     if (name == GL_EXTENSIONS) {
         build_table();
-        if (visible_count >= 0) return index < (GLuint)visible_count ? real_glGetStringi(name, visible[index]) : NULL;
+        if (visible_count >= 0) {
+            if (index < (GLuint)visible_count) return real_glGetStringi(name, visible[index]);
+            return index == (GLuint)visible_count && add_timer_query() ? (const GLubyte *)TIMER_QUERY_EXT : NULL;
+        }
     }
     return real_glGetStringi ? real_glGetStringi(name, index) : NULL;
 }
@@ -665,11 +689,12 @@ __attribute__((visibility("default"))) const GLubyte *glGetString(GLenum name) {
     if (name != GL_EXTENSIONS || !s) return s;
     static char *filtered;
     if (!filtered) {
-        filtered = calloc(strlen((const char *)s) + 1, 1);
+        filtered = calloc(strlen((const char *)s) + sizeof(TIMER_QUERY_EXT) + 2, 1);
         char *copy = strdup((const char *)s), *save = NULL;
         for (char *tok = strtok_r(copy, " ", &save); tok; tok = strtok_r(NULL, " ", &save))
             if (!is_hidden(tok)) { strcat(filtered, tok); strcat(filtered, " "); }
         free(copy);
+        if (add_timer_query()) { strcat(filtered, TIMER_QUERY_EXT); strcat(filtered, " "); }
     }
     return (const GLubyte *)filtered;
 }
@@ -794,13 +819,55 @@ EXPORT void glDrawRangeElements(GLenum m, GLuint s, GLuint e, GLsizei c, GLenum 
     if (d.DrawRangeElements) d.DrawRangeElements(m, s, e, c, t, i);
 }
 
+// GPU timer queries (GL_EXT_disjoint_timer_query) the driver doesn't have: GLAD engines call the function pointers
+// whether or not the extension is listed (Path of the Warrior: glad_glGenQueriesEXT NULL -> SIGSEGV at pc 0 in
+// EgHalGrTimestampQueryGL on AXRB's emulator, whose gfxstream GLES has no timer queries; Quest and the Frame have
+// them, so the stand-ins are only handed out when the real lookup fails). Every query is at once available and
+// measured 0 ns.
+static GLuint tq_next = 0x7f000000;
+static void tq_gen(GLsizei n, GLuint *ids) { for (GLsizei i = 0; ids && i < n; i++) ids[i] = __atomic_add_fetch(&tq_next, 1, __ATOMIC_RELAXED); }
+static void tq_delete(GLsizei n, const GLuint *ids) { (void)n; (void)ids; }
+static GLboolean tq_is(GLuint id) { return id > 0x7f000000; }
+static void tq_begin(GLenum target, GLuint id) { (void)target; (void)id; }
+static void tq_end(GLenum target) { (void)target; }
+static void tq_counter(GLuint id, GLenum target) { (void)id; (void)target; }
+static void tq_getiv(GLenum target, GLenum pname, GLint *v) { (void)target; (void)pname; if (v) *v = 0; }
+#define TQ_RESULT(v, pname) if (v) *(v) = (pname) == 0x8867 /* GL_QUERY_RESULT_AVAILABLE */ ? 1 : 0
+static void tq_objiv(GLuint id, GLenum pname, GLint *v) { (void)id; TQ_RESULT(v, pname); }
+static void tq_objuiv(GLuint id, GLenum pname, GLuint *v) { (void)id; TQ_RESULT(v, pname); }
+static void tq_obji64v(GLuint id, GLenum pname, GLint64 *v) { (void)id; TQ_RESULT(v, pname); }
+static void tq_objui64v(GLuint id, GLenum pname, GLuint64 *v) { (void)id; TQ_RESULT(v, pname); }
+static void tq_int64v(GLenum pname, GLint64 *v) { (void)pname; if (v) *v = 0; }
+static const struct { const char *name; void *fn; } timer_query_standins[] = {
+    {"glGenQueriesEXT", (void *)tq_gen}, {"glDeleteQueriesEXT", (void *)tq_delete}, {"glIsQueryEXT", (void *)tq_is},
+    {"glBeginQueryEXT", (void *)tq_begin}, {"glEndQueryEXT", (void *)tq_end},
+    {"glQueryCounterEXT", (void *)tq_counter}, {"glGetQueryivEXT", (void *)tq_getiv},
+    {"glGetQueryObjectivEXT", (void *)tq_objiv}, {"glGetQueryObjectuivEXT", (void *)tq_objuiv},
+    {"glGetQueryObjecti64vEXT", (void *)tq_obji64v}, {"glGetQueryObjectui64vEXT", (void *)tq_objui64v},
+    {"glGetInteger64vEXT", (void *)tq_int64v},
+};
+
+static __eglMustCastToProperFunctionPointerType timer_query_standin(const char *name) {
+    for (size_t i = 0; i < sizeof(timer_query_standins) / sizeof(timer_query_standins[0]); i++)
+        if (!strcmp(name, timer_query_standins[i].name)) {
+            if (!tq_used++) LOG("no GPU timer queries in this driver: %s and the other EXT query functions answer "
+                               "'available, 0 ns'", name);
+            return (__eglMustCastToProperFunctionPointerType)timer_query_standins[i].fn;
+        }
+    return NULL;
+}
+
 __attribute__((visibility("default"))) __eglMustCastToProperFunctionPointerType eglGetProcAddress(const char *name) {
     pthread_once(&once, init);
     if (name && !strcmp(name, "glGetStringi")) return (__eglMustCastToProperFunctionPointerType)glGetStringi;
     if (name && !strcmp(name, "glGetString")) return (__eglMustCastToProperFunctionPointerType)glGetString;
     if (name && !strcmp(name, "glGetIntegerv")) return (__eglMustCastToProperFunctionPointerType)glGetIntegerv;
     __eglMustCastToProperFunctionPointerType fn = real_eglGetProcAddress ? real_eglGetProcAddress(name) : NULL;
-    if (!fn || !name) return fn;
+    if (name && (!fn || added_timer_query > 0)) {
+        __eglMustCastToProperFunctionPointerType standin = timer_query_standin(name);
+        if (standin || !fn) return standin;
+    }
+    if (!name) return fn;
 #define WRAP(sym, real, w) if (!strcmp(name, sym)) { real = (void *)fn; return (__eglMustCastToProperFunctionPointerType)w; }
     if (hide_msrtt && (!strcmp(name, "glFramebufferTexture2DMultisampleEXT") ||
                        !strcmp(name, "glRenderbufferStorageMultisampleEXT"))) {

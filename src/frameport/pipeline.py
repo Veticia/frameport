@@ -386,6 +386,14 @@ def pc_installable(entry: dict) -> bool:
     return (((entry.get("analysis") or {}).get("extra") or {}).get("vr_kind") or "quest") in ("quest", "openxr")
 
 
+def pc_gles(entry: dict) -> bool:
+    """A Quest game that draws with OpenGL ES: on this PC it runs in AXRB's emulator at reduced resolution and frame
+    rate (eye images copied as pixels; the PC build halves the eye size). Library fields only."""
+    if entry.get("kind"):
+        return False
+    return "GLES" in ((entry.get("analysis") or {}).get("graphics") or "")
+
+
 def analysis_warnings(entry: dict) -> list[str]:
     """Blockers read from a Quest/Android game's APK, for the CLI (the game page shows them as callouts)."""
     if is_rift(entry) or is_linux(entry) or not entry.get("analysis"):

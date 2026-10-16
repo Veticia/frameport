@@ -109,6 +109,11 @@ class Patch:
         in the recipe, which both builds share): pc_selection adds it."""
         return False
 
+    def pc_keeps(self, analysis: Analysis) -> bool:
+        """For an on_pc patch in the recipe: False when the build for this PC leaves it out for this game anyway
+        (pc_selection, given the analysis)."""
+        return True
+
     def apply(self, ctx: ApkContext) -> bool:  # apk stage; returns True when something changed
         raise NotImplementedError
 
@@ -170,6 +175,7 @@ def pc_selection(patches: dict, analysis: Analysis | None = None) -> dict:
     out = {pid: params for pid, params in patches.items()
            if pid in REGISTRY and (REGISTRY[pid].category == "overport" or REGISTRY[pid].on_pc)}
     if analysis is not None:
+        out = {pid: params for pid, params in out.items() if REGISTRY[pid].pc_keeps(analysis)}
         for patch in all_patches():
             if patch.id not in out and patch.pc_detect(analysis):
                 out[patch.id] = {}
@@ -178,7 +184,18 @@ def pc_selection(patches: dict, analysis: Analysis | None = None) -> dict:
 
         for key, value in PC_VALUES.items():
             out[f"adapter.{key}"] = {"value": value}
+        if analysis is not None and "GLES" in (analysis.graphics or ""):
+            # AXRB's emulator sends GLES eye images as pixels (adb reverse, ~100 MB/s, synchronous in xrEndFrame):
+            # Lucky's Tale at Monado's 896x1008 per eye 9 fps, at half size (FrameBridge's minimum) 30 fps
+            scale = (out.get("adapter.scale") or {}).get("value")
+            out["adapter.scale"] = {"value": min(float(scale), GLES_PC_SCALE) if scale else GLES_PC_SCALE}
+            # ... and rejects every GLES frame with more than one layer (no layer batches without Vulkan)
+            out["adapter.projection_only"] = {"value": 1}
+            out["adapter.scale_max"] = {"value": 1}  # also for games that size their eyes from the maximum
     return out
+
+
+GLES_PC_SCALE = 0.5  # eye-size scale for GLES games in the build for this PC (FrameBridge accepts 0.5-2.0)
 
 
 def all_patches() -> list[Patch]:

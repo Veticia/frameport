@@ -986,9 +986,30 @@ $ErrorActionPreference = 'Stop'
 $env:ADB_SERVER_SOCKET = $null
 $env:PATH = (Join-Path @RES@ 'tools\python') + ';' + $env:PATH
 $run = Join-Path @RES@ 'scripts\run\run_windows_game.ps1'
+# GLES games send their eye images as pixels. AXRB's default route (TCP to 10.0.2.2 through the emulator's user-mode
+# network) carries ~8 MB/s, its adb reverse route ~120 MB/s (Lucky's Tale at 448x512 per eye: 1 -> 30 fps). The
+# guest reads debug.axrb.image_transport when it connects, so Android is started here first (as AXRB's run script
+# would; that script then owns it and shuts it down) and the property set. Vulkan games use shared GPU images.
+# FRAMEPORT_AXRB_IMAGE_TRANSPORT=default leaves AXRB's own choice.
+$transport = if ($env:FRAMEPORT_AXRB_IMAGE_TRANSPORT) { $env:FRAMEPORT_AXRB_IMAGE_TRANSPORT } else { 'adb' }
+$owns = $false
+if ($transport -ne 'default') {
+    $adb = Join-Path $env:ANDROID_HOME 'platform-tools\adb.exe'
+    $serial = 'emulator-@PORT@'
+    if (((& $adb devices) -join "`n") -notmatch ('(?m)^' + [regex]::Escape($serial) + '\s+device\s*$')) {
+        & (Join-Path @RES@ 'scripts\emulator\windows_android_emulator.ps1') -Action Start -Sdk $env:ANDROID_HOME `
+            -Avd '@AVD@' -Port @PORT@ -ApiLevel @API@ -Abi arm64-v8a -MemoryMB @MEM@ -CpuCores @CORES@ `
+            -GuestClock TscCorrected -GpuSharing:(Test-Path (Join-Path @RES@ 'out\gpu\Release\axrb_gpu_layer.json'))
+        $owns = $true
+    }
+    & $adb -s $serial shell setprop debug.axrb.image_transport $transport
+    # Android's "built for an older version of Android" dialog takes the window focus from games with an old
+    # targetSdk (Accounting+, 27): Unity 2017 then never starts rendering. Android 16 skips it with this property.
+    & $adb -s $serial shell setprop debug.wm.disable_deprecated_target_sdk_dialog 1
+}
 & $run -Avd '@AVD@' -Port @PORT@ -Sdk $env:ANDROID_HOME -MemoryMB @MEM@ -CpuCores @CORES@ -TextureMode gpu `
     -Package $Package -Activity $Activity -GameName $GameName -GuestClock Auto -CaptureGuestLog:$CaptureGuestLog `
-    -PrecomposeProjectionLayers:$PrecomposeProjectionLayers -RuntimeApk (Join-Path @RES@ '@APK@')
+    -PrecomposeProjectionLayers:$PrecomposeProjectionLayers -RuntimeApk (Join-Path @RES@ '@APK@') -OwnsEmulator:$owns
 exit $LASTEXITCODE
 """
 
@@ -1022,6 +1043,7 @@ def launcher_text(root: Path | None = None, app: Path | None = None) -> str:
     return (LAUNCHER.replace("@ENV@", sets).replace("@RES@", _ps_quote(winhost.to_windows(resources(app))))
             .replace("@AVD@", emulator_values(app)["avd"]).replace("@PORT@", str(PORT))
             .replace("@MEM@", str(MEMORY_MB)).replace("@CORES@", str(CPU_CORES))
+            .replace("@API@", str(emulator_values(app)["api"]))
             .replace("@APK@", RUNTIME_APK.replace("/", "\\")))
 
 

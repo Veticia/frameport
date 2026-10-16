@@ -71,6 +71,14 @@ class UnityMultiPass(Il2cppReturnPatch):
     def detect(self, a):
         return None  # only for a game that shows the symptom (catalog recipe or the user's choice)
 
+    # AXRB's emulator (gfxstream GLES) lists GL_OVR_multiview2, but its encoder finds a multiview framebuffer
+    # incomplete and drops every draw into it (logcat: "GL2Encoder.cpp:s_glDrawElements ... GL error 0x506
+    # checkFramebufferCompleteness"; Lucky's Tale, 2026-10-15: both eyes black). Each eye in its own pass draws.
+    on_pc = "experimental"
+
+    def pc_detect(self, a):
+        return self.applies(a) and "GLES" in a.graphics and bool((a.extra or {}).get("oculus_xr_plugin"))
+
 
 class UnityNoOverlayCopy(Il2cppReturnPatch):
     id = "frame.unity_no_overlay_copy"

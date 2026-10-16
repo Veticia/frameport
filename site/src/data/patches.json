@@ -204,6 +204,11 @@
   "title": "Treat newer Quest controllers as Touch",
   "group": "Game settings"
  },
+ "adapter.projection_only": {
+  "anchor": "adapter-projection_only",
+  "title": "Main picture only",
+  "group": "Game settings"
+ },
  "adapter.proximity_emul": {
   "anchor": "adapter-proximity_emul",
   "title": "Animate fingers from touch",
@@ -232,6 +237,11 @@
  "adapter.scale": {
   "anchor": "adapter-scale",
   "title": "Sharpness",
+  "group": "Game settings"
+ },
+ "adapter.scale_max": {
+  "anchor": "adapter-scale_max",
+  "title": "Cap the eye size",
   "group": "Game settings"
  },
  "adapter.scene_depth": {

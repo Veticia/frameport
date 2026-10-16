@@ -2,7 +2,7 @@
 
 # Patches
 
-Every patch and game setting FramePort knows: 171 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
+Every patch and game setting FramePort knows: 173 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
 
 Each entry says what the patch does, whether it changes the APK or only the install, when FramePort suggests it, its options, the catalog games whose recipe names it and the launch-test signatures that suggest it. Patches that are on by default are on for every game, so the catalog rarely names them.
 
@@ -12,7 +12,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 
 - [Patches from OVRPort](#group-overport) (25)
 - [Steam Frame patches](#group-frame) (56)
-- [Game settings](#group-adapter) (68)
+- [Game settings](#group-adapter) (70)
 - [Files and settings on the Frame](#group-device) (9)
 - [PC VR (Proton and Revive)](#group-pcvr) (13)
 
@@ -142,12 +142,14 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Pose timing diagnostics (log)](#adapter-pose_debug) | `adapter.pose_debug` | Game settings |  |
 | [Fix hands lagging behind controllers](#adapter-pose_time_fix) | `adapter.pose_time_fix` | Game settings | 14 |
 | [Treat newer Quest controllers as Touch](#adapter-profile_remap) | `adapter.profile_remap` | Game settings |  |
+| [Main picture only](#adapter-projection_only) | `adapter.projection_only` | Game settings |  |
 | [Animate fingers from touch](#adapter-proximity_emul) | `adapter.proximity_emul` | Game settings |  |
 | [Keep pictures in bounds](#adapter-rect_clamp) | `adapter.rect_clamp` | Game settings |  |
 | [Refresh rate](#adapter-refresh_rate) | `adapter.refresh_rate` | Game settings | 3 |
 | [Wait for the game's GPU](#adapter-release_wait) | `adapter.release_wait` | Game settings |  |
 | [Re-create play space](#adapter-respace_kick) | `adapter.respace_kick` | Game settings |  |
 | [Sharpness](#adapter-scale) | `adapter.scale` | Game settings | 4 |
+| [Cap the eye size](#adapter-scale_max) | `adapter.scale_max` | Game settings |  |
 | [Room depth](#adapter-scene_depth) | `adapter.scene_depth` | Game settings |  |
 | [Pretend room layout](#adapter-scene_emul) | `adapter.scene_emul` | Game settings | 9 |
 | [Room height](#adapter-scene_height) | `adapter.scene_height` | Game settings |  |
@@ -616,7 +618,7 @@ Experimental: shows HUDs, menus and other flat panels that stay black on the Fra
 
 Corrects graphics code the Frame's drivers reject (black screen with sound).
 
-- `frame.gl_shim` · experimental
+- `frame.gl_shim` · experimental · also in builds for this PC (AXRB, experimental)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** GLES engine resolving GL through eglGetProcAddress (GLAD) on the VrApi bridge.
 - **Requires:** [`frame.vrapi_bridge`](#frame-vrapi_bridge)
@@ -917,7 +919,7 @@ Stops a gray or frozen screen in Unity games that turn on anti-aliasing while ru
 
 Draws each eye separately. Try it when one eye shows a gray or broken picture.
 
-- `frame.unity_multipass` · revision 2
+- `frame.unity_multipass` · also in builds for this PC (AXRB, experimental) · revision 2
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Catalog games (1):** I Am Cat.
@@ -1844,6 +1846,20 @@ For apps that only know Quest 3/Pro controllers: without it they get no buttons.
 
 > Apps that suggest controller bindings only for Meta's newer profiles (Touch Plus, Touch Pro), which the Frame's runtime rejects (XR_ERROR_PATH_UNSUPPORTED), get the same bindings as oculus/touch_controller instead (components Touch lacks are dropped). Without it such apps get no controller input.
 
+### <a id="adapter-projection_only"></a>Main picture only
+
+Shows only the game's main picture, without menus or overlays drawn as extra layers.
+
+- `adapter.projection_only` · also in builds for this PC (AXRB)
+- **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
+- **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
+- **Options:**
+  - Value: int, default `0`.
+  - Game settings → Troubleshooting → "Main picture only" (advanced).
+- **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
+
+> Frames that carry more than the game's main picture (menus or overlays as extra layers) submit the main picture alone. For runtimes that refuse such frames: AXRB's emulator on this PC rejects every multi-layer OpenGL ES frame (on by default there for GLES games). The extra layers don't show.
+
 ### <a id="adapter-proximity_emul"></a>Animate fingers from touch
 
 For games whose hands' thumbs never move when you touch the buttons or thumbstick (for example Vader Immortal).
@@ -1929,6 +1945,20 @@ Higher looks sharper but needs more power; lower runs smoother. 1.0× is the gam
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
 
 > Multiplies the recommended eye-buffer width and height (0.5–2.0). 1.5 ≈ 2.25× pixels.
+
+### <a id="adapter-scale_max"></a>Cap the eye size
+
+Keeps games from rendering larger than the resolution scale allows.
+
+- `adapter.scale_max` · also in builds for this PC (AXRB)
+- **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
+- **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
+- **Options:**
+  - Value: int, default `0`.
+  - Game settings → Troubleshooting → "Cap the eye size" (advanced).
+- **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
+
+> With a resolution scale below 1, the largest eye size the game is told about is the scaled one too, for games that size their eye pictures from the maximum (for example Unity 2017 games). On by default on this PC for OpenGL ES games, whose pictures AXRB's emulator copies pixel by pixel.
 
 ### <a id="adapter-scene_depth"></a>Room depth
 

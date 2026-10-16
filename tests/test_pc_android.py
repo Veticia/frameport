@@ -132,6 +132,10 @@ def test_launcher_script_and_steam_arguments(tmp_path, win):
     text = axrb.launcher_text(tmp_path / "AXRB Runtime", app)
     assert "run_windows_game.ps1" in text and f"-Avd '{axrb.AVD}' -Port {axrb.PORT}" in text
     assert "@" not in text.replace("@{", "")  # every placeholder filled
+    # pixel frames (GLES) over adb reverse: Android started first so the property is set before the game connects
+    assert "setprop debug.axrb.image_transport $transport" in text and "-OwnsEmulator:$owns" in text
+    assert "setprop debug.wm.disable_deprecated_target_sdk_dialog 1" in text  # old targetSdk games keep focus
+    assert f"-ApiLevel {axrb.API_LEVEL} -Abi arm64-v8a" in text and "-GuestClock TscCorrected" in text
     args = axrb.launcher_args(r"C:\x\fp-axrb-run.ps1", "com.a.b", "com.a.b/.Main", 'Say "Hi" $now')
     assert '-File "C:\\x\\fp-axrb-run.ps1" -Package com.a.b -Activity com.a.b/.Main -GameName "Say Hi now"' in args
 
@@ -174,9 +178,10 @@ def test_pc_selection_keeps_ovrport_and_apk_fixes_only():
                "frame.gl_shim": {}, "frame.sdl_clipboard": {}, "frame.a32_bridge": {}, "device.files": {},
                "frame.hw_video_decode": {}, "frame.ovr_stable_user": {}, "frame.launcher": {}}
     assert set(pc_selection(patches)) == {"patch_oculus_unity", "frame.ovrstubs", "frame.swapchain_limit",
-                                          "frame.vk_sanitize", "frame.ovr_stable_user", "frame.launcher"}
+                                          "frame.vk_sanitize", "frame.gl_shim", "frame.ovr_stable_user",
+                                          "frame.launcher"}
     r1 = {"patches": patches}
-    r2 = {"patches": dict(patches, **{"frame.gl_shim": {"x": 1}, "device.hide_navbar": {}})}  # Frame-only changes
+    r2 = {"patches": dict(patches, **{"frame.sdl_clipboard": {"x": 1}, "device.hide_navbar": {}})}  # Frame-only
     assert pipeline.pc_recipe_fingerprint(r1) == pipeline.pc_recipe_fingerprint(r2)
     assert pipeline.recipe_fingerprint(r1) != pipeline.recipe_fingerprint(r2)
     r3 = {"patches": dict(patches, **{"frame.unity_text_input": {}})}  # an APK fix both builds get
@@ -191,8 +196,9 @@ PC_FIXES = ["frame.ovr_stable_user", "frame.unreal_ovrp_entrypoints", "frame.ava
             "frame.unreal_skip_obb_delivery", "frame.nodebug", "frame.meta_permissions", "frame.launcher",
             "frame.adapter", "frame.ovrplatformcompat", "frame.ovrstubs", "frame.swapchain_limit",
             "frame.vrapi_bridge"]
-PC_EXPERIMENTAL = ["frame.vk_sanitize", "frame.unity_tls_key_pool", "frame.eos_keychain_loop"]
-FRAME_ONLY = ["frame.gl_shim", "frame.unity_gl_shim", "frame.unreal_gl_shim", "frame.sdl_clipboard",
+PC_EXPERIMENTAL = ["frame.vk_sanitize", "frame.unity_tls_key_pool", "frame.eos_keychain_loop", "frame.gl_shim",
+                   "frame.unity_multipass"]
+FRAME_ONLY = ["frame.unity_gl_shim", "frame.unreal_gl_shim", "frame.sdl_clipboard",
               "frame.godot_clipboard", "frame.vivox_audio_route", "frame.a32_bridge", "frame.hw_video_decode",
               "frame.zink_shader_fix", "frame.gl_multiview_fbo", "device.files", "device.hide_navbar",
               "device.steam_gamepad", "device.text_input_window"]
@@ -281,6 +287,7 @@ def test_vrapi_vulkan_games_on_the_pc():
     sel = base.pc_selection(recipe, climb)
     assert exts in sel and "frame.vrapi_bridge" in sel and "frame.gl_shim" not in sel
     assert exts not in base.pc_selection(recipe, potw) and "frame.vrapi_bridge" in base.pc_selection(recipe, potw)
+    assert "frame.gl_shim" in base.pc_selection(recipe, potw)  # GLES: its timer-query stand-ins (gfxstream)
 
 
 def test_vk_android_extensions_renames_the_renderer_import(monkeypatch):
@@ -419,7 +426,7 @@ def test_install_into_axrb(tmp_path, monkeypatch, win):
     monkeypatch.setattr(axrb, "write_launcher", lambda **k: tmp_path / "FramePort/axrb/fp-axrb-run.ps1")
     monkeypatch.setattr(axrb, "adb", adb)
     monkeypatch.setattr(pc_android, "powershell_win", lambda: r"C:\Windows\powershell.exe")
-    recipe = Recipe("com.game.x", {"patch_oculus_unity": {}, "frame.gl_shim": {}, "frame.ovrstubs": {}})
+    recipe = Recipe("com.game.x", {"patch_oculus_unity": {}, "frame.sdl_clipboard": {}, "frame.ovrstubs": {}})
     res = pc_android.install("com.game.x", "Game X", apk, data, recipe, Reporter(), record_dir=tmp_path / "rec",
                              appid=lambda exe, title: 0x80001234)
     assert res == {"ok": True, "appid": 0x80001234, "activity": "com.game.x/com.unity3d.player.UnityPlayerActivity",
@@ -471,7 +478,7 @@ def test_pc_outdated_for_android_follows_the_pc_build():
     from frameport.ui import components as C
 
     dep = {"kind": "android", "recipe": {"patches": ["frame.ovrstubs", "patch_oculus_unity"]}}
-    g = {"recipe": {"patches": {"patch_oculus_unity": {}, "frame.ovrstubs": {}, "frame.gl_shim": {}}}}
+    g = {"recipe": {"patches": {"patch_oculus_unity": {}, "frame.ovrstubs": {}, "frame.sdl_clipboard": {}}}}
     assert not C.pc_outdated(g, dep)  # Frame-only patches don't matter on the PC
     g["recipe"]["patches"]["patch_oculus_unreal"] = {}
     assert C.pc_outdated(g, dep)
@@ -788,7 +795,7 @@ def test_backend_patch_goes_into_the_pc_selection():
 
     p = get("pc.axrb_backend")
     assert p.on_pc and p.stage == "install" and p.CHOICES[0] == ("", "Automatic")
-    assert pc_selection({"pc.axrb_backend": {"backend": "direct"}, "frame.gl_shim": {}}) == {
+    assert pc_selection({"pc.axrb_backend": {"backend": "direct"}, "frame.sdl_clipboard": {}}) == {
         "pc.axrb_backend": {"backend": "direct"}}
 
 
@@ -966,3 +973,46 @@ def test_direct_mode_triage():
                        ("E/AndroidRuntime( 99): FATAL EXCEPTION: main", "axrb-direct-java-crash")):
         assert want in {f.id for f in triage(text, "EXITED", "com.game.x", kind="axrb").findings}
     assert not [f for f in triage(log, "EXITED", "com.game.x").findings if f.id.startswith("axrb")]
+
+
+def test_settings_merge_rules():
+    from frameport.targets import pc_android
+
+    assert pc_android.merge_settings({"scale": "1"}, {"scale": "0.5", "layer_debug": 1}) == \
+        {"scale": "0.5", "layer_debug": "1"}
+    assert pc_android.merge_settings({"scale": "0.5", "x": "1"}, {"scale": ""}) == {"x": "1"}  # empty = removed
+    for bad in ({"scale": "1;rm"}, {"Bad-Key": "1"}, {"scale": "abc"}):
+        with pytest.raises(ValueError):
+            pc_android.merge_settings({}, bad)
+    assert pc_android.settings_text({"scale": "0.5", "haptic_fix": "1"}) == "scale=0.5\nhaptic_fix=1\n"
+
+
+def test_settings_pushed_into_the_emulator(tmp_path, monkeypatch, win):
+    from frameport.targets import pc_android
+
+    adb, events = FakeAdb(), []
+    monkeypatch.setattr(axrb, "adb", adb)
+    monkeypatch.setattr(axrb, "launcher_dir", lambda: tmp_path / "FramePort" / "axrb")
+    monkeypatch.setattr(axrb, "start_emulator", lambda **k: events.append("start") or True)
+    monkeypatch.setattr(axrb, "stop_emulator", lambda *a, **k: events.append("stop"))
+    dep = {"package": "com.game.x", "kind": "android", "settings": {"layer_debug": "1"}}
+    res = pc_android.set_settings(dep, {"scale": "0.5"})
+    assert res["settings"] == dep["settings"] == {"layer_debug": "1", "scale": "0.5"}
+    local = tmp_path / "FramePort/axrb/games/com.game.x/framebridge.conf"
+    assert local.read_text() == "layer_debug=1\nscale=0.5\n"
+    assert ["push", "W:" + str(local).replace("/", "\\"),
+            "/sdcard/Android/data/com.game.x/files/framebridge.conf"] in adb.calls
+    assert events == ["start", "stop"]  # Android started for it is stopped again
+    pc_android.set_settings(dep, {"layer_debug": "", "scale": ""})  # nothing left: the file is removed
+    assert ["shell", "rm", "-f", "/sdcard/Android/data/com.game.x/files/framebridge.conf"] in adb.calls
+
+
+def test_settings_written_for_direct_mode(tmp_path, monkeypatch):
+    from frameport.targets import pc_android
+
+    monkeypatch.setattr(axrb, "direct_runtime_root", lambda: tmp_path / "rt")
+    monkeypatch.setattr(axrb, "adb", lambda *a, **k: pytest.fail("no adb in direct mode"))
+    dep = {"package": "com.game.x", "kind": "android", "backend": "direct"}
+    pc_android.set_settings(dep, {"scale": "0.6"})
+    conf = tmp_path / "rt/direct/sdcard/Android/data/com.game.x/files/framebridge.conf"
+    assert conf.read_text() == "scale=0.6\n"

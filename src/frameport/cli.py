@@ -584,9 +584,11 @@ def triage(logfile: Path = typer.Argument(..., help="a launch.log"),
 
 @app.command()
 def settings(package: str, values: list[str] = typer.Argument(..., help="key=value pairs"),
-             frame: Optional[str] = typer.Option(None, help=FRAME_HELP)):
+             frame: Optional[str] = typer.Option(None, help=FRAME_HELP),
+             to: str = typer.Option("frame", help="frame, or pc (a Quest game in AXRB on this PC; an empty value "
+                                    "removes a setting)")):
     """Change FrameBridge settings of an installed game (no rebuild), for example scale=1.2."""
-    target = _target(frame)
+    target = _target(frame, to=to)
     kv = dict(v.split("=", 1) for v in values)
     typer.echo(json.dumps(target.set_settings(package, kv), indent=1))
 
