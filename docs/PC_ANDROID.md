@@ -25,7 +25,10 @@ folder) and picks per game:
 
 - **Choice** (`targets/pc_android.choose_backend`): `--axrb-backend direct|emulator` on `frameport install --to pc`,
   else the recipe's `pc.axrb_backend` (device category, `on_pc`: part of the PC build's selection, no-op on the
-  Frame), else **direct for `graphics` Vulkan, emulator for GLES / unknown**. `deployment.json` records `backend`
+  Frame), else **direct for `graphics` Vulkan, emulator for GLES / unknown**. Unreal games never declare
+  `android.hardware.vulkan`; since analysis version 20 their manifest meta-data
+  `com.epicgames.{ue4,unreal}.GameActivity.bSupportsVulkan` = true makes them "Vulkan (Unreal bSupportsVulkan)"
+  (UE 4.25+ Quest builds, e.g. Deadpool VR, Pinball FX VR, Myst; false or missing = GLES: Espire 1, Vader Immortal). `deployment.json` records `backend`
   and the launcher `flags`; installs from before have none (= emulator). Switching leaves the other backend's copy
   and saves alone.
 - **Per-game options** (`pc.axrb_backend` params → `run_direct_game.ps1` switches): `translator` (`dynarmic` =
@@ -95,6 +98,16 @@ median of the last summaries. What is drawn was judged from Monado's window and 
 | PowerWash Simulator VR 2.5.0 (Unity 2020.3, Vulkan) | in game: the garage hub (~3-4 min; at 90 s still its loading logo) | 70.5 / 69.8 | garage in both eyes, both hands drawn at the simulated controllers | none; Meta multiplayer callbacks throw NullReferenceExceptions (no Meta services, harmless so far) |
 | LEGO Bricktales 2.1 (Unity, Vulkan, URP) | scene `Diorama_Hub_Startup` loaded (~3 min) | 72 / 72 | intro text panel ("You want to free the simulation? Follow the white rabbit.") on black, both eyes | stop slow: the game didn't finish its activity shutdown in 25 s (`axrb-direct-slow-stop`); Meta achievements fail (no Meta services, harmless) |
 | Toy Master 1.1.2 (Unity 2022.3, **GLES**) | activity created, then crash in 18 s | - | - | not a Vulkan game: "Vulkan (Unity boot.config)" came from the Oculus plugin's `xr-vulkan-*` keys; Unity: "Unable to retrieve the default EGL display!" + SIGTRAP. Automatic choice now sends such games to the emulator |
+| Marvel's Deadpool VR 1.0.40 (UE 4.27, Vulkan; `frame.vk_sanitize` in the build) | first-run LANGUAGE menu (~3 min; at 90 s still loading at 1-2 fps) | 64 (FrameBridge pacing) | game-drawn stereo menu, both eyes | none; AXRB transcodes ASTC to BC on the GPU; stop slow (`axrb-direct-slow-stop`) |
+| Pinball FX VR 1.9 (UE 5.3, Vulkan, 7 GB OBB) | 3D lobby with the Terms & Conditions panel (~4 min) | ~60 (FrameBridge pacing) | arcade hall + panel in both eyes | none of the emulator's blockers (gfxstream `vkAllocateMemory` SIGSEGV, and Refract's FRSQRTE SIGILL / ASTC layout probe / promoted extension names) showed up in direct mode (no SIGILL under Dynarmic, no ASTC or device-loss failure; AXRB stores ASTC as BC); OVRPlugin's xrPerfSettingsSetPerformanceLevelEXT unsupported (harmless) |
+| Myst 3.3.0 (UE 5.3, Vulkan) | loading screen (book), then its starfield intro | 72 | stereo, both eyes | a white splash quad at first (texture not shown yet), then normal |
+| Metro Awakening 1.0-916944 (UE 5.2, Vulkan) | splash art, then the USER DATA COLLECTION consent screen with the laser pointer | 72 | stereo, both eyes | stop slow (`axrb-direct-slow-stop`) |
+
+Unreal Vulkan games: before analysis version 20 every Unreal game was "GLES or unknown" (Unreal never declares
+`android.hardware.vulkan`), so the automatic choice sent them to the emulator; now `GameActivity.bSupportsVulkan`
+picks direct mode (Myst and Metro above were installed without `--axrb-backend`). Unreal probes EGL before it
+creates its Vulkan device, which tripped `axrb-direct-no-gles`; the signature now needs no Vulkan device. None of
+the four needed a recipe change for the PC.
 
 Integration bugs found and fixed on the way: AXRB's trap message never reached FramePort's log; the content list
 overflowed the command line (Batman); Unity's EGL failure and SIGTRAP weren't triaged; long sessions lost their
@@ -208,7 +221,8 @@ Shadow); an AXRB issue for the Pinball crash.
 ## Open (needs the owner + a headset)
 
 - A game in the headset through SteamVR (picture, audio, controllers; Steam Frame controllers: AXRB #20).
-- Pinball FX VR's Vulkan crash with the host attached (AXRB's demo game: likely an AXRB/emulator issue if it repeats).
+- Pinball FX VR's Vulkan crash with the host attached happens in the emulator only; in direct mode it reaches its lobby
+  headless. Needs the headset: picture/latency through SteamVR, controllers, a table played.
 - Play from the PC's Steam library (shortcut → launcher script → AXRB).
 
 ## Testing without a headset (Monado's simulated HMD, 2026-10-15)

@@ -884,6 +884,10 @@ def test_direct_mode_triage():
     assert [f.id for f in triage(crash, "EXITED", "com.game.x", kind="axrb").findings] == ["axrb-direct-guest-crash"]
     gles = "E/Unity   ( 4410): [EGL] Unable to initialize EGL display: EGL_BAD_DISPLAY\n"
     assert [f.id for f in triage(gles, "EXITED", "com.game.x", kind="axrb").findings] == ["axrb-direct-no-gles"]
+    # Unreal Vulkan builds probe EGL first (Deadpool VR): with a Vulkan device it isn't a GLES game
+    unreal = ("E/libEGL( 4242): eglInitializeImpl:283 error 3008 (EGL_BAD_DISPLAY)\n"
+              "   35.775 70748 I/vulkan: vkCreateDevice(2 queue families, 12 extensions) = 0\n")
+    assert "axrb-direct-no-gles" not in {f.id for f in triage(unreal, "RUNNING", "com.game.x", kind="axrb").findings}
     # Toy Master (Unity 2022.3, GLES) in direct mode, 2026-10-15: Unity's own EGL message, then its SIGTRAP
     toy = ("E/Unity( 4252): Unable to retrieve the default EGL display!\n"
            "   17.854 82044 E/cpu: thread 4252 (UnityMain): fatal signal 5 (SIGTRAP), code -6, fault addr 278b00001092\n")
