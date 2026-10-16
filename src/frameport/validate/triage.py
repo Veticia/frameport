@@ -209,8 +209,13 @@ def _forgive_headless_end(res: TriageResult, lines: list[str], markers: list[dic
 
 
 def _secs(line: str) -> float | None:
+    """A logcat line's time in seconds, its month and day included: launch logs also carry the Frame's kernel log
+    since boot (lines from earlier days), which a time of day alone would mix up with the session's."""
     m = LOGCAT_TIME.match(line)
-    return int(m[1]) * 3600 + int(m[2]) * 60 + int(m[3]) + int(m[4]) / 1000 if m else None
+    if not m:
+        return None
+    day = int(m[1]) * 31 + int(m[2])
+    return day * 86400 + int(m[3]) * 3600 + int(m[4]) * 60 + int(m[5]) + int(m[6]) / 1000
 
 
 MISSING_OBB = ("The game keeps its content in a data file (.obb) and none was installed: FramePort found no .obb "
@@ -229,22 +234,20 @@ def add_missing_obb(res: TriageResult) -> TriageResult:
     return res
 
 
-LOGCAT_TIME = re.compile(r"^\d\d-\d\d (\d\d):(\d\d):(\d\d)\.(\d{3})")
+LOGCAT_TIME = re.compile(r"^(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d)\.(\d{3})")
+YEAR = 12 * 31 * 86400  # _secs counts 31 days a month: January 1st + YEAR is the day after December 31st
 
 
 def frames_stopped(lines: list[str], gap: float = 20.0) -> float | None:
     """Seconds since the last pacing summary (or initial projection submission if none), when over `gap`.
     Twenty seconds allows several of FrameBridge's 5 s pacing windows before suspecting a stalled frame loop."""
-    def secs(line):
-        m = LOGCAT_TIME.match(line)
-        return int(m[1]) * 3600 + int(m[2]) * 60 + int(m[3]) + int(m[4]) / 1000 if m else None
     last_projection = last_pacing = last = None
     for ln in lines:  # logcat lines aren't strictly in time order: the latest time counts, not the last line
-        t = secs(ln)
+        t = _secs(ln)
         if t is None:
             continue
-        if last is not None and t < last - 43200:  # past midnight
-            t += 86400
+        if last is not None and t < last - YEAR / 2:  # December -> January
+            t += YEAR
         last = t if last is None else max(last, t)
         if re.search(r"FrameBridge\s*: pacing:", ln):
             last_pacing = t if last_pacing is None else max(last_pacing, t)

@@ -204,6 +204,24 @@ def test_frames_stopped_and_unity_render_crash():
     alone = triage.triage(log.replace("libgallium_dri", "libother"), "RUNNING")
     assert "frames-stopped" in [f.id for f in alone.findings]
     assert triage.frames_stopped(["10-05 23:16:30.000 x FrameBridge: pacing: 72 fps", "10-05 23:16:40.000 y"]) is None
+    assert triage.frames_stopped(["12-31 23:59:50.000 x FrameBridge: pacing: 72 fps", "01-01 00:00:20.000 y"]) == 30
+
+
+def test_frames_stopped_ignores_the_kernel_log_of_earlier_days():
+    """Launch logs carry the Frame's kernel log since boot, two days earlier here: its times of day must not count
+    as later than the session (Eleven Table Tennis, GitHub #298: "stopped sending frames 81661 s before the end")."""
+    from frameport.validate import triage
+
+    lines = ["10-16 00:43:03.794    17    17 I hwservicemanager: ready",
+             "10-14 00:40:12.674    15    15 W auditd  : initialized",
+             "10-14 23:59:59.000     0     0 W binder_user_error: 3 callbacks suppressed",
+             "10-15 00:00:02.397     0     0 W binder_user_error: 1094 callbacks suppressed",
+             "10-15 20:30:00.000     0     0 W binder_user_error: 5 callbacks suppressed",
+             "10-16 00:10:19.576     0     0 W overlayfs: upper fs does not support file handles",
+             "10-16 00:44:54.087  1188  1266 I FrameBridge: pacing: 72.2 fps",
+             "10-16 00:44:55.000  1188  1266 I Unity   : still here"]
+    assert triage.frames_stopped(lines) is None
+    assert triage.frames_stopped(lines + ["10-16 00:45:30.000  1188  1266 I Unity   : later"]) > 30
 
 
 def test_vrapi_called_before_init_suggests_the_stub_not_the_bridge():
