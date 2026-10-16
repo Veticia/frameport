@@ -431,6 +431,13 @@ def cmd_setup(args):
     return {"done": done}
 
 
+def signed_in(sessions):
+    """A Meta sign-in = a session folder named by the numeric Meta user id (sessions/<id>/). Meta's app framework
+    creates sessions/_oaf as soon as the runtime starts, signed in or not (seen on the Frame, 2026-10-15)."""
+    return os.path.isdir(sessions) and any(n.isdigit() and os.path.isdir(os.path.join(sessions, n))
+                                           for n in os.listdir(sessions))
+
+
 def cmd_status(args):
     st = read_json(STATUS, {}) or {}
     sessions = os.path.join(USER_DIR, "AppData", "Roaming", "Oculus", "sessions")
@@ -440,7 +447,7 @@ def cmd_status(args):
             "proton": os.path.isfile(os.path.join(GE, ".fp-verified")), "fex": os.path.isdir(FEX_DIR),
             "prefix": os.path.isfile(os.path.join(PFX, "system.reg")),
             "meta": read_json(os.path.join(META_DIR, ".fp-meta.json")),
-            "login": os.path.isdir(sessions) and bool(os.listdir(sessions)), "apps": apps}
+            "login": signed_in(sessions), "apps": apps}
 
 
 # ------------------------------------------------------------------------------------------------ login import

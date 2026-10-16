@@ -165,7 +165,7 @@ cd {q(str(Path(CORE.META_DIR) / 'Support/oculus-client'))}
 
 def signed_in():
     sessions = Path(CORE.PFX) / "drive_c/users/steamuser/AppData/Roaming/Oculus/sessions"
-    return sessions.is_dir() and any(p.is_file() and p.stat().st_size for p in sessions.iterdir())
+    return CORE.signed_in(str(sessions))   # sessions/<numeric user id>/, not Meta's _oaf framework folder
 
 
 def running(name):

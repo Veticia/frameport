@@ -62,3 +62,14 @@ def test_artifact_files_include_extensions_and_data():
 
     rels = {rel for _, rel in fexrift.artifact_files()}
     assert {"fexrift.py", "fexrift_games.json"} <= rels
+
+
+def test_signed_in_needs_a_user_id_folder(monkeypatch, tmp_path):
+    fx = load_copy(monkeypatch, tmp_path)
+    sessions = tmp_path / "sessions"
+    assert not fx.signed_in(str(sessions))
+    (sessions / "_oaf").mkdir(parents=True)
+    (sessions / "_oaf" / "data.sqlite").write_text("x")          # what the runtime alone creates
+    assert not fx.signed_in(str(sessions))
+    (sessions / "1368740236322643").mkdir()
+    assert fx.signed_in(str(sessions))

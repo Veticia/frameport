@@ -112,9 +112,13 @@ def test_memory_only_fallback_and_status_transitions(ext, monkeypatch):
     assert broker.handle({"op": "callback", "url": CALLBACK}) == {"delivered": True}
     sessions = Path(ext.CORE.PFX) / "drive_c/users/steamuser/AppData/Roaming/Oculus/sessions"
     sessions.mkdir(parents=True)
+    # real layout: Meta's app creates sessions/_oaf when the runtime starts, a sign-in adds sessions/<user id>/
+    (sessions / "_oaf").mkdir()
+    (sessions / "_oaf" / "data.sqlite").write_text("framework")
     (sessions / "empty").touch()
     assert not ext.status({})["signed_in"]
-    (sessions / "fake").write_text("test session")
+    (sessions / "1234567890").mkdir()
+    (sessions / "1234567890" / "data.sqlite").write_text("test session")
     st = ext.status({})
     assert st["signed_in"] and st["page_opened_at"] and st["callback_received_at"]
     assert_no_credentials(ext.folder())
@@ -202,7 +206,8 @@ def test_cleanup_keeps_sessions_and_retries_after_failure(ext, monkeypatch):
     path.write_text(json.dumps({"browser": None, "files": {}}))
     sessions = Path(ext.CORE.PFX) / "drive_c/users/steamuser/AppData/Roaming/Oculus/sessions"
     sessions.mkdir(parents=True)
-    (sessions / "fake").write_bytes(b"test session")
+    (sessions / "1234567890").mkdir()
+    (sessions / "1234567890" / "fake").write_bytes(b"test session")
     monkeypatch.setattr(ext, "request", lambda msg: (_ for _ in ()).throw(OSError()))
     monkeypatch.setattr(ext.CORE, "wineserver_kill", lambda: (_ for _ in ()).throw(OSError()))
     with pytest.raises(OSError):
@@ -210,7 +215,7 @@ def test_cleanup_keeps_sessions_and_retries_after_failure(ext, monkeypatch):
     assert path.exists()
     monkeypatch.setattr(ext.CORE, "wineserver_kill", lambda: None)
     assert ext.stop({})["signed_in"] and not path.exists()
-    assert ext.stop({})["signed_in"] and (sessions / "fake").read_bytes() == b"test session"
+    assert ext.stop({})["signed_in"] and (sessions / "1234567890" / "fake").read_bytes() == b"test session"
 
 
 def test_stop_signals_launcher_before_wine_and_registry(ext, monkeypatch):

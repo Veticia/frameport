@@ -140,7 +140,9 @@ def setup(frame, reporter: Reporter, wait: float = 3600) -> dict:
 def find_user_dir(prefix: Path) -> Path:
     users = prefix / "drive_c" / "users"
     for u in sorted(users.iterdir()) if users.is_dir() else []:
-        if (u / "AppData" / "Roaming" / "Oculus" / "sessions").is_dir():
+        sessions = u / "AppData" / "Roaming" / "Oculus" / "sessions"
+        # signed in = sessions/<numeric Meta user id>/ (Meta's app creates sessions/_oaf without a sign-in)
+        if sessions.is_dir() and any(p.is_dir() and p.name.isdigit() for p in sessions.iterdir()):
             return u
     raise RuntimeError(f"no Meta login in {prefix} (sign in with Meta's app in that prefix first)")
 
