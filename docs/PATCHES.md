@@ -616,7 +616,7 @@ Experimental: shows HUDs, menus and other flat panels that stay black on the Fra
 
 Corrects graphics code the Frame's drivers reject (black screen with sound).
 
-- `frame.gl_shim` · experimental
+- `frame.gl_shim` · experimental · also in builds for this PC (AXRB, experimental)
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** GLES engine resolving GL through eglGetProcAddress (GLAD) on the VrApi bridge.
 - **Requires:** [`frame.vrapi_bridge`](#frame-vrapi_bridge)
@@ -917,7 +917,7 @@ Stops a gray or frozen screen in Unity games that turn on anti-aliasing while ru
 
 Draws each eye separately. Try it when one eye shows a gray or broken picture.
 
-- `frame.unity_multipass` · revision 2
+- `frame.unity_multipass` · also in builds for this PC (AXRB, experimental) · revision 2
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Catalog games (1):** I Am Cat.

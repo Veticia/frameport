@@ -1611,6 +1611,7 @@
  "This Frame isn't set up for FramePort yet. Run the setup once.": "",
  "This Frame's SSH key changed since FramePort last connected (SteamOS was reset, or another device now has its address). If it's your Frame, choose Trust the new key on the Steam Frame page.": "",
  "This game can't run on the Steam Frame.": "",
+ "This game draws with OpenGL ES. AXRB's emulator copies such pictures to the PC frame by frame, so FramePort renders them at half size: expect about 30 frames per second at best, less with a high SteamVR resolution. Vulkan games don't have this limit.": "",
  "This game is marked \"Can't run\" on the Steam Frame:": "",
  "This is a website in an app: it opens in Meta's browser, which the Frame doesn't have. If nothing opens, visit the website in a browser.": "",
  "This is the example button from frameport.app. Real buttons install real games.": "",

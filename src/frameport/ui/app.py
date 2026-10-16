@@ -1000,7 +1000,8 @@ class FramePortApp:
                   G.PC, lambda e: self.install(pkg, "pc"), not winhost.available(),
                   tr("The launch settings changed since the install — update the Steam shortcut.") if stale else
                   tr("Needs Windows (or WSL).") if not winhost.available() else
-                  None if rift else C.HELP["pc_android"])
+                  None if rift else C.HELP["pc_android"] + (
+                      "\n\n" + C.HELP["pc_android_gles"] if pipeline.pc_gles(g) else ""))
         # Quest games: the Frame stays the main place (the PC path through AXRB is experimental)
         pc_first = not connected and winhost.available() and (rift or on_pc)
         return [pc_opt, frame_opt] if pc_first else [frame_opt, pc_opt]

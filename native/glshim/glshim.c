@@ -630,15 +630,18 @@ static int is_hidden(const char *name) {
 }
 
 // GL_EXT_disjoint_timer_query listed although the driver lacks it: GLAD loaders only look its functions up when the
-// extension is listed, and some engines call them unconditionally (Path of the Warrior on AXRB's emulator); the
-// lookups then get the stand-ins below eglGetProcAddress. Decided once, by whether the driver has the functions.
+// extension is listed, and some engines call them unconditionally (Path of the Warrior on AXRB's emulator, whose
+// gfxstream eglGetProcAddress still returns pointers for the names); the lookups then get the stand-ins below
+// eglGetProcAddress. Decided once a context answers GL_NUM_EXTENSIONS, by whether the driver lists the extension.
 static const char TIMER_QUERY_EXT[] = "GL_EXT_disjoint_timer_query";
 static int added_timer_query = -1;
 static int add_timer_query(void) {
-    if (added_timer_query < 0)
-        added_timer_query = real_eglGetProcAddress && !real_eglGetProcAddress("glQueryCounterEXT") &&
-                            !real_eglGetProcAddress("glGenQueriesEXT");
-    return added_timer_query;
+    if (added_timer_query < 0 && real_glGetIntegerv && real_glGetStringi) {
+        GLint total = 0;
+        real_glGetIntegerv(GL_NUM_EXTENSIONS, &total);
+        if (total > 0) added_timer_query = !ext_supported(TIMER_QUERY_EXT);
+    }
+    return added_timer_query > 0;
 }
 
 // Filtered index table for glGetStringi (built lazily, per process).
@@ -860,7 +863,10 @@ __attribute__((visibility("default"))) __eglMustCastToProperFunctionPointerType 
     if (name && !strcmp(name, "glGetString")) return (__eglMustCastToProperFunctionPointerType)glGetString;
     if (name && !strcmp(name, "glGetIntegerv")) return (__eglMustCastToProperFunctionPointerType)glGetIntegerv;
     __eglMustCastToProperFunctionPointerType fn = real_eglGetProcAddress ? real_eglGetProcAddress(name) : NULL;
-    if (!fn && name) return timer_query_standin(name);
+    if (name && (!fn || added_timer_query > 0)) {
+        __eglMustCastToProperFunctionPointerType standin = timer_query_standin(name);
+        if (standin || !fn) return standin;
+    }
     if (!name) return fn;
 #define WRAP(sym, real, w) if (!strcmp(name, sym)) { real = (void *)fn; return (__eglMustCastToProperFunctionPointerType)w; }
     if (hide_msrtt && (!strcmp(name, "glFramebufferTexture2DMultisampleEXT") ||

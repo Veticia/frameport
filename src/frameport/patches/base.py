@@ -184,7 +184,15 @@ def pc_selection(patches: dict, analysis: Analysis | None = None) -> dict:
 
         for key, value in PC_VALUES.items():
             out[f"adapter.{key}"] = {"value": value}
+        if analysis is not None and "GLES" in (analysis.graphics or ""):
+            # AXRB's emulator sends GLES eye images as pixels (adb reverse, ~100 MB/s, synchronous in xrEndFrame):
+            # Lucky's Tale at Monado's 896x1008 per eye 9 fps, at half size (FrameBridge's minimum) 30 fps
+            scale = (out.get("adapter.scale") or {}).get("value")
+            out["adapter.scale"] = {"value": min(float(scale), GLES_PC_SCALE) if scale else GLES_PC_SCALE}
     return out
+
+
+GLES_PC_SCALE = 0.5  # eye-size scale for GLES games in the build for this PC (FrameBridge accepts 0.5-2.0)
 
 
 def all_patches() -> list[Patch]:
