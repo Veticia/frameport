@@ -160,6 +160,80 @@ variables to a launch test's AXRB processes (`AXRB_DIRECT_DUMP` only works in AX
 Needs a headset: the picture through SteamVR, controllers past the first menu (the simulated ones hold still),
 climbing, sound; and a released AXRB-Emulatorless with the window fix.
 
+### Library sweep 2026-10-16
+
+Every other Quest game of the owner's library that `pipeline.pc_installable` accepts and whose APK still exists,
+installed with `frameport install <pkg> --to pc --no-library` (automatic backend, isolated `FRAMEPORT_HOME`, catalog
+recipe or heuristics, no per-game changes) and tested with `frameport test <pkg> --to pc --sim --seconds 150` (240 for
+Unreal) under Monado's simulated HMD at 72 Hz. Direct mode = the local AXRB build of 59626ac **with the HostWindow
+patch** (above; upstream had no newer commit or 2.x release on 2026-10-16); emulator = AXRB 1.0.4 with this branch's
+`adb install -g`, `projection_only=2` and qwerty-head fixes. "fps" = game submits / bridge to Monado (AXRB.Perf
+medians); "Picture" = Monado's window (both eyes) at the end of the run, plus AXRB's layer captures. Not run: the
+three 32-bit-only games (Sports Scramble, Shadow Point, Journey of the Gods: AXRB has no AArch32, and the PC build
+drops the 32-bit bridge), and the emulator games after NEX Player (disk, see the end).
+
+| Game (engine) | Backend | Reached | fps | Picture | Blocker / notes |
+|---|---|---|---|---|---|
+| Arcsmith 1.128 (Unity) | direct | frames | 59 / 51.7 | in game: the workshop, both hands with tools, both eyes | none |
+| QuestCraft 6.0.0-RC4 (Unity) | direct | frames | 65.1 / 63.6 | launcher room, QuestCraft EULA panel, laser pointers | none (Minecraft itself is behind its Continue button) |
+| BattleGlide 0.4.1 (UE) | direct | frames | 62.2 / 54.8 | title screen (START), both hands | none |
+| In Death: Unchained 1.8.0 (UE) | direct | frames | 64.1 / 56.9 | sky + PRIVACY UPDATE panel | none |
+| The Boys VR 1.1.0 (Unity) | direct | frames | 62.4 / 59.9 | ANALYTICS DISCLAIMER panel over a lit floor, laser | slow stop |
+| Creed: Rise to Glory CE (UE) | direct | frames | 60.6 / 55.5 | IMPORTANT SAFETY INFORMATION panel, both hands, laser | none |
+| Wallace & Gromit: The Grand Getaway 1.0.34 (UE) | direct | frames | 61.5 / 53.5 | space scene (nebula, planets), both gloved hands | none |
+| VR4 2.3 (UE) | direct | frames | 71.9 / 72 | title scene: church interior, "resident evil 4" logo, both hands | none (slow stop) |
+| Demeter 1.1.0 (Unity, MR) | direct | frames, FrameBridge scene emulation active | 62.3 / 57.3 | "PERMISSION REQUIRED ... access to your spatial data" panel, controllers | AXRB's direct mode grants only 8 allow-listed permissions (`HostPackageManager.permission`): `com.oculus.permission.USE_SCENE` stays denied although the build declares it (`frame.meta_permissions`). AXRB's side |
+| Green Hell VR 2.5.2 (Unity) | direct | frames | 11.8 / 11.7 | loading screen at "50%" after 180 s | slow load |
+| TRIANGLE STRATEGY 1.0 (UE) | direct | frames | 44.6 / 40.2 | both controllers with a "Control Guide" label, rest black at 280 s | still loading? |
+| Riven 1.9.0 (UE) | direct | frames | 29.8 / 25.2 | white splash quad (AXRB captures), black window at 274 s | still loading (as Myst's white splash) |
+| Espire 2 1.7.13 (UE) | direct | frames | 72 / 71.8 | white splash quad low in both eyes at 289 s | splash texture never shown |
+| Carve Snowboarding 1.09 (UE) | direct | frames | 64.5 / 59.3 | both hands, rest black at 270 s | scene never appears; not diagnosed |
+| Asgard's Wrath 2 12.1 (UE, 33 GB) | direct | frames | 30.6 / 21.9 | black at 287 s | still loading |
+| Assassin's Creed Nexus 207706 (Unity) | direct | frames | 42.6 / 42.6 | black at 180 s (captures too) | loading or no visible layer yet |
+| BARTENDER VR SIMULATOR 1.9.2.7 (UE) | direct | frames (in a second process) | 62.7 / 53.6 | black for 260 s (window + captures all 0) | not diagnosed (no Unreal log lines in direct.log) |
+| Vermillion 1.7.2 (Unity) | direct | frames, OVRManager focused | 63.8 / 60.3 | black with its brush loading icon | stays there (Vuplex 3D WebView starts, then nothing) |
+| H.U.N.T 0.1.2 (Unity OpenXR) | direct | session created, no frame in 200 s | - | bridge splash | never submits a frame; not diagnosed |
+| WiiCompiled VR 0.4.0 | direct | 2D launcher activity, no OpenXR | - | bridge splash | its launcher imports games through a document picker; the VR part is a second activity |
+| Medieval Dynasty New Settlement 2.4 (Unity) | direct | OpenXR FOCUSED, exit(1) at 30 s | - | - | **opens an Android Dialog** (right after "initOculus Java!"); direct mode can't add a second window (`UnsupportedOperationException: addToDisplayAsUser`, "Adding window failed"). Triage `axrb-direct-dialog-window` |
+| Under Cover 1.1.3r2 (Unity) | direct | Vulkan device, exit(1) at 33 s | - | - | the same Dialog |
+| Of Lies and Rain 1.1.0 (UE) | direct | vkCreateInstance, exit(1) at 32 s | - | - | Unreal's `MessageBox01` (an error box before its Vulkan device; its text is lost with the window) |
+| NOPE CHALLENGE 1.0.964 (UE) | direct | ART, crash at 15 s | - | - | Google Play services call `IActivityManager.getMyMemoryState`: `AXRB_SERVICE_UNIMPLEMENTED` -> uncaught exception. Triage `axrb-direct-unimplemented-service` |
+| BAM 1.2 (Unity) | direct (manifest declares Vulkan) | activity, crash at 33 s | - | - | runs GLES: "Unable to retrieve the default EGL display!"; the manifest's Vulkan feature doesn't say which API Unity picks first. Emulator run not reached |
+| Mobile Suit Gundam: Silver Phantom 1.1.58 (Unity) | direct | install refused | - | - | 257 content files with ~80-character names don't fit axrb-direct.exe's command line even through hard links (the guest paths alone are too long); needs AXRB to read the list from a file or mount the folder. Emulator run not reached |
+| Silhouette 1.3.0 (Unity) | emulator | frames | 30.2 / 30.1 | title menu (Play / Options / Quit), both eyes | none headless |
+| Yupitergrad 2.6.1 (Unity) | emulator | frames | 13.8 / 14 | splash ("Loading...") in both eyes | still loading at 174 s |
+| 4XVR Video Player 2.0.22 | emulator | frames | 34.9 / 32.2 | black | gfxstream rejects its GL every frame: `glEnable(GL_FRAMEBUFFER_SRGB_EXT)`, a `glTexParameteri` value, vertex attribute index >= `CODEC_MAX_VERTEX_ATTRIBUTES` |
+| NEX Player 1.3.1 (Unity) | emulator | frames | 9.3 / 9.3 | black | not diagnosed |
+| Lambda1VR 1.7.3 (Team Beef) | emulator | Java crash at start | - | - | `libopenxr_loader_google.so not found`: TBXR ports load `openxr_loader_<Build.MANUFACTURER>`; `frame.tbxr_vendor` handles "valve" and isn't in PC builds; AXRB's Android says "google" (a PC variant: add that library and match "google" in the maker checks) |
+
+Summary (31 games run): **8 reach a menu or the game in both eyes** in direct mode (Arcsmith in game; QuestCraft,
+BattleGlide, In Death, The Boys, Creed, Wallace & Gromit, VR4 at their first menu/panel) and 1 in the emulator
+(Silhouette); Demeter shows its own "permission required" panel; 12 submit frames but were still loading or black at
+the end of the run (big Unreal games at 30-45 fps while loading under Dynarmic); 9 never submit a frame. The most
+common blockers, all on AXRB's side:
+1. **No second window in direct mode** (3 games: Medieval Dynasty, Under Cover, Of Lies and Rain): any Android
+   Dialog ends the game. Upstream candidate together with the permission allow-list (Demeter's `USE_SCENE`) and the
+   unimplemented framework calls (Play services' `getMyMemoryState`, NOPE).
+2. **Long or loading-heavy starts**: under Dynarmic the large Unreal games need more than 4-5 minutes to their first
+   picture (Riven, Asgard's Wrath 2, TRIANGLE STRATEGY, Espire 2's white splash); a longer `--seconds` would show more.
+3. **The content list on the command line** (Gundam): a list file or folder mounts in `axrb-direct.exe` would fix it
+   for good (drafted upstream).
+4. GLES-in-direct-mode mislabels: a Unity manifest that declares Vulkan can still run GLES (BAM).
+
+FramePort changes from the sweep: triage `axrb-direct-dialog-window` and `axrb-direct-unimplemented-service`
+(`axrb-direct-no-gles` no longer blames Unreal's EGL probe when one of those ended the game first); the
+command-line message suggests the emulator; and **direct-mode uninstalls and reinstalls remove the libraries AXRB's
+`prepare_art_session.py` extracts per APK** into `<runtime>\direct\installed\<identity>`, which AXRB never deletes
+(5 GB after 25 games; `pc_android.staged_libraries` computes AXRB's identity: the APK's Windows path + every
+`lib/arm64-v8a` entry's name, CRC and size; unit-tested, not yet seen on a real uninstall).
+
+The emulator half stopped after NEX Player: the WSL disk and C: filled up (other jobs; C: 14 GB free, below the 60
+GB the sweep keeps), so the remaining emulator games were not run: The Room VR, Pixel Ripped 1995, Time Stall, Five
+Nights at Freddy's: HW, Star Wars Pinball VR, I Am Cat, Vader Immortal 1-3, Genotype, Phantom: Covert Ops, Sniper Elite
+VR (+ Winter Warrior), Robo Recall, Budget Cuts Ultimate, Espire 1, BodyCombat, Star Wars: Tales from the Galaxy's
+Edge, HITMAN 3, Jurassic World Aftermath, Nano, Wander, Stremio, Eleven Table Tennis, BlazeRush, plus BAM and Gundam
+in the emulator.
+
 ## Spike results (2026-10-10, Windows 11 26200, i7-14700K, RTX 4080 SUPER, 64 GB; headless)
 
 | Step | Result |
