@@ -17,6 +17,7 @@ AXRB's own run script (run_windows_game.ps1 / run_direct_game.ps1). See docs/PC_
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -53,13 +54,17 @@ def backend_params(recipe: Recipe | None) -> dict:
 
 def choose_backend(recipe: Recipe | None, graphics: str = "", override: str | None = None) -> str:
     """Which AXRB runs the game: `override` (CLI), else the recipe's pc.axrb_backend, else direct mode for Vulkan
-    games and the emulator for OpenGL ES ones (direct mode has no GLES renderer; "unknown" counts as GLES)."""
+    games and the emulator for OpenGL ES ones (direct mode has no GLES renderer; "unknown" counts as GLES).
+    "Vulkan (Unity boot.config)" counts as unknown: that label comes from the Oculus XR plugin's xr-vulkan-* keys,
+    which GLES builds have too (all 9 such games in the dev library; Toy Master and I Am Cat run GLES, and Toy
+    Master crashed in direct mode at "Unable to retrieve the default EGL display!")."""
     for choice in (override, backend_params(recipe).get("backend")):
         if choice:
             if choice not in axrb.BACKENDS:
                 raise ValueError(f"unknown AXRB backend {choice!r} (direct or emulator)")
             return choice
-    return axrb.DIRECT if (graphics or "").startswith("Vulkan") else axrb.EMULATOR
+    graphics = graphics or ""
+    return axrb.DIRECT if graphics.startswith("Vulkan") and "boot.config" not in graphics else axrb.EMULATOR
 
 
 def launch_flags(backend: str, params: dict, profile: dict | None = None) -> list[str]:
@@ -210,28 +215,89 @@ def _apk_versions(apk: Path) -> tuple[str | None, str | None]:
         return None, None
 
 
+CONTENT_LINKS = "content"  # <game dir>\content: hard links to the game's data files (short paths)
+# axrb-direct.exe gets one "--mount-ro <guest>=<host>" argument per content file (prepare_art_session.py, which
+# resolves every path first: junctions and 8.3 names don't shorten it), and a Windows command line holds 32767
+# characters: Batman's 90 files from a long dump path didn't fit ("The filename or extension is too long": 32876
+# characters, 27028 of them content mounts). What is left for the content files next to AXRB's own arguments
+# (~5,900 characters with the dev PC's paths; more with longer runtime folders).
+MOUNT_ARGS_BUDGET = 25000
+
+
+def _windows_readable(path: Path) -> str | None:
+    """The Windows path of a local folder when Windows reads it directly (not through \\\\wsl$), else None."""
+    try:
+        w = winhost.to_windows(path)
+    except ValueError:
+        return None
+    return None if w.startswith("\\\\") else w
+
+
+def mount_args_length(lines: list[str]) -> int:
+    """Characters the content files take on axrb-direct.exe's command line (quoted "--mount-ro" "<guest>=<host>")."""
+    return sum(len(' "--mount-ro" ""') + len("/storage/emulated/0/") + len(line) for line in lines)
+
+
+def _hard_links(package: str, data_dir: Path, rels: list[str]) -> Path | None:
+    """Hard links to the data files in <game dir>\\content (no copies, no extra space), None when they can't be made
+    (the data is on another drive than FramePort's folder)."""
+    links = axrb.game_dir(package) / CONTENT_LINKS
+    try:
+        for rel in rels:
+            src, dst = data_dir / rel, links / rel
+            if dst.exists() and os.path.samefile(src, dst):
+                continue
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.unlink(missing_ok=True)
+            os.link(src, dst)
+    except OSError:
+        shutil.rmtree(links, ignore_errors=True)
+        return None
+    return links
+
+
+def _line(package: str, rel: str, host_win: str) -> str:
+    guest = f"Android/obb/{package}/{rel}"
+    # prepare_art_session.py's rules: inside the app's storage, no empty/dot parts, no backslash; one line each
+    if any(part in ("", ".", "..") for part in guest.split("/")) or "\\" in guest or \
+            re.search(r"[\t\r\n]", guest + host_win):
+        raise RuntimeError(f"unsupported content file name: {rel}")
+    return f"{guest}\t{host_win}"
+
+
 def asset_lines(package: str, data_dir: Path | None, files: list[str] | None, reporter: Reporter) -> list[str]:
     """AXRB's content-file list (core/direct.mjs writeAssetList): "Android/obb/<pkg>/<file>\\t<Windows path>" per
-    data file. Files stay where they are when Windows can read them, else they are copied next to the APK."""
-    manifest = data_manifest(data_dir, files) if data_dir else {}
+    data file. Files stay where they are when Windows can read them, else (a WSL-only folder: \\\\wsl$ is unreliable)
+    they are copied next to the APK. A list too long for axrb-direct.exe's command line goes through hard links in
+    <game dir>\\content instead (same drive only), else the install stops with a clear message."""
+    manifest = list(data_manifest(data_dir, files) if data_dir else {})
+    base = _windows_readable(data_dir) if manifest else None
     lines = []
     for rel in manifest:
         host = data_dir / rel
-        try:
-            host_win = winhost.to_windows(host)
-        except ValueError:  # e.g. a WSL-only folder: give AXRB a copy it can read
+        if base:
+            host_win = base + "\\" + rel.replace("/", "\\")
+        else:
             copy = axrb.game_dir(package) / "obb" / rel
             if not copy.is_file() or copy.stat().st_size != host.stat().st_size:
                 reporter.log(f"copying {rel} to where Windows can read it")
                 copy.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(host, copy)
             host_win = winhost.to_windows(copy)
-        guest = f"Android/obb/{package}/{rel}"
-        # prepare_art_session.py's rules: inside the app's storage, no empty/dot parts, no backslash; one line each
-        if any(part in ("", ".", "..") for part in guest.split("/")) or "\\" in guest or \
-                re.search(r"[\t\r\n]", guest + host_win):
-            raise RuntimeError(f"unsupported content file name: {rel}")
-        lines.append(f"{guest}\t{host_win}")
+        lines.append(_line(package, rel, host_win))
+    links = axrb.game_dir(package) / CONTENT_LINKS
+    if base and mount_args_length(lines) > MOUNT_ARGS_BUDGET:
+        made = _hard_links(package, data_dir, manifest)
+        if made:
+            reporter.log(f"{len(lines)} content files: listed through hard links in {made} (shorter paths)")
+            short = winhost.to_windows(made)
+            lines = [_line(package, rel, short + "\\" + rel.replace("/", "\\")) for rel in manifest]
+    elif links.is_dir():
+        shutil.rmtree(links, ignore_errors=True)  # hard links of an earlier install, no longer needed
+    if mount_args_length(lines) > MOUNT_ARGS_BUDGET:
+        raise RuntimeError(f"{len(lines)} content files with paths this long don't fit on the command line of "
+                           "AXRB's direct mode; move the game's data to the drive FramePort is on, or to a folder "
+                           "with a shorter path")
     return lines
 
 
@@ -400,6 +466,9 @@ DIRECT_LOGS = (("session.json", "game/session.json", 1 << 16), ("host.err", "gam
                ("frameport-launch-test.log", "frameport-launch-test.log", 1 << 16))
 
 
+HEAD_TOO = ("direct.out", "direct.log")
+
+
 def game_logs(backend: str | None = None) -> dict[str, str]:
     """AXRB's session logs (newest session) for triage and diagnostics. Both backends when `backend` is None: the
     direct ones then under "direct/"."""
@@ -415,7 +484,8 @@ def game_logs(backend: str | None = None) -> dict[str, str]:
         for name, sub, limit in files:
             p = logs / sub
             if p.is_file():
-                out[prefix + name] = axrb.read_log(p, limit)
+                # the runner's logs keep their start (milestones) as well as their end
+                out[prefix + name] = axrb.read_log(p, limit, head=limit // 4 if name in HEAD_TOO else 0)
     return out
 
 
@@ -435,8 +505,8 @@ def launch_test(dep: dict, reporter: Reporter, seconds: int = 45, triage=None, e
     before = time.time()
     q = axrb._ps_quote
     # --- xr-sim hook (tools/xr_sim.py): env + SteamVR-registration shim before the launcher call
-    sim = xr_sim.launcher_prefix(xr_sim.active_env() if extra_env is None else extra_env)
-    pid = axrb.spawn_detached(sim + axrb.logged(
+    sim_env = xr_sim.active_env() if extra_env is None else extra_env
+    pid = axrb.spawn_detached(xr_sim.launcher_prefix(sim_env) + axrb.logged(
         f"& {q(dep['launcher_win'])} -Package {q(package)} -Activity {q(dep['activity'])} "
         f"-GameName {q(dep['title'])} -CaptureGuestLog " + " ".join(dep.get("flags") or ()),
         winhost.to_windows(log)))
@@ -456,6 +526,8 @@ def launch_test(dep: dict, reporter: Reporter, seconds: int = 45, triage=None, e
             break
     if seen and state == "NEVER_STARTED":
         state = "EXITED"
+    if state == "RUNNING":
+        sim_capture(sim_env, package, reporter)
     if axrb.pid_running(pid):
         try:  # AXRB's script sees the game stop, cleans up (and shuts Android down if it started it)
             axrb.adb(["shell", "am", "force-stop", package], timeout=30)
@@ -482,6 +554,21 @@ def direct_state(out_text: str, launcher_running: bool) -> str | None:
     return None if launcher_running else "NEVER_STARTED"
 
 
+def sim_capture(env: dict, package: str, reporter: Reporter) -> Path | None:
+    """Under the simulated headset (env names Monado's runtime): save its window, both eyes as a headset gets them,
+    to the xr-sim captures folder, so a test shows what the game drew at its end. None without the simulator or the
+    capture tool; a failed capture never fails the test."""
+    if "XR_RUNTIME_JSON" not in (env or {}) or not xr_sim.capture_exe():
+        return None
+    try:
+        path = xr_sim.capture(xr_sim.capture_dir() / f"{time.strftime('%Y%m%d-%H%M%S')}-{package}-headset.bmp")
+    except (xr_sim.XrSimError, OSError, subprocess.SubprocessError) as exc:
+        reporter.log(f"simulated headset view not saved: {exc}")
+        return None
+    reporter.log(f"simulated headset view: {path}")
+    return path
+
+
 def _launch_test_direct(dep: dict, reporter: Reporter, seconds: int, triage, extra_env: dict | None = None):
     reporter.stage("Launch test (this PC, AXRB direct mode)")
     inst = axrb.find(axrb.DIRECT)
@@ -495,8 +582,8 @@ def _launch_test_direct(dep: dict, reporter: Reporter, seconds: int, triage, ext
     out = logs / "game" / "direct.out"
     before = time.time()
     q = axrb._ps_quote
-    sim = xr_sim.launcher_prefix(xr_sim.active_env() if extra_env is None else extra_env)
-    pid = axrb.spawn_detached(sim + axrb.logged(
+    sim_env = xr_sim.active_env() if extra_env is None else extra_env
+    pid = axrb.spawn_detached(xr_sim.launcher_prefix(sim_env) + axrb.logged(
         f"& {q(dep['launcher_win'])} -Package {q(package)} -Activity {q(dep['activity'])} "
         f"-GameName {q(dep['title'])} " + " ".join(dep.get("flags") or ()), winhost.to_windows(log)))
     state, deadline, watch_end = "NEVER_STARTED", time.time() + 300, None  # ART's first start is slow (no JIT)
@@ -505,7 +592,7 @@ def _launch_test_direct(dep: dict, reporter: Reporter, seconds: int, triage, ext
         time.sleep(3)
         alive = axrb.pid_running(pid)
         fresh = out.is_file() and out.stat().st_mtime >= before - 5  # the run script rewrites it every session
-        now = direct_state(axrb.read_log(out, 1 << 20) if fresh else "", alive)
+        now = direct_state(axrb.read_log(out, 1 << 20, head=1 << 18) if fresh else "", alive)
         if now in ("EXITED", "NEVER_STARTED"):
             state = now
             break
@@ -514,6 +601,8 @@ def _launch_test_direct(dep: dict, reporter: Reporter, seconds: int, triage, ext
         if watch_end and time.time() >= watch_end:
             state = "RUNNING"
             break
+    if state == "RUNNING":
+        sim_capture(sim_env, package, reporter)
     if axrb.pid_running(pid):  # AXRB's own Stop: the bridge window closes, the game pauses, stops and saves
         try:
             axrb.stop_game(inst, pid)
@@ -528,9 +617,31 @@ def _launch_test_direct(dep: dict, reporter: Reporter, seconds: int, triage, ext
     return _report(text, state, package, before, reporter, triage, "direct mode")
 
 
+# AXRB's runtime logs a summary of the game's frames every ~5 s: "AXRB.Perf end-frame: rate=63.7/s ..." (guest), and
+# the bridge one of what it hands the PC's OpenXR runtime: "AXRB.Perf host-fresh-submit: rate=62.9/s ..."
+PERF_RATE = re.compile(r"AXRB\.Perf (end-frame|host-fresh-submit): rate=([\d.]+)/s")
+
+
+def frame_rates(text: str, last: int = 6) -> dict[str, float]:
+    """{"game": fps, "host": fps}: the median of the last few AXRB.Perf summaries (the first ones include loading)."""
+    seen: dict[str, list[float]] = {}
+    for kind, rate in PERF_RATE.findall(text):
+        seen.setdefault("game" if kind == "end-frame" else "host", []).append(float(rate))
+    out = {}
+    for name, rates in seen.items():
+        tail = sorted(rates[-last:])
+        out[name] = tail[len(tail) // 2]
+    return out
+
+
 def _report(text: str, state: str, package: str, before: float, reporter: Reporter, triage, note: str):
     result = triage(text, state, package, kind="axrb") if triage else None
     reporter.check("Game process", state == "RUNNING", f"{state} ({round(time.time() - before)}s, {note})")
+    rates = frame_rates(text)
+    if rates:
+        reporter.check("Frame rate", True, ", ".join(f"{k} {v:g} fps" for k, v in
+                                                     (("game submits", rates.get("game")),
+                                                      ("bridge to the PC's runtime", rates.get("host"))) if v))
     if result:
         for m in result.milestones:
             reporter.check(m, True)
@@ -568,7 +679,7 @@ def _uninstall_direct(dep: dict, keep_data: bool) -> bool:
     data in AXRB's runtime folder (direct\\data\\data\\<pkg> = /data/data, direct\\sdcard\\Android\\data\\<pkg>)."""
     package = dep["package"]
     try:
-        shutil.rmtree(axrb.game_dir(package), ignore_errors=True)
+        shutil.rmtree(axrb.game_dir(package), ignore_errors=True)  # content\ holds hard links: the data stays
     except axrb.AxrbError:
         return False
     root = axrb.direct_runtime_root()

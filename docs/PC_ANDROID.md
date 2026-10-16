@@ -55,10 +55,17 @@ folder) and picks per game:
   aren't empty + AXRB's direct files complete. Requirements: ≥ 6 GB RAM, `vulkan-1.dll` (no hypervisor, no GPU
   vendor gate).
 - **Direct install** (no adb): the PC build is copied to `%LOCALAPPDATA%\FramePort\axrb\games\<pkg>\<pkg>.apk`
-  (FramePort removes its converted copies after an install), the launch activity comes from the APK's manifest
+  (FramePort removes its converted copies after an install; `FRAMEPORT_AXRB_LAUNCHER_DIR` moves FramePort's `axrb`
+  folder, for isolated `FRAMEPORT_HOME` runs), the launch activity comes from the APK's manifest
   (`axml.launcher_activity`, `pkg/fully.qualified.Class`), the data files become AXRB's content list `assets.txt`
-  (`Android/obb/<pkg>/<file>\t<Windows path>`, read-only mounts at the original place; WSL-only folders are copied
-  next to the APK). App data and saves: `<runtime>\direct\data\data\<pkg>` and `direct\sdcard\Android\data\<pkg>`.
+  (`Android/obb/<pkg>/<file>\t<Windows path>`, read-only mounts of the files where they are; WSL-only folders, which
+  Windows reads only through `\\wsl$`, are copied next to the APK). AXRB's `prepare_art_session.py` turns every
+  content file into one `--mount-ro` argument of `axrb-direct.exe` (with the path resolved: junctions and 8.3 names
+  don't shorten it), and Batman's 90 files from a long dump folder made a 32,876-character command line (Windows'
+  limit is 32,767: "The filename or extension is too long"). A list over 25,000 characters therefore goes through
+  hard links in `games\<pkg>\content` (no extra space; only on the drive FramePort's folder is on), else the install
+  stops with a clear message. App data and saves: `<runtime>\direct\data\data\<pkg>` and
+  `direct\sdcard\Android\data\<pkg>`.
 - **Play**: Steam shortcut → `%LOCALAPPDATA%\FramePort\axrb\fp-axrb-direct.ps1 -Package … -Activity … [flags]` →
   sets `AXRB_DATA_HOME=<runtime>\output` (as AXRB's launcher does) → AXRB's `run_direct_game.ps1 -Apk -Package
   -Activity -GameName -Executable <root>\out\direct\axrb-direct.exe -DataDirectory <runtime>\direct -Sysroot
@@ -69,10 +76,32 @@ folder) and picks per game:
   direct.log, host.err, host.log, session.json}` (diagnostics: `axrb/direct/*`); triage signatures
   `axrb-direct-*` and milestones ART started → activity created → OpenXR → Vulkan device (`catalog/triage.yaml`).
 
-**Untested** (written 2026-10-15 from AXRB's source at 5b3dba19; no Windows run, no AXRB 2.x build yet): every
-direct-mode step on a real PC (silent install of the 2.x NSIS installer, `make_sysroot.py` through WSL interop, the
-launcher script, the launch test's markers and stop, the triage patterns against real logs), the upgrade of an
-installed 1.0.x, and whether AXRB's own launcher shows FramePort-set-up runtimes as ready.
+**Tested end to end with a local build** (2026-10-15, AXRB `windows-android16` @ 59626ac built on the dev PC,
+`FRAMEPORT_AXRB_DIRECT_DIR` = its staged `runtime\`, the staged sysroot reached through a junction
+`<FRAMEPORT_AXRB_DIRECT_RUNTIME>\direct\sysroot`; Monado's simulated HMD, see below): scan → PC build → direct
+install → `frameport test --to pc --sim --axrb-backend direct` → launcher → AXRB's run script → bridge + runner →
+milestones → AXRB's Stop. Still untested: the 2.x NSIS installer (no release yet), `setup_direct`'s download +
+`make_sysroot.py` path, the upgrade of an installed 1.0.x, AXRB's launcher seeing FramePort-set-up runtimes.
+
+### Direct-mode results (2026-10-15, Monado simulated HMD at 72 Hz, Dynarmic, no headset)
+
+PC build = the catalog recipe's PC selection (OVRPort's patches + `on_pc` fixes + FrameBridge with `focus_hold=0`),
+no `pc.axrb_backend` options. "fps" = AXRB.Perf `end-frame` (game) / `host-fresh-submit` (bridge → Monado), the
+median of the last summaries. What is drawn was judged from Monado's window and AXRB's layer captures.
+
+| Game (engine, graphics) | Reached | fps | Picture | Blocker / notes |
+|---|---|---|---|---|
+| Batman: Arkham Shadow 1.4.1-350961 (Unity, Vulkan; 90 content files, 27 GB) | menu (SELECT REGION) in ~25 s | 63.7 / 62.9 | stereo menu over the Batcave scene, both eyes correct | none; needed the content-list fix (command line overflow) and hard links; stop clean (activities stopped) |
+| PowerWash Simulator VR 2.5.0 (Unity 2020.3, Vulkan) | in game: the garage hub (~3-4 min; at 90 s still its loading logo) | 70.5 / 69.8 | garage in both eyes, both hands drawn at the simulated controllers | none; Meta multiplayer callbacks throw NullReferenceExceptions (no Meta services, harmless so far) |
+| LEGO Bricktales 2.1 (Unity, Vulkan, URP) | scene `Diorama_Hub_Startup` loaded (~3 min) | 72 / 72 | intro text panel ("You want to free the simulation? Follow the white rabbit.") on black, both eyes | stop slow: the game didn't finish its activity shutdown in 25 s (`axrb-direct-slow-stop`); Meta achievements fail (no Meta services, harmless) |
+| Toy Master 1.1.2 (Unity 2022.3, **GLES**) | activity created, then crash in 18 s | - | - | not a Vulkan game: "Vulkan (Unity boot.config)" came from the Oculus plugin's `xr-vulkan-*` keys; Unity: "Unable to retrieve the default EGL display!" + SIGTRAP. Automatic choice now sends such games to the emulator |
+
+Integration bugs found and fixed on the way: AXRB's trap message never reached FramePort's log; the content list
+overflowed the command line (Batman); Unity's EGL failure and SIGTRAP weren't triaged; long sessions lost their
+start-up milestones; the boot.config Vulkan label picked direct mode for GLES games. Open, AXRB's side: the content
+list should reach `axrb-direct.exe` as a file (FramePort's hard links only work when the data is on the drive of
+FramePort's folder; drafted as an upstream issue). Needs a headset: picture and latency through SteamVR, sound,
+controllers (the simulated ones hold still), Batman beyond its region menu.
 
 ## Spike results (2026-10-10, Windows 11 26200, i7-14700K, RTX 4080 SUPER, 64 GB; headless)
 
@@ -215,7 +244,9 @@ without changing the system's OpenXR runtime or touching SteamVR:
 - **Seeing what is drawn:** the windowed compositor ("Monado (Windowed)", 1264×681, both eyes side by side without
   distortion) can be saved with `native/xrsimprobe/xr_sim_capture.cpp` (`PrintWindow`, works behind other windows;
   `xr_sim.capture(path)`), and `--sim` also sets AXRB's own opt-in `AXRB_CAPTURE_PREFIX` (4 PPM readbacks of the
-  submitted layers, 5 s apart, from frame 300) into `<data>/logs/xr-sim/`. Monado itself has no screenshot function;
+  submitted layers, 5 s apart, from frame 300) into `<data>/logs/xr-sim/`. A launch test that reached RUNNING saves
+  Monado's window there too, just before it stops the game (`<time>-<pkg>-headset.bmp`, `pc_android.sim_capture`),
+  and every AXRB launch test reports the frame rate from AXRB's `AXRB.Perf` summaries (game submits / bridge). Monado itself has no screenshot function;
   `XRT_WINDOW_PEEK` and `XRT_DEBUG_GUI` exist but only show windows.
 - **Use:** `frameport test <pkg> --to pc --sim` (or `FRAMEPORT_PC_XR_SIM=1`): starts `monado-service.exe` hidden
   (WMI, like AXRB's scripts; ready when its pipe `\\.\pipe\<%TEMP%>\monado_comp_ipc` exists), passes the environment to
