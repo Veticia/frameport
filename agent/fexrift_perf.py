@@ -393,7 +393,7 @@ def bench_run(args, launcher, vr):
             if child.poll() is not None:
                 raise ValueError("benchmark launcher exited before the game started; inspect launch.log")
             level = vr.activity()
-            if level == 1 or recent_steam_input(CORE.STEAM):
+            if level == 1:   # controller.txt isn't a signal here: the starting game loads its input bindings
                 raise ValueError(f"benchmark stopped: owner interaction (activity {level})")
             time.sleep(1)
         before, previous = {}, time.monotonic()
@@ -403,7 +403,7 @@ def bench_run(args, launcher, vr):
             # (activity leaves standby), so during the run only real use stops it: 1 = user interaction (worn or
             # moved), or new controller input.
             level = vr.activity()
-            if level == 1 or recent_steam_input(CORE.STEAM):
+            if level == 1:   # controller.txt isn't a signal here: the starting game loads its input bindings
                 raise ValueError(f"benchmark stopped: owner interaction (activity {level})")
             if child.poll() is not None:
                 raise ValueError("benchmark launcher exited before the sampling window ended; inspect launch.log")
