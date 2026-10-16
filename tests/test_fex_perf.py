@@ -439,3 +439,42 @@ def test_prepare_scales_accepts_the_real_setup_upload(perf, tmp_path):
     for scale in (1.0, 1.25, 1.5):
         dll = (Path(p.scale_folder(scale)) / "LibRevive64.dll").read_bytes()
         assert struct.unpack_from("<f", dll, 0x1229c)[0] == scale
+
+
+@pytest.mark.parametrize("how", ["crash", "result", "error"])
+def test_bench_guarded_restores_display_when_the_measurement_dies(perf, monkeypatch, tmp_path, how):
+    """A native crash in the ctypes SteamVR calls skips bench_run's finally (seen on the Frame): the parent must
+    still restore the display settings and stop the game from the guard file."""
+    core, p = perf
+    g = core.COMMANDS["bench"].__globals__
+    Path(core.ROOT).mkdir(parents=True, exist_ok=True)
+    log = tmp_path / "events.txt"
+
+    def run(args, launcher, vr):
+        g["guard_write"](screen=300.0, pgid=999999)
+        if how == "crash":
+            os.kill(os.getpid(), 9)                   # what a segfault in vrclient.so looks like to Python
+        if how == "error":
+            raise ValueError("refused")
+        return {"frames": 3}
+    monkeypatch.setitem(g, "VR", lambda: SimpleNamespace(close=lambda: None))
+    monkeypatch.setitem(g, "bench_run", run)
+    monkeypatch.setitem(g, "vrsetting_subprocess",
+                        lambda *a: log.open("a").write(json.dumps(a) + "\n"))
+    def run_cmd(argv, **k):
+        if str(argv[0]).endswith("wineserver"):
+            log.open("a").write('["wineserver -k"]\n')
+        return SimpleNamespace(stdout="", stderr="", returncode=0)
+    monkeypatch.setattr(p.subprocess, "run", run_cmd)
+    if how == "crash":
+        with pytest.raises(ValueError, match="died .*display settings restored"):
+            g["bench_guarded"]({"app": "x"}, "/fake/launch.sh")
+        lines = [json.loads(l) for l in log.read_text().splitlines()]
+        assert ["power", "pauseCompositorOnStandby", "b", True] in lines
+        assert ["power", "turnOffScreensTimeout", "f", 300.0] in lines and ["wineserver -k"] in lines
+    elif how == "error":
+        with pytest.raises(ValueError, match="refused"):
+            g["bench_guarded"]({"app": "x"}, "/fake/launch.sh")
+    else:
+        assert g["bench_guarded"]({"app": "x"}, "/fake/launch.sh") == {"frames": 3}
+    assert not Path(g["guard_path"]()).exists()

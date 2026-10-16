@@ -10,6 +10,7 @@ import hashlib
 import json
 import math
 import os
+import sys
 import re
 import shlex
 import shutil
@@ -360,6 +361,7 @@ def bench_run(args, launcher, vr):
     if busy_processes(processes()) or recent_steam_input(CORE.STEAM) or vr.activity() != 3:
         raise ValueError("benchmark refused: game, Wine, container, HMD activity or recent Steam input")
     screen = vr.screen_timeout()  # no setting is changed until both safety checks and this read succeed
+    guard_write(screen=screen)    # before any change: the parent restores from it if this process dies
     child, old_handler = None, None
     settings = settings_get(args)["settings"]
     frames, waits, gpu, gpu_seconds = {}, collections.Counter(), 0, 0.0
@@ -376,6 +378,7 @@ def bench_run(args, launcher, vr):
         with open(os.devnull, "wb") as sink:
             child = subprocess.Popen([launcher], stdin=subprocess.DEVNULL, stdout=sink, stderr=sink,
                                      start_new_session=True, close_fds=True)
+        guard_write(screen=screen, pgid=getattr(child, "pid", None))
         before, previous = {}, time.monotonic()
         deadline = started + seconds
         while time.monotonic() < deadline:
@@ -437,11 +440,77 @@ def bench(args):
     os.makedirs(CORE.ROOT, exist_ok=True)
     with open(os.path.join(CORE.ROOT, ".bench.lock"), "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        vr = VR()
+        return bench_guarded(dict(args, app=app, exe=exe), launcher)
+
+
+# The measurement talks to SteamVR through ctypes (vrclient.so). A native crash there kills the process without
+# running bench_run's finally, which once left pauseCompositorOnStandby=false (display kept on) on the Frame
+# (2026-10-16). So it runs in a forked child, and the parent restores the display settings and stops the game from
+# a guard file when the child returns no result, each restore in its own process (another crash can't skip it).
+def guard_path():
+    return os.path.join(CORE.ROOT, ".bench.guard.json")
+
+
+def guard_write(**kw):
+    CORE.write_json(guard_path(), kw)
+
+
+def vrsetting_subprocess(section, key, kind, value):
+    arg = json.dumps({"section": section, "key": key, "kind": kind, "value": value})
+    subprocess.run([sys.executable, "-I", os.path.join(CORE.HERE, "fexrift.py"), "vrsetting", arg],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
+
+
+def crash_cleanup():
+    guard = CORE.read_json(guard_path(), {}) or {}
+    try:
+        if guard.get("pgid"):
+            try:
+                os.killpg(int(guard["pgid"]), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+        subprocess.run([os.path.join(CORE.GEF, "files/bin/wineserver"), "-k"], env=CORE.wine_env(),
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+    finally:
+        vrsetting_subprocess("power", "pauseCompositorOnStandby", "b", True)
+        if guard.get("screen") is not None:
+            vrsetting_subprocess("power", "turnOffScreensTimeout", "f", float(guard["screen"]))
+
+
+def bench_guarded(args, launcher):
+    read_fd, write_fd = os.pipe()
+    pid = os.fork()
+    if pid == 0:                                   # child: measure, report through the pipe
+        os.close(read_fd)
+        code = 0
         try:
-            return bench_run(dict(args, app=app, exe=exe), launcher, vr)
-        finally:
-            vr.close()
+            vr = VR()
+            try:
+                out = {"ok": True, "result": bench_run(args, launcher, vr)}
+            finally:
+                vr.close()
+        except Exception as e:  # noqa: BLE001 - reported to the parent as the command's error
+            out, code = {"ok": False, "error": f"{type(e).__name__}: {e}"}, 1
+        with os.fdopen(write_fd, "w") as w:
+            w.write(json.dumps(out))
+        os._exit(code)
+    os.close(write_fd)
+    try:
+        with os.fdopen(read_fd) as r:
+            raw = r.read()
+        _, status = os.waitpid(pid, 0)
+        out = json.loads(raw) if raw.strip() else None
+        if out is None:                             # crashed or killed: bench_run's own cleanup didn't run
+            crash_cleanup()
+            raise ValueError(f"benchmark process died ({'signal ' + str(-os.waitstatus_to_exitcode(status)) if os.WIFSIGNALED(status) else 'no result'}); display settings restored, game stopped")
+        if not out["ok"]:
+            raise ValueError(out["error"])
+        return out["result"]
+    finally:
+        try:
+            os.remove(guard_path())
+        except FileNotFoundError:
+            pass
 
 
 def register(core):
