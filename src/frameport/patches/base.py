@@ -189,6 +189,9 @@ def pc_selection(patches: dict, analysis: Analysis | None = None) -> dict:
             # Lucky's Tale at Monado's 896x1008 per eye 9 fps, at half size (FrameBridge's minimum) 30 fps
             scale = (out.get("adapter.scale") or {}).get("value")
             out["adapter.scale"] = {"value": min(float(scale), GLES_PC_SCALE) if scale else GLES_PC_SCALE}
+            # ... and rejects every GLES frame with more than one layer (no layer batches without Vulkan)
+            out["adapter.projection_only"] = {"value": 1}
+            out["adapter.scale_max"] = {"value": 1}  # also for games that size their eyes from the maximum
     return out
 
 

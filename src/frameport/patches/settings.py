@@ -42,6 +42,14 @@ SETTINGS = [
      "Hides XR_FB_space_warp, so the game renders every frame itself instead of half of them plus motion vectors "
      "(Application SpaceWarp). For games whose picture flickers or smears on the Frame (for example Unreal Engine 5 "
      "games such as Into The Radius 2)."),
+    ("projection_only", "int", 0, "Main picture only",
+     "Frames that carry more than the game's main picture (menus or overlays as extra layers) submit the main "
+     "picture alone. For runtimes that refuse such frames: AXRB's emulator on this PC rejects every multi-layer "
+     "OpenGL ES frame (on by default there for GLES games). The extra layers don't show."),
+    ("scale_max", "int", 0, "Cap the eye size",
+     "With a resolution scale below 1, the largest eye size the game is told about is the scaled one too, for games "
+     "that size their eye pictures from the maximum (for example Unity 2017 games). On by default on this PC for "
+     "OpenGL ES games, whose pictures AXRB's emulator copies pixel by pixel."),
     ("controller_fix", "int", 1, "Report Touch controllers",
      "Reports Frame controllers as Oculus Touch and hides synthetic hand tracking. Set 0 for games that require hand "
      "tracking (for example Silhouette)."),
@@ -375,6 +383,12 @@ UI: dict[str, dict] = {
                 control=("switch",)),
     "hide_space_warp": dict(group="troubleshooting", level="advanced", label="Turn off space warp",
                 help="For games whose picture flickers or smears (for example Into The Radius 2).",
+                control=("switch",)),
+    "projection_only": dict(group="troubleshooting", level="advanced", label="Main picture only",
+                help="Shows only the game's main picture, without menus or overlays drawn as extra layers.",
+                control=("switch",)),
+    "scale_max": dict(group="troubleshooting", level="advanced", label="Cap the eye size",
+                help="Keeps games from rendering larger than the resolution scale allows.",
                 control=("switch",)),
     "swapchain_fix": dict(group="troubleshooting", level="advanced", label="Retry refused picture formats",
                 help="Lets OpenGL ES games start when the Frame refuses their picture format. Leave it on.",

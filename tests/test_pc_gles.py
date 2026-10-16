@@ -17,12 +17,17 @@ def test_gles_games_get_half_size_eyes_and_multipass_on_the_pc():
     recipe = {"frame.adapter": {}, "adapter.scale": {"value": 1.2}}
     sel = base.pc_selection(recipe, gles)
     assert sel["adapter.scale"] == {"value": 0.5} and "frame.unity_multipass" in sel
+    assert sel["adapter.projection_only"] == {"value": 1}  # AXRB rejects multi-layer GLES frames
+    assert sel["adapter.scale_max"] == {"value": 1}
+    from frameport.patches.frame.adapter import settings_text
+    assert b"projection_only=1" in settings_text(sel)
     assert base.pc_selection(sel, gles) == sel  # idempotent
     assert base.pc_selection({"frame.adapter": {}}, gles)["adapter.scale"] == {"value": 0.5}
     assert base.pc_selection({"frame.adapter": {}, "adapter.scale": {"value": 0.6}}, gles)["adapter.scale"] == {
         "value": 0.5}
     vk = base.pc_selection(recipe, vulkan)
     assert vk["adapter.scale"] == {"value": 1.2} and "frame.unity_multipass" not in vk
+    assert "adapter.projection_only" not in vk
     plain = analysis("GLES or unknown (no Vulkan declaration)", oculus_xr_plugin=False)  # built-in VR: no plugin
     assert "frame.unity_multipass" not in base.pc_selection({"frame.adapter": {}}, plain)
     assert "frame.unity_multipass" not in base.pc_selection({"frame.adapter": {}})  # no analysis: the recipe only

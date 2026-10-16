@@ -1003,6 +1003,9 @@ if ($transport -ne 'default') {
         $owns = $true
     }
     & $adb -s $serial shell setprop debug.axrb.image_transport $transport
+    # Android's "built for an older version of Android" dialog takes the window focus from games with an old
+    # targetSdk (Accounting+, 27): Unity 2017 then never starts rendering. Android 16 skips it with this property.
+    & $adb -s $serial shell setprop debug.wm.disable_deprecated_target_sdk_dialog 1
 }
 & $run -Avd '@AVD@' -Port @PORT@ -Sdk $env:ANDROID_HOME -MemoryMB @MEM@ -CpuCores @CORES@ -TextureMode gpu `
     -Package $Package -Activity $Activity -GameName $GameName -GuestClock Auto -CaptureGuestLog:$CaptureGuestLog `
