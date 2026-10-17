@@ -126,6 +126,7 @@ Generated from [catalog/games](../catalog/games) by `scripts/compat_list.py`.
 | Sniper Elite VR | Quest | ✅ Works |  |
 | Sniper Elite VR: Winter Warrior | Quest | ✅ Works |  |
 | Space Pirate Trainer Quest | Quest | ✅ Works |  |
+| Spectre | Quest | ✅ Works |  |
 | Sports Scramble (Santa Cruz) | Quest | ✅ Works |  |
 | Star Wars Pinball VR | Quest | ✅ Works |  |
 | Star Wars: Tales from the Galaxy's Edge | Quest | ✅ Works |  |
