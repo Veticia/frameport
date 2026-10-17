@@ -468,3 +468,18 @@ def test_meta_libraries_on_this_pc():
     if not libs:
         pytest.skip("no Meta app library on this PC")
     assert all((p / "Manifests").is_dir() for p in libs)
+
+
+def test_local_copy_profile_status_decides_verified(fx, game):
+    """A profile key equal to the local copy's name doesn't make it verified: its status does (Chronos was a
+    'likely' profile installed as a local copy)."""
+    info, _prep = upload(fx, game)
+    register(fx, info)
+    fx.GAMES["demo"] = {"status": "likely", "ime_patch": "off"}
+    inf, verified = fx.game_info("demo")
+    assert not verified and inf["ime_patch"] == "off" and inf["args"] == ["-a", "two words"]
+    fx.GAMES["demo"]["status"] = "verified"
+    assert fx.game_info("demo")[1]
+    fx.GAMES["demo"] = {"match": {"executables": [{"name": "Other.exe", "size": 1}]}, "status": "verified"}
+    inf, verified = fx.game_info("demo")       # a build-matched profile applies only through the compat hook
+    assert not verified and "match" not in inf

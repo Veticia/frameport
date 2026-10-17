@@ -787,6 +787,12 @@ echo "start $(date +%s)" >>"$A/plays.log" 2>/dev/null || true
 export STEAM_COMPAT_DATA_PATH="$R/compat" WINEPREFIX="$R/compat/pfx" WINEDLLOVERRIDES="winemenubuilder.exe="
 export STEAM_COMPAT_CLIENT_INSTALL_PATH={steam_q} PROTON_NO_ZENITY=1 PROTONFIXES_DISABLE=1 WINEDEBUG=-all
 unset STEAM_COMPAT_INSTALL_PATH STEAM_COMPAT_LIBRARY_PATHS
+# opt-in Wine debug channels for one launch (touch "$A/debug-wine"): loader, signer checks and the VR bridges, all
+# into launch.log. Never by default: it slows the game under FEX and grows the log (no +process: GBs per minute)
+if [[ -e "$A/debug-wine" ]]; then
+    export WINEDEBUG=+timestamp,+pid,+tid,+seh,+loaddll,+wintrust,+chain,+openxr,+vrclient,+steamclient
+    echo "FramePort FEX: Wine debug channels on"
+fi
 export SteamAppId={gid} SteamGameId={gid} STEAM_COMPAT_APP_ID={gid}
 export XR_RUNTIME_JSON=/opt/steamvr/steamxr_linux64.json
 export XDG_RUNTIME_DIR="/run/user/$(id -u)" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$(id -u)/bus"
@@ -800,6 +806,8 @@ export FEX_MULTIBLOCK=1 FEX_PROFILESTATS=0
 # Default taskset -c 4-7; launch-time perf extension overrides these defaults before any Wine process starts.
 FP_CORES=4-7; FP_REVIVE_DIR="$R/revive"
 FP_MOTION_SMOOTHING={vrsetting_q}
+# 0 = the game needs neither LibOVR nor Meta's Platform SDK (an OpenVR build): no Meta runtime, no Revive
+FP_META_RUNTIME={meta_runtime}
 {game_env}if [[ -z "${{DISPLAY:-}}" ]]; then
     steam_pid=$(pgrep -x steam | head -n1 || true)
     [[ -n "$steam_pid" ]] && while IFS= read -r -d '' kv; do case "$kv" in
@@ -814,6 +822,7 @@ cleanup() {{
 trap cleanup EXIT
 python3 -I "$R/artifacts/fexrift.py" vrsetting "$FP_MOTION_SMOOTHING" || true
 "$G/files/bin/wineserver" -k 2>/dev/null; sleep 1
+if [[ "$FP_META_RUNTIME" == 1 ]]; then
 echo "FramePort: starting Meta's runtime"
 L="$WINEPREFIX/drive_c/users/steamuser/AppData/Local/Oculus"
 ( cd "$WINEPREFIX/drive_c/Program Files/Meta Horizon/Support/oculus-runtime" &&
@@ -833,6 +842,7 @@ if pgrep -f "[O]VRLibrarian.exe" >/dev/null &&
     echo "FramePort FEX: OVRLibrarian still running after Service invocation completed"
 fi
 ( while sleep 5; do pkill -9 -f "[O]VRLibrarian.exe"; done ) & LK=$!
+fi
 python3 -I "$R/artifacts/fexrift.py" hidewin & HW=$!
 # Steam's reaper gone (Exit game) -> end the game
 ( pp=$PPID; while sleep 2; do kill -0 "$pp" 2>/dev/null || {{ "$G/files/bin/wineserver" -k; break; }}; done ) & WD=$!
@@ -854,7 +864,8 @@ def write_launcher(app, info, anchor):
         args = shlex.split(" ".join(args))
     text = LAUNCHER.format(title=re.sub(r"[\\\"$`\n]", "", info["title"]), root_q=shlex.quote(ROOT),
                            anchor_q=shlex.quote(anchor), steam_q=shlex.quote(STEAM), gid=GAME_ID, game_env=env,
-                           vrsetting_q=shlex.quote(vr), gamedir_q=shlex.quote(os.path.dirname(exe)),
+                           vrsetting_q=shlex.quote(vr), meta_runtime=1 if info.get("meta_runtime", True) else 0,
+                           gamedir_q=shlex.quote(os.path.dirname(exe)),
                            exe_q=shlex.quote(exe),
                            injector='"$FP_REVIVE_DIR/ReviveInjector.exe" ' if info.get("revive", True) else "",
                            args=" ".join(shlex.quote(a) for a in args))
@@ -914,6 +925,8 @@ def cmd_install(args):
         set_ini_values(ini, "SystemSettings", {"r.MobileMSAA": str(msaa)})
         set_ini_values(ini, "/Script/Engine.RendererSettings", {"r.MobileMSAA": str(msaa)})
         res["msaa"] = msaa
+    for hook in INSTALL_INFO_HOOKS:
+        res["checks"].update(hook(app, info, res) or {})
     os.makedirs(anchor, exist_ok=True)
     write_launcher(app, info, anchor)
     res["launcher"] = os.path.join(anchor, "launch.sh")
@@ -1260,6 +1273,8 @@ COMMANDS = {"status": cmd_status, "setup": cmd_setup, "import_login": cmd_import
 EXTENSIONS = ("login", "install", "compat", "perf")
 LAUNCHER_ENV_HOOKS = []    # fn(app, info) -> list of "export X=Y" lines added to the launcher's environment block
 INSTALL_CHECK_HOOKS = []   # fn(app, info, result) -> dict of extra checks merged into cmd_install's result
+INSTALL_INFO_HOOKS = []    # fn(app, info, result) -> dict of checks; may change info (route, args) before the
+                           # launcher is written
 GAME_INFO_HOOKS = []       # fn(app, info): enrich manifest data with a compatibility profile before install/launch
 LOADED_EXTENSIONS = []
 

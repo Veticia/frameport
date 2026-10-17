@@ -66,6 +66,73 @@ def graphics_lines(route):
     return lines
 
 
+# Which VR runtimes a build can use, from its files (after RiftLift's detection.py, MIT). Over-reporting LibOVR or
+# the Platform SDK is safe (the game keeps Meta's runtime + Revive); only a build with neither leaves that route.
+LIBOVR_FILES = {"libovrrt64_1.dll", "libovrrt32_1.dll", "ovrplugin.dll", "oculusxrplugin.dll"}
+PLATFORM_FILES = {"libovrplatform64_1.dll", "libovrplatform32_1.dll", "pnsovr.dll"}
+LIBOVR_MARKERS = (b"libovrrt", "libovrrt".encode("utf-16-le"))           # LibOVR shim's runtime name (static or
+PLATFORM_MARKERS = (b"libovrplatform", "libovrplatform".encode("utf-16-le"))  # format string), Platform SDK imports
+# arguments that already pick a VR mode/runtime: Unreal (-vr, -hmd=, ...) and Unity (-vrmode <name>)
+VR_SELECTORS = ("-vr", "-nohmd", "-emulatestereo", "-openvr", "-steamvr", "-openxr", "-oculus", "-vrmode")
+
+
+def _contains(path, needles):
+    """Case-insensitive search of a file in 16 MiB chunks (the exe can be ~100 MB)."""
+    keep = max(map(len, needles)) - 1
+    tail = b""
+    try:
+        with open(path, "rb") as f:
+            while chunk := f.read(16 << 20):
+                block = (tail + chunk).lower()
+                if any(n in block for n in needles):
+                    return True
+                tail = block[-keep:]
+    except OSError:
+        pass
+    return False
+
+
+def oculus_facts(game_dir, exe):
+    """{libovr, platform_sdk, openvr, unity}: file names in the game's folder tree + markers in the exe."""
+    names = set()
+    for _root, dirs, files in os.walk(game_dir or os.path.dirname(exe)):
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        names.update(n.lower() for n in files)
+    folder = os.path.dirname(exe)
+    unity = os.path.isfile(os.path.join(folder, "UnityPlayer.dll")) or \
+        os.path.isdir(os.path.splitext(exe)[0] + "_Data")
+    return {
+        # modular Unreal ships the plugins as DLLs (*-OculusHMD-*, *-OnlineSubsystemOculus-*)
+        "libovr": bool(names & LIBOVR_FILES) or any("oculushmd" in n for n in names) or
+        _contains(exe, LIBOVR_MARKERS),
+        "platform_sdk": bool(names & PLATFORM_FILES) or any("onlinesubsystemoculus" in n for n in names) or
+        _contains(exe, PLATFORM_MARKERS),
+        "openvr": "openvr_api.dll" in names,
+        "unity": unity,
+    }
+
+
+def vr_route(facts):
+    """"revive" (Meta's runtime + Revive, the proven route) or "openvr" (straight to SteamVR, nothing of Meta's):
+    only builds without the Platform SDK that carry OpenVR and either no LibOVR or Unity's per-launch VR choice."""
+    if facts["platform_sdk"] or not facts["openvr"]:
+        return "revive"
+    return "openvr" if not facts["libovr"] or facts["unity"] else "revive"
+
+
+def vr_args(engine, route, args):
+    """Arguments that make the engine use the route's runtime (after RiftLift's oculus_launch_arguments), unless
+    the arguments already choose one: Unity dual builds take -vrmode OpenVR, Unreal on Revive gets -vr."""
+    low = [a.lower() for a in args]
+    if any(a in VR_SELECTORS or a.startswith("-hmd=") for a in low):
+        return []
+    if engine == "unity" and route == "openvr":
+        return ["-vrmode", "OpenVR"]
+    if engine == "unreal" and route == "revive":
+        return ["-vr"]
+    return []
+
+
 def register(core):
     original_find = core.find_ime_target
 
@@ -88,8 +155,28 @@ def register(core):
         status = profile.get("status", "verified")     # backward compatible with First Contact's original data
         if status not in STATUSES:
             raise ValueError(f"invalid FEX profile status: {status}")
+        if "args" in profile:
+            info.pop("args_argv", None)      # profile args are shell fragments like the legacy entries
         info.update({k: v for k, v in profile.items() if k != "match"})
         info.update(profile=key, status=status)
+
+    def install_info(app, info, result):
+        """Route and VR arguments from the build's files. A profile's explicit revive/meta_runtime/args win, and a
+        verified profile keeps exactly the launch it was verified with."""
+        facts = oculus_facts(result.get("game_dir"), result["exe"])
+        engine = "unity" if facts["unity"] else result["checks"].get("engine")
+        explicit = "revive" in info or "meta_runtime" in info
+        route = ("revive" if info.get("revive", True) else "openvr") if explicit or result["verified"] \
+            else vr_route(facts)
+        info.setdefault("revive", route == "revive")
+        # without Revive, Meta's runtime only matters to the Platform SDK
+        info.setdefault("meta_runtime", info["revive"] or facts["platform_sdk"])
+        added = []
+        if not result["verified"] and "args" not in (core.GAMES.get(info.get("profile")) or {}) and \
+                info.get("vr_args") != "off":
+            added = vr_args(engine, route, info.get("args", []))
+            info["args"] = list(info.get("args", [])) + added
+        return {"vr": dict(facts, route=route, meta_runtime=info["meta_runtime"], added_args=added)}
 
     def launcher_env(app, info):
         lines = graphics_lines(info.get("graphics", "d3d11"))
@@ -128,6 +215,7 @@ def register(core):
         return facts
 
     core.GAME_INFO_HOOKS.append(game_info)
+    core.INSTALL_INFO_HOOKS.append(install_info)
     core.find_ime_target = find_ime_target
     core.LAUNCHER_ENV_HOOKS.append(launcher_env)
     core.INSTALL_CHECK_HOOKS.append(checks)

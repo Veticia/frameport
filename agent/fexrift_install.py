@@ -350,9 +350,15 @@ def register(core):
         rec = read_record(app)
         if not rec.get("registered"):
             return original_info(app)
-        info = dict(core.GAMES.get(app) or {})
+        # the same profile rules as a game in Meta's library: a legacy entry (no "match") by name, else the
+        # compatibility hooks match the build; "verified" only from a verified profile
+        known = core.GAMES.get(app) or {}
+        legacy = app in core.GAMES and "match" not in known
+        info = dict(known) if legacy else {}
         info.update(manifest_launch(app))
-        return info, app in core.GAMES
+        for hook in core.GAME_INFO_HOOKS:
+            hook(app, info)
+        return info, info.get("status", "verified" if legacy else "untested") == "verified"
 
     core.manifest_launch = manifest_launch
     core.game_info = game_info

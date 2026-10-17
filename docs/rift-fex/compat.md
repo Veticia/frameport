@@ -30,6 +30,32 @@ profiles are refused even with force. `checks` records the selected profile, sta
 | `args` | Optional argument list override; omit to preserve manifest arguments |
 | `notes` | Evidence and first-launch cautions |
 | `revive` | Optional, defaults true; false launches an OpenVR-only game directly |
+| `meta_runtime` | Optional; false starts the game without Meta's runtime. Default: true with Revive or the Platform SDK |
+| `vr_args` | Optional `off`: unverified installs keep their arguments exactly (no `-vr` / `-vrmode OpenVR`) |
+
+### Route and VR arguments from the build's files
+
+Without an explicit `revive`/`meta_runtime` (and for any game that isn't verified), `install_info()` reads the game's
+folder (`oculus_facts`, after RiftLift's `detection.py`): LibOVR (`LibOVRRT*`, `OVRPlugin.dll`, `OculusXRPlugin.dll`,
+`*OculusHMD*` file names, or "LibOVRRT" ASCII/UTF-16 in the exe), the Platform SDK (`LibOVRPlatform*`, `pnsovr.dll`,
+`*OnlineSubsystemOculus*`, or "LibOVRPlatform" in the exe), OpenVR (`openvr_api.dll`) and Unity. `vr_route()`:
+
+- Platform SDK, or no OpenVR → `revive`: Meta's runtime + ReviveInjector (the route First Contact is verified on).
+- OpenVR and no LibOVR, or a Unity build with both providers (it picks one per launch) → `openvr`: straight to
+  SteamVR, no Revive and no Meta runtime (`FP_META_RUNTIME=0` in launch.sh; no OVRServer/OVRLibrarian under FEX).
+- Unreal builds with both plugins stay on `revive` (no device evidence for `-hmd=SteamVR` yet).
+
+Unverified games then get the engine's VR switch if their arguments don't already pick one (`vr_args`, after
+RiftLift's `oculus_launch_arguments`): Unity on the OpenVR route `-vrmode OpenVR`, Unreal on Revive `-vr`. Verified
+profiles keep the launch they were verified with. `checks.vr` records the facts, route and added arguments.
+Over-detection only keeps a game on the proven route; the OpenVR route needs a headset check per game.
+
+Local copies now run the same profile hooks as games in Meta's library: before this, a profile key equal to the
+local name counted as verified whatever its status (Chronos, `likely`) and build-matched profiles never applied.
+
+`touch <anchor>/debug-wine` turns on Wine debug channels for the next launches (`+loaddll,+wintrust,+chain,+openxr,
++vrclient,+steamclient,+seh` with timestamps, into launch.log); remove the file afterwards. It slows the game under
+FEX.
 
 Match alternatives are OR, while basename and size within an executable match are AND. Multiple matching profiles
 are refused. With no `match`, the profile key is the exact canonical name (legacy First Contact compatibility).

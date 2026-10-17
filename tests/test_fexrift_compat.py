@@ -158,3 +158,108 @@ def test_fex_triage_does_not_treat_normal_completion_as_hang():
     log = "OVRLibrarian: Service invocation completed\nReviveInjector: Succesfully injected!"
     result = triage(log, "RUNNING", "rift.test")
     assert not any(f.id in ("fex-librarian-stuck", "fex-revive-injector") for f in result.findings)
+
+
+def _tree(base, files):
+    for rel, data in files.items():
+        p = base / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(data)
+    return base
+
+
+@pytest.mark.parametrize("files,exe,want", [
+    # Oculus-store Unreal: the shim names LibOVRRT, the Platform SDK is delay-imported
+    ({"P/Binaries/Win64/P.exe": b"..LibOVRRT%hs_%d.dll..LIBOVRPLATFORM64_1.DLL"}, "P/Binaries/Win64/P.exe",
+     {"libovr": True, "platform_sdk": True, "openvr": False, "unity": False}),
+    # modular Unreal: plugin DLL names
+    ({"P/Binaries/Win64/P.exe": b"x", "P/Binaries/Win64/P-OnlineSubsystemOculus-Win64-Shipping.dll": b"",
+      "P/Binaries/Win64/P-OculusHMD-Win64-Shipping.dll": b""}, "P/Binaries/Win64/P.exe",
+     {"libovr": True, "platform_sdk": True, "openvr": False, "unity": False}),
+    # Unity with both providers (SUPERHOT-like) and no Platform SDK
+    ({"G.exe": b"x", "UnityPlayer.dll": b"", "G_Data/Plugins/OVRPlugin.dll": b"",
+      "G_Data/Plugins/openvr_api.dll": b""}, "G.exe",
+     {"libovr": True, "platform_sdk": False, "openvr": True, "unity": True}),
+    # OpenVR-only build
+    ({"G.exe": "openvr".encode("utf-16-le"), "openvr_api.dll": b""}, "G.exe",
+     {"libovr": False, "platform_sdk": False, "openvr": True, "unity": False}),
+    # the runtime name in UTF-16 counts
+    ({"G.exe": "LibOVRRT64_1.dll".encode("utf-16-le"), "openvr_api.dll": b""}, "G.exe",
+     {"libovr": True, "platform_sdk": False, "openvr": True, "unity": False}),
+])
+def test_oculus_facts(tmp_path, files, exe, want):
+    base = _tree(tmp_path / "game", files)
+    assert compat().oculus_facts(str(base), str(base / exe)) == want
+
+
+def test_vr_route_and_args():
+    mod = compat()
+    f = {"libovr": True, "platform_sdk": False, "openvr": True, "unity": True}
+    assert mod.vr_route(f) == "openvr"                                    # Unity picks its provider per launch
+    assert mod.vr_route(dict(f, platform_sdk=True)) == "revive"           # entitlement needs Meta's runtime
+    assert mod.vr_route(dict(f, unity=False)) == "revive"                 # Unreal dual builds: proven route
+    assert mod.vr_route(dict(f, libovr=False, unity=False)) == "openvr"
+    assert mod.vr_route(dict(f, openvr=False)) == "revive"
+    assert mod.vr_args("unity", "openvr", ["-screen-fullscreen", "0"]) == ["-vrmode", "OpenVR"]
+    assert mod.vr_args("unity", "openvr", ["-VRMode", "Oculus"]) == []
+    assert mod.vr_args("unreal", "revive", ['-gamemode="x"']) == ["-vr"]
+    assert mod.vr_args("unreal", "revive", ["-hmd=OculusHMD"]) == []
+    assert mod.vr_args("other", "revive", []) == []
+
+
+def _install(fx, tmp_path, app, files, exe_rel, params=""):
+    game = Path(fx.META_DIR) / "Software" / "Software" / app
+    _tree(game, files)
+    man = Path(fx.META_DIR) / "Software" / "Manifests"
+    man.mkdir(parents=True, exist_ok=True)
+    (man / f"{app}.json").write_text(json.dumps({"canonicalName": app, "launchFile": exe_rel,
+                                                "launchParameters": params}))
+    result = fx.cmd_install({"app": app, "anchor": str(tmp_path / app), "force_unverified": True})
+    return result, Path(result["launcher"]).read_text()
+
+
+def test_openvr_build_skips_meta_runtime_and_revive(fx, tmp_path):
+    files = {"G.exe": b"x", "UnityPlayer.dll": b"", "G_Data/Plugins/OVRPlugin.dll": b"",
+             "G_Data/Plugins/openvr_api.dll": b""}
+    result, text = _install(fx, tmp_path, "dual", files, "G.exe", "-screen-fullscreen 0")
+    vr = result["checks"]["vr"]
+    assert vr["route"] == "openvr" and vr["meta_runtime"] is False and vr["added_args"] == ["-vrmode", "OpenVR"]
+    assert "FP_META_RUNTIME=0" in text and "ReviveInjector.exe" not in text
+    assert text.rstrip().endswith("G.exe' -screen-fullscreen 0 -vrmode OpenVR")
+    # the same build with Oculus' Platform SDK keeps Meta's runtime and Revive, and its own VR choice
+    files["G_Data/Plugins/LibOVRPlatform64_1.dll"] = b""
+    result, text = _install(fx, tmp_path, "dual-platform", files, "G.exe")
+    assert result["checks"]["vr"]["route"] == "revive" and "FP_META_RUNTIME=1" in text
+    assert "ReviveInjector.exe" in text and "-vrmode" not in text
+
+
+def test_unreal_gets_vr_unless_verified_or_chosen(fx, tmp_path):
+    exe = "P/Binaries/Win64/P-Win64-Shipping.exe"
+    result, text = _install(fx, tmp_path, "ue", {exe: b"LibOVRRT"}, exe, "-x")
+    assert result["checks"]["vr"]["added_args"] == ["-vr"] and text.rstrip().endswith("-x -vr")
+    result, text = _install(fx, tmp_path, "ue-hmd", {exe: b"LibOVRRT"}, exe, "-hmd=OculusHMD")
+    assert result["checks"]["vr"]["added_args"] == [] and text.rstrip().endswith("-hmd=OculusHMD")
+    fx.GAMES["ue-ok"] = {"status": "verified"}              # legacy verified profile: the proven launch only
+    result, text = _install(fx, tmp_path, "ue-ok", {exe: b"LibOVRRT"}, exe, "-x")
+    assert result["checks"]["vr"]["added_args"] == [] and text.rstrip().endswith("-x")
+    assert "FP_META_RUNTIME=1" in text
+    fx.GAMES["ue-off"] = {"status": "untested", "vr_args": "off"}
+    assert _install(fx, tmp_path, "ue-off", {exe: b"LibOVRRT"}, exe)[0]["checks"]["vr"]["added_args"] == []
+
+
+def test_profile_revive_off_without_platform_sdk_skips_meta_runtime(fx, tmp_path):
+    fx.GAMES["rm"] = {"status": "untested", "revive": False, "graphics": "opengl"}
+    _result, text = _install(fx, tmp_path, "rm", {"R.exe": b"x", "openvr_api.dll": b""}, "R.exe")
+    assert "FP_META_RUNTIME=0" in text and "ReviveInjector.exe" not in text
+
+
+def test_launcher_wine_debug_is_opt_in(fx, tmp_path):
+    anchor = tmp_path / "anchor"
+    anchor.mkdir()
+    fx.write_launcher("test", {"exe": "game.exe", "title": "Game"}, str(anchor))
+    text = (anchor / "launch.sh").read_text()
+    assert 'if [[ -e "$A/debug-wine" ]]; then' in text and "WINEDEBUG=-all" in text
+    assert ",+process" not in text and "FP_META_RUNTIME=1" in text
+    # the Meta runtime block is closed again before the game starts
+    start = text.index('if [[ "$FP_META_RUNTIME" == 1 ]]; then')
+    assert start < text.index("LK=$!") < text.index("\nfi\n", text.index("LK=$!")) < text.index("proton\" run")
