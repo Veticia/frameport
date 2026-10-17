@@ -384,6 +384,11 @@
   "title": "Hide Android's navigation bar",
   "group": "Files and settings on the Frame"
  },
+ "device.language": {
+  "anchor": "device-language",
+  "title": "Game language",
+  "group": "Files and settings on the Frame"
+ },
  "device.lepton_env": {
   "anchor": "device-lepton_env",
   "title": "Extra Lepton settings",

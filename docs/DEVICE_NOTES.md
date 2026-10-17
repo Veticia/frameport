@@ -4,6 +4,19 @@ Detailed device findings per game and issue, moved verbatim from CLAUDE.md (whic
 with the key fact and the patch/setting names for each). Read the matching section before debugging a game;
 general runtime facts are in docs/FRAME_RUNTIME.md and symptom → fix rows in docs/PLAYBOOK.md.
 
+## Per-game language (GitHub #354, 2026-10-17)
+
+Asgard's Wrath 2 starts in English with no in-game language choice. Headless verification used Transformers:
+`LEPTON_GFXRECON_FP_LOCALE="0\npersist.sys.locale=de-DE"` gave container
+`getprop persist.sys.locale = de-DE`, while `ro.product.locale` remained `en-US`. The game's VM started with
+`user.locale=de-DE`, Android configuration was `[de_DE]`, and Unreal logged `Locale=de_DE`.
+Patch `device.language` sets this boot property independently of `device.hide_navbar`.
+Text/voice switching in individual games, including Asgard's Wrath 2, still needs headset verification.
+
+Recipes store the selection as `patches: {device.language: {tag: de-DE}}`. The catalog's `device` field is a
+list of patch IDs, with dedicated fields for some parameterized device settings (files, environment, config sync,
+foveation); it has no field for a language tag. Catalog import/export cannot currently preserve this selection.
+
 ## a32 bridge: games, lessons, debugging aids, profiling
 
 Learned: Unity 2019 contexts

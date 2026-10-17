@@ -7,6 +7,7 @@ The GL shim reads framebridge.conf too (gl_hide_multiview), as does the multivie
 from __future__ import annotations
 
 import math
+import re
 
 from .base import InstallContext, Param, Patch, Suggestion, register
 
@@ -720,6 +721,43 @@ class HideNavBar(Patch):
         ctx.env.update(self.ENV)
 
 
+LANGUAGE_TAG = re.compile(r"^[a-z]{2,3}(-[A-Z][a-z]{3})?(-[A-Z]{2}|-[0-9]{3})?$")
+
+
+class Language(Patch):
+    id = "device.language"
+    title = "Game language"
+    description = ("The language Android reports to the game. Lepton's Android is set to English (US), and games that "
+                   "follow the system language (most Unity and Unreal games) start in English. A language the game "
+                   "doesn't have still shows English. Applies with Update on Frame (the APK isn't changed).")
+    category = "device"
+    needs_vr = False
+    stage = "install"
+    params = [Param("tag", "str", "", "Android language tag, e.g. de-DE (empty = English, US)")]
+    CHOICES = (("", "English (US)"), ("en-GB", "English (UK)"), ("de-DE", "Deutsch"), ("fr-FR", "Français"),
+               ("es-ES", "Español"), ("es-MX", "Español (Latinoamérica)"), ("it-IT", "Italiano"),
+               ("pt-BR", "Português (Brasil)"), ("pt-PT", "Português (Portugal)"), ("nl-NL", "Nederlands"),
+               ("pl-PL", "Polski"), ("cs-CZ", "Čeština"), ("sv-SE", "Svenska"), ("da-DK", "Dansk"),
+               ("nb-NO", "Norsk"), ("fi-FI", "Suomi"), ("tr-TR", "Türkçe"), ("ru-RU", "Русский"),
+               ("uk-UA", "Українська"), ("ja-JP", "日本語"), ("ko-KR", "한국어"), ("zh-CN", "中文（简体）"),
+               ("zh-TW", "中文（繁體）"))
+    # persist.sys.locale is Android's system language, read when the container boots. Lepton has no setting for it;
+    # like device.hide_navbar it rides as a second line of a LEPTON_GFXRECON_* value (copied into the boot
+    # properties unescaped, see docs/FRAME_RUNTIME.md), in its own variable so both can be on.
+    ENV_KEY = "LEPTON_GFXRECON_FP_LOCALE"
+
+    def applies(self, a):
+        return True
+
+    def install(self, ctx: InstallContext) -> None:
+        tag = str(ctx.params.get("tag") or "").strip()
+        if not tag:
+            return
+        if not LANGUAGE_TAG.match(tag):
+            raise ValueError(f"Not a language tag: {tag!r} (for example de-DE)")
+        ctx.env[self.ENV_KEY] = f"0\npersist.sys.locale={tag}"
+
+
 class SteamGamepad(Patch):
     id = "device.steam_gamepad"
     title = "Controllers as a gamepad (Steam Input)"
@@ -878,6 +916,7 @@ register(DeviceFiles)
 register(ConfigSync)
 register(LeptonEnv)
 register(HideNavBar)
+register(Language)
 register(SteamGamepad)
 register(TextInputWindow)
 register(DisplayMode)

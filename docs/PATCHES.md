@@ -2,7 +2,7 @@
 
 # Patches
 
-Every patch and game setting FramePort knows: 179 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
+Every patch and game setting FramePort knows: 180 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
 
 Each entry says what the patch does, whether it changes the APK or only the install, when FramePort suggests it, its options, the catalog games whose recipe names it and the launch-test signatures that suggest it. Patches that are on by default are on for every game, so the catalog rarely names them.
 
@@ -13,7 +13,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 - [Patches from OVRPort](#group-overport) (25)
 - [Steam Frame patches](#group-frame) (61)
 - [Game settings](#group-adapter) (72)
-- [Files and settings on the Frame](#group-device) (8)
+- [Files and settings on the Frame](#group-device) (9)
 - [PC VR (Proton and Revive)](#group-pcvr) (13)
 
 ## Index
@@ -183,6 +183,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Settings files for the game](#device-files) | `device.files` | Files and settings on the Frame | 3 |
 | [Foveated rendering (Valve)](#device-foveation) | `device.foveation` | Files and settings on the Frame | 5 |
 | [Hide Android's navigation bar](#device-hide_navbar) | `device.hide_navbar` | Files and settings on the Frame |  |
+| [Game language](#device-language) | `device.language` | Files and settings on the Frame |  |
 | [Extra Lepton settings](#device-lepton_env) | `device.lepton_env` | Files and settings on the Frame | 3 |
 | [Controllers as a gamepad (Steam Input)](#device-steam_gamepad) | `device.steam_gamepad` | Files and settings on the Frame |  |
 | [Show the app's Android window (for typing)](#device-text_input_window) | `device.text_input_window` | Files and settings on the Frame | 114 |
@@ -2453,6 +2454,18 @@ Hides Android's back, home and recents buttons, which cover the app's own button
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
 
 > Removes Android's back/home/recents buttons from a 2D app's window, where they cover the app's own controls. Turn it off for an app that needs the on-screen back button.
+
+### <a id="device-language"></a>Game language
+
+Choose the language for games that follow the system language. The game must include it. Apply with Update on Frame.
+
+- `device.language` · also for 2D apps
+- **Changes:** Install only: written on the Frame when the game is installed; the APK isn't changed.
+- **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
+- **Options:** `tag`: str, default empty — Android language tag, e.g. de-DE (empty = English, US)
+- **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
+
+> The language Android reports to the game. Lepton's Android is set to English (US), and games that follow the system language (most Unity and Unreal games) start in English. A language the game doesn't have still shows English. Applies with Update on Frame (the APK isn't changed).
 
 ### <a id="device-lepton_env"></a>Extra Lepton settings
 

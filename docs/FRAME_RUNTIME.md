@@ -43,6 +43,12 @@
   work on Android 11: `policy_control` is gone, `cmd statusbar send-disable-flag home recents` has no `back` and
   moves the back button onto the app's controls, the `sysui_nav_bar` layout and disabling SystemUI had no effect.
 
+- **Per-game language** (verified 2026-10-17): `device.language` uses the same unescaped
+  `LEPTON_GFXRECON_*` boot-property path: `LEPTON_GFXRECON_FP_LOCALE="0\npersist.sys.locale=<tag>"`.
+  Android reports the selected locale to the game at startup; `ro.product.locale` stays `en-US`.
+  Choose Game language under Customize and apply with Update on Frame. English (US) removes the override.
+  Games need to include and use the requested language; text and voice still need headset verification.
+
 ## Where FramePort keeps games (internal storage, microSD)
 - Every game has an **anchor** on internal storage: `~/Applications/quest-frame/<pkg>/` with `launch.sh`,
   `deployment.json`, `artwork/` and `plays.log`. Steam's shortcut points at the anchor's `launch.sh`, so it never
