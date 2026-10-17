@@ -288,6 +288,8 @@ def main() -> int:
                  ("linux-change-program", lambda a: a.choose_exe(LINUX_FOLDER)),
                  ("frame", lambda a: (a.page.pop_dialog(), a.navigate(1))),
                  ("linux-move", lambda a: a.move_game(LINUX_APPIMAGE) if args.fake_frame else None),
+                 # GitHub #361: Files lists drives and the install folders of PC VR games and Linux apps
+                 ("linux-files", lambda a: (a.page.pop_dialog(), a.go("files"))),
                  ("linux-game-menu", lambda a: (a.page.pop_dialog(), a.open_game_menu(LINUX_FOLDER))),
                  ("linux-menu", lambda a: (a.page.pop_dialog(), a.navigate(0), time.sleep(3),
                                            a.library_view.open_menu(LINUX_APPIMAGE)))]

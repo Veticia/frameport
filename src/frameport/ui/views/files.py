@@ -79,6 +79,12 @@ def drive_locations(listed: list[dict]) -> list[dict]:
             for d in listed if not d.get("internal") and d.get("path", "").startswith("/")]
 
 
+def game_section(kind: str | None) -> str:
+    """Which Files section an installed game is listed in: its Android storage (Quest, the default), or the install
+    folder of a PC VR game / Linux app."""
+    return "pcvr" if kind in ("rift", "pcvr") else "linux" if kind == "linux" else "quest"
+
+
 def game_location(dep: dict, title: str, home: str) -> dict:
     """Quest storage resolves lazily; other games expose their deployment's base."""
     pkg = dep["package"]
@@ -225,12 +231,18 @@ class FilesView:
                                           " · ".join(filter(None, [free_text(loc),
                                                                  tr("Read-only") if loc.get("read_only") else ""])))
                         for loc in self.drives)
-        games = self._installed_games()
-        if games:
-            rows.append(ft.Container(C.meta(tr("Game storage").upper()), padding=ft.Padding(T.S2, T.S3, 0, T.px(2))))
+        kinds = {d["package"]: d.get("kind") for d in (self.app.frame_info or {}).get("installed", [])}
+        installed = self._installed_games()
+        for section, heading, icon in (("quest", tr("Game storage"), ft.Icons.SPORTS_ESPORTS_OUTLINED),
+                                       ("pcvr", tr("PC VR games"), ft.Icons.DESKTOP_WINDOWS_OUTLINED),
+                                       ("linux", tr("Linux apps"), ft.Icons.TERMINAL_OUTLINED)):
+            games = [g for g in installed if game_section(kinds.get(g[0])) == section]
+            if not games:
+                continue
+            rows.append(ft.Container(C.meta(heading.upper()), padding=ft.Padding(T.S2, T.S3, 0, T.px(2))))
             for pkg, title in games:
                 loc = self.game_locs.get(pkg) or self._game_location(pkg, title)
-                rows.append(self._location_row(loc, ft.Icons.SPORTS_ESPORTS_OUTLINED))
+                rows.append(self._location_row(loc, icon))
         rows.append(ft.Container(C.meta(tr("Advanced").upper()), padding=ft.Padding(T.S2, T.S3, 0, T.px(2))))
         home = {"id": "home", "label": tr("Home folder"), "path": self.app.target.frame.home, "android": "",
                 "shared": False}

@@ -107,3 +107,10 @@ def test_empty_drives_cached(monkeypatch):
     v._load_locations(None)
     v._load_locations(None)
     assert v.drives == [] and len(calls) == 1
+
+
+def test_installed_games_are_grouped_by_kind():
+    from frameport.ui.views.files import game_section
+
+    assert [game_section(k) for k in ("quest", None, "rift", "pcvr", "linux")] == \
+        ["quest", "quest", "pcvr", "pcvr", "linux"]
