@@ -148,6 +148,10 @@ HELP: dict[str, str] = _Translated({
     "frame_summary": "Quest ✓: Lepton is installed, so Quest games can run. PC VR ✓: Proton is installed, so PC VR "
                      "games can run on the Frame.",
     # ---- settings
+    "quest_buttons": "Quest games bind Touch controllers. SteamVR normally repeats Touch Y/B on three top "
+                     "buttons. Mirror gives the bottom and inner buttons X/A, the top and outer Y/B. Quest pair "
+                     "uses two diagonal buttons per hand. Requires the Frame runtime's controller extension; "
+                     "SteamVR custom bindings can override the choice. Changes apply at the next launch.",
     "data_folder": "FramePort's tools, library, artwork and your games' signing keys. Back it up: an update needs the "
                    "same key, or the game must be reinstalled and loses its saves.",
     "catalog": "Recipes tested on a real Frame: built in, fetched online and the ones you saved as known-good.",

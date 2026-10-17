@@ -51,6 +51,10 @@ SETTINGS = [
     ("controller_fix", "int", 1, "Report Touch controllers",
      "Reports Frame controllers as Oculus Touch and hides synthetic hand tracking. Set 0 for games that require hand "
      "tracking (for example Silhouette)."),
+    ("quest_buttons", "int", 0, "Controller buttons",
+     "Choose how the Frame's face buttons send Quest Touch inputs: 0 = SteamVR default, 1 = Mirror, "
+     "2 = Quest pair. Used at the next launch; SteamVR custom bindings can override it. Requires the runtime's "
+     "XR_VALVE_frame_controller_interaction extension. See docs/CONTROLLERS.md for the mapping."),
     ("swapchain_fix", "int", 1, "Swapchain format fallback",
      "Retry rejected GLES formats/MSAA with sRGB, samples=1."),
     ("cube_standin", "int", 1, "Stand-in cube swapchains",
@@ -327,6 +331,10 @@ UI: dict[str, dict] = {
     "controller_fix": dict(group="controllers", level="common", label="Use controllers",
                            help="Turn off only for games you play with your hands instead of controllers.",
                            control=("switch",)),
+    "quest_buttons": dict(group="controllers", level="common", label="Controller buttons",
+                          help="Choose which Quest Touch buttons the Frame's face buttons send. "
+                               "Takes effect at the next launch.",
+                          control=("choice", [(0, "SteamVR default"), (1, "Mirror"), (2, "Quest pair")])),
     "focus_hold_ms": dict(group="screens", level="advanced", label="Ignore focus dips up to", depends="focus_hold",
                           help="Longer for headsets that briefly think they're off your head.",
                           control=("slider", 500.0, 3000.0, 100.0, "{:.0f} ms")),
@@ -647,10 +655,11 @@ class AdapterSetting(Patch):
         pass  # collected by adapter_settings()
 
 
-def adapter_settings(recipe_patches: dict) -> dict:
+def adapter_settings(recipe_patches: dict, *, defaults: dict | None = None) -> dict:
     """Ordered settings for libframe_settings.so / settings.conf: base keys first, then enabled overrides in
-    selection order."""
+    selection order. Callers supply preference defaults; this helper never reads the library."""
     out = dict(BASE_SETTINGS)
+    out.update(defaults or {})
     for pid, params in recipe_patches.items():
         if pid.startswith("adapter."):
             key = pid.split(".", 1)[1]

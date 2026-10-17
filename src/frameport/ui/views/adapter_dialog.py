@@ -10,6 +10,7 @@ import flet as ft
 
 from ... import pipeline
 from ...core import library
+from ...core.controllers import QUEST_BUTTONS, effective_adapter_settings, quest_buttons_default
 from ...i18n import tr
 from ...patches import base
 from ...patches.settings import (
@@ -20,12 +21,12 @@ from ...patches.settings import (
     SETTINGS,
     UI,
     Foveation,
-    adapter_settings,
     foveation_options,
     foveation_preference,
 )
 from .. import components as C
 from .. import theme as T
+from ..controllers import diagram, diagram_source
 
 if TYPE_CHECKING:
     from ..app import FramePortApp
@@ -57,20 +58,23 @@ def relevant(analysis, key: str, value) -> bool:
 
 def recipe_values(g: dict) -> dict:
     vals = {key: default(key) for key in SPECS}
-    vals.update({k: _num(k, v) for k, v in adapter_settings(library.recipe_from_dict(g["recipe"]).patches).items()
-                 if k in SPECS})
+    patches = library.recipe_from_dict(g["recipe"]).patches
+    vals.update({k: _num(k, v) for k, v in effective_adapter_settings(patches).items() if k in SPECS})
     return vals
 
 
-def save_to_recipe(package: str, values: dict) -> None:
+def save_to_recipe(package: str, values: dict, *, inherit_quest_buttons: bool | None = None) -> None:
     """Adapter patches = the settings that differ from their defaults (BASE_SETTINGS are written anyway)."""
     g = library.game(package)
     r = library.recipe_from_dict(g["recipe"])
     before = {pid: dict(v or {}) for pid, v in r.patches.items() if pid.startswith("adapter.")}
+    if inherit_quest_buttons is None:
+        inherit_quest_buttons = (QUEST_BUTTONS not in r.patches
+                                 and values.get("quest_buttons") == quest_buttons_default())
     for key in SPECS:
         pid = f"adapter.{key}"
         v = _num(key, values.get(key, default(key)))
-        if v == default(key):
+        if (inherit_quest_buttons if key == "quest_buttons" else v == default(key)):
             r.patches.pop(pid, None)
             r.reasons.pop(pid, None)
         else:
@@ -111,11 +115,16 @@ def show_adapter_dialog(app: FramePortApp, package: str) -> None:
     _open(app, package, g, recipe_values(g))
 
 
-def _open(app: FramePortApp, package: str, g: dict | None, values: dict, foveation_values=None) -> None:
+def _open(app: FramePortApp, package: str, g: dict | None, values: dict, foveation_values=None,
+          inherit_quest_buttons: bool | None = None) -> None:
     analysis = library.analysis_from_dict(g["analysis"]) if g and g.get("analysis") else None
     suggested = recipe_values({"recipe": g["suggested"]}) if g and g.get("suggested") else \
         {key: default(key) for key in SPECS}
     values = dict(values)
+    global_mode = quest_buttons_default()
+    inherited = {"on": (g is not None and QUEST_BUTTONS not in (g.get("recipe") or {}).get("patches", {}))
+                 if inherit_quest_buttons is None else inherit_quest_buttons}
+    controller_preview = diagram(values["quest_buttons"])
     foveation = dict(foveation_values) if foveation_values is not None else foveation_preference(g or {})
     foveation_controls = []
     foveation_rows = {}
@@ -155,7 +164,13 @@ def _open(app: FramePortApp, package: str, g: dict | None, values: dict, foveati
                 or any(UI[k]["level"] == "advanced" and values[k] != default(k) for k in SPECS)}
 
     def set_value(key, v):
+        if key == "quest_buttons":
+            inherited["on"] = v == "global"
+            v = global_mode if inherited["on"] else v
         values[key] = _num(key, v)
+        if key == "quest_buttons":
+            controller_preview.src = diagram_source(values[key])
+            C.update(controller_preview)
         if key in readouts:
             readouts[key].value = UI[key]["control"][4].format(values[key])
             C.update(readouts[key])
@@ -177,7 +192,10 @@ def _open(app: FramePortApp, package: str, g: dict | None, values: dict, foveati
         choices = list(spec[0])
         if v not in [c for c, _ in choices]:
             choices.append((v, str(v)))  # a value set elsewhere (CLI, catalog) stays selectable
-        return C.dropdown(value=str(v), width=T.px(220),
+        if key == "quest_buttons" and g is not None:
+            name = next(label for mode, label in UI[key]["control"][1] if mode == global_mode)
+            choices.insert(0, ("global", tr("Use global default ({mode})").format(mode=tr(name))))
+        return C.dropdown(value="global" if key == "quest_buttons" and inherited["on"] else str(v), width=T.px(260),
                            options=[ft.DropdownOption(key=str(c), text=tr(label)) for c, label in choices],
                            on_select=lambda e: set_value(key, e.control.value))
 
@@ -186,10 +204,12 @@ def _open(app: FramePortApp, package: str, g: dict | None, values: dict, foveati
         label = tr(ui["label"]) if ui.get("label") else tr(base.get(f"adapter.{key}").title)
         help_text = tr(ui["help"]) if ui.get("help") else tr(base.get(f"adapter.{key}").description)
         controls[key] = control_for(key)
-        rows[key] = ft.Container(ft.Row([
+        line = ft.Row([
             ft.Column([C.body(label, T.TEXT, weight=ft.FontWeight.W_500), C.meta(help_text, T.TEXT_2)],
                       spacing=T.px(2), expand=True),
-            controls[key]], spacing=T.S4, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            controls[key]], spacing=T.S4, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+        rows[key] = ft.Container(ft.Column([line, controller_preview], spacing=T.S2)
+                                if key == "quest_buttons" else line,
             padding=ft.Padding(0, T.px(8), 0, T.px(8)))
         return rows[key]
 
@@ -225,7 +245,8 @@ def _open(app: FramePortApp, package: str, g: dict | None, values: dict, foveati
         for k in list(values):
             values[k] = suggested.get(k, default(k))
         app.page.pop_dialog()
-        _open(app, package, g, values, {})
+        recommended = (g.get("suggested") or {}).get("patches", {}) if g else {}
+        _open(app, package, g, values, {}, inherit_quest_buttons=g is not None and QUEST_BUTTONS not in recommended)
 
     before = dict(values)
 
@@ -237,7 +258,7 @@ def _open(app: FramePortApp, package: str, g: dict | None, values: dict, foveati
         app.page.pop_dialog()
         if g is not None:
             library.set_fields(package, foveation=dict(foveation))
-            save_to_recipe(package, values)
+            save_to_recipe(package, values, inherit_quest_buttons=inherited["on"])
         reinstall = any(UI[k].get("reinstall") and values[k] != before[k] for k in SPECS)
         installed = app.target is not None and (g is None or C.install_state(g, app.frame_info) in
                                                 ("installed", "outdated"))

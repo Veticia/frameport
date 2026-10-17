@@ -1,0 +1,150 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="750" viewBox="0 0 1080 750" role="img" aria-labelledby="title desc">
+<title id="title">Quest Touch buttons on Steam Frame controllers</title>
+<desc id="desc">Quest Touch reference and three Frame mappings: SteamVR default, Mirror, and Quest pair. Each button shows its physical input above and the Touch input it sends below. A dash means unbound. Left Touch buttons are X and Y; right are A and B.</desc>
+<rect width="1080" height="750" rx="16" fill="#0D0E12"/>
+<g font-family="DejaVu Sans,Arial,sans-serif">
+<text x="20" y="32" fill="#EDEEF2" font-size="24" font-weight="600" text-anchor="start">Controller buttons</text>
+<text x="20" y="57" fill="#A7ABB7" font-size="14" font-weight="400" text-anchor="start">Blue: X / A · Orange: Y / B or Menu · —: no Touch input</text>
+<g transform="translate(16 72)">
+<rect x="0" y="0" width="520" height="334" rx="12" fill="#16181E" stroke="#2A2D37"/>
+<text x="20" y="31" fill="#EDEEF2" font-size="20" font-weight="600" text-anchor="start">Quest Touch reference</text>
+<text x="20" y="55" fill="#A7ABB7" font-size="13" font-weight="400" text-anchor="start">Physical button above · Touch input below</text>
+<text x="140" y="84" fill="#A7ABB7" font-size="13" font-weight="400" text-anchor="middle">Left</text>
+<circle cx="117" cy="196" r="25" fill="#1D1F27" stroke="#3AA8FF" stroke-width="1.5"/>
+<text x="117" y="190" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">X</text>
+<text x="117" y="211" fill="#3AA8FF" font-size="19" font-weight="600" text-anchor="middle">X</text>
+<circle cx="163" cy="141" r="25" fill="#1D1F27" stroke="#FF8A1F" stroke-width="1.5"/>
+<text x="163" y="135" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">Y</text>
+<text x="163" y="156" fill="#FF8A1F" font-size="19" font-weight="600" text-anchor="middle">Y</text>
+<rect x="83" y="241" width="114" height="32" rx="8" fill="#1D1F27"/>
+<text x="140" y="262" fill="#A7ABB7" font-size="12" font-weight="400" text-anchor="middle">Menu: Menu</text>
+<text x="380" y="84" fill="#A7ABB7" font-size="13" font-weight="400" text-anchor="middle">Right</text>
+<circle cx="357" cy="196" r="25" fill="#1D1F27" stroke="#3AA8FF" stroke-width="1.5"/>
+<text x="357" y="190" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">A</text>
+<text x="357" y="211" fill="#3AA8FF" font-size="19" font-weight="600" text-anchor="middle">A</text>
+<circle cx="403" cy="141" r="25" fill="#1D1F27" stroke="#FF8A1F" stroke-width="1.5"/>
+<text x="403" y="135" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">B</text>
+<text x="403" y="156" fill="#FF8A1F" font-size="19" font-weight="600" text-anchor="middle">B</text>
+<rect x="323" y="241" width="114" height="32" rx="8" fill="#1D1F27"/>
+<text x="380" y="262" fill="#A7ABB7" font-size="12" font-weight="400" text-anchor="middle">Menu: —</text>
+<text x="260" y="306" fill="#A7ABB7" font-size="14" font-weight="400" text-anchor="middle">Lower: X / A · Upper: Y / B</text>
+</g>
+<g transform="translate(544 72)">
+<rect x="0" y="0" width="520" height="334" rx="12" fill="#16181E" stroke="#2A2D37"/>
+<text x="20" y="31" fill="#EDEEF2" font-size="20" font-weight="600" text-anchor="start">SteamVR default</text>
+<text x="20" y="55" fill="#A7ABB7" font-size="13" font-weight="400" text-anchor="start">Physical button above · Touch input below</text>
+<text x="140" y="84" fill="#A7ABB7" font-size="13" font-weight="400" text-anchor="middle">Left</text>
+<circle cx="140" cy="111" r="25" fill="#1D1F27" stroke="#FF8A1F" stroke-width="1.5"/>
+<text x="140" y="105" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">↑</text>
+<text x="140" y="126" fill="#FF8A1F" font-size="19" font-weight="600" text-anchor="middle">Y</text>
+<circle cx="90" cy="161" r="25" fill="#1D1F27" stroke="#FF8A1F" stroke-width="1.5"/>
+<text x="90" y="155" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">←</text>
+<text x="90" y="176" fill="#FF8A1F" font-size="19" font-weight="600" text-anchor="middle">Y</text>
+<circle cx="190" cy="161" r="25" fill="#1D1F27" stroke="#FF8A1F" stroke-width="1.5"/>
+<text x="190" y="155" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">→</text>
+<text x="190" y="176" fill="#FF8A1F" font-size="19" font-weight="600" text-anchor="middle">Y</text>
+<circle cx="140" cy="211" r="25" fill="#1D1F27" stroke="#3AA8FF" stroke-width="1.5"/>
+<text x="140" y="205" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">↓</text>
+<text x="140" y="226" fill="#3AA8FF" font-size="19" font-weight="600" text-anchor="middle">X</text>
+<rect x="83" y="241" width="114" height="32" rx="8" fill="#1D1F27"/>
+<text x="140" y="262" fill="#A7ABB7" font-size="12" font-weight="400" text-anchor="middle">View: Menu</text>
+<rect x="83" y="286" width="114" height="32" rx="8" fill="#1D1F27"/>
+<text x="140" y="307" fill="#A7ABB7" font-size="12" font-weight="400" text-anchor="middle">Bumper: —</text>
+<text x="380" y="84" fill="#A7ABB7" font-size="13" font-weight="400" text-anchor="middle">Right</text>
+<circle cx="380" cy="111" r="25" fill="#1D1F27" stroke="#FF8A1F" stroke-width="1.5"/>
+<text x="380" y="105" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">Y</text>
+<text x="380" y="126" fill="#FF8A1F" font-size="19" font-weight="600" text-anchor="middle">B</text>
+<circle cx="330" cy="161" r="25" fill="#1D1F27" stroke="#FF8A1F" stroke-width="1.5"/>
+<text x="330" y="155" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">X</text>
+<text x="330" y="176" fill="#FF8A1F" font-size="19" font-weight="600" text-anchor="middle">B</text>
+<circle cx="430" cy="161" r="25" fill="#1D1F27" stroke="#FF8A1F" stroke-width="1.5"/>
+<text x="430" y="155" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">B</text>
+<text x="430" y="176" fill="#FF8A1F" font-size="19" font-weight="600" text-anchor="middle">B</text>
+<circle cx="380" cy="211" r="25" fill="#1D1F27" stroke="#3AA8FF" stroke-width="1.5"/>
+<text x="380" y="205" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">A</text>
+<text x="380" y="226" fill="#3AA8FF" font-size="19" font-weight="600" text-anchor="middle">A</text>
+<rect x="323" y="241" width="114" height="32" rx="8" fill="#1D1F27"/>
+<text x="380" y="262" fill="#A7ABB7" font-size="12" font-weight="400" text-anchor="middle">Menu: —</text>
+<rect x="323" y="286" width="114" height="32" rx="8" fill="#1D1F27"/>
+<text x="380" y="307" fill="#A7ABB7" font-size="12" font-weight="400" text-anchor="middle">Bumper: —</text>
+</g>
+<g transform="translate(16 414)">
+<rect x="0" y="0" width="520" height="334" rx="12" fill="#16181E" stroke="#2A2D37"/>
+<text x="20" y="31" fill="#EDEEF2" font-size="20" font-weight="600" text-anchor="start">Mirror</text>
+<text x="20" y="55" fill="#A7ABB7" font-size="13" font-weight="400" text-anchor="start">Physical button above · Touch input below</text>
+<text x="140" y="84" fill="#A7ABB7" font-size="13" font-weight="400" text-anchor="middle">Left</text>
+<circle cx="140" cy="111" r="25" fill="#1D1F27" stroke="#FF8A1F" stroke-width="1.5"/>
+<text x="140" y="105" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">↑</text>
+<text x="140" y="126" fill="#FF8A1F" font-size="19" font-weight="600" text-anchor="middle">Y</text>
+<circle cx="90" cy="161" r="25" fill="#1D1F27" stroke="#FF8A1F" stroke-width="1.5"/>
+<text x="90" y="155" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">←</text>
+<text x="90" y="176" fill="#FF8A1F" font-size="19" font-weight="600" text-anchor="middle">Y</text>
+<circle cx="190" cy="161" r="25" fill="#1D1F27" stroke="#3AA8FF" stroke-width="1.5"/>
+<text x="190" y="155" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">→</text>
+<text x="190" y="176" fill="#3AA8FF" font-size="19" font-weight="600" text-anchor="middle">X</text>
+<circle cx="140" cy="211" r="25" fill="#1D1F27" stroke="#3AA8FF" stroke-width="1.5"/>
+<text x="140" y="205" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">↓</text>
+<text x="140" y="226" fill="#3AA8FF" font-size="19" font-weight="600" text-anchor="middle">X</text>
+<rect x="83" y="241" width="114" height="32" rx="8" fill="#1D1F27"/>
+<text x="140" y="262" fill="#A7ABB7" font-size="12" font-weight="400" text-anchor="middle">View: Menu</text>
+<rect x="83" y="286" width="114" height="32" rx="8" fill="#1D1F27"/>
+<text x="140" y="307" fill="#A7ABB7" font-size="12" font-weight="400" text-anchor="middle">Bumper: —</text>
+<text x="380" y="84" fill="#A7ABB7" font-size="13" font-weight="400" text-anchor="middle">Right</text>
+<circle cx="380" cy="111" r="25" fill="#1D1F27" stroke="#FF8A1F" stroke-width="1.5"/>
+<text x="380" y="105" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">Y</text>
+<text x="380" y="126" fill="#FF8A1F" font-size="19" font-weight="600" text-anchor="middle">B</text>
+<circle cx="330" cy="161" r="25" fill="#1D1F27" stroke="#3AA8FF" stroke-width="1.5"/>
+<text x="330" y="155" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">X</text>
+<text x="330" y="176" fill="#3AA8FF" font-size="19" font-weight="600" text-anchor="middle">A</text>
+<circle cx="430" cy="161" r="25" fill="#1D1F27" stroke="#FF8A1F" stroke-width="1.5"/>
+<text x="430" y="155" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">B</text>
+<text x="430" y="176" fill="#FF8A1F" font-size="19" font-weight="600" text-anchor="middle">B</text>
+<circle cx="380" cy="211" r="25" fill="#1D1F27" stroke="#3AA8FF" stroke-width="1.5"/>
+<text x="380" y="205" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">A</text>
+<text x="380" y="226" fill="#3AA8FF" font-size="19" font-weight="600" text-anchor="middle">A</text>
+<rect x="323" y="241" width="114" height="32" rx="8" fill="#1D1F27"/>
+<text x="380" y="262" fill="#A7ABB7" font-size="12" font-weight="400" text-anchor="middle">Menu: —</text>
+<rect x="323" y="286" width="114" height="32" rx="8" fill="#1D1F27"/>
+<text x="380" y="307" fill="#A7ABB7" font-size="12" font-weight="400" text-anchor="middle">Bumper: —</text>
+</g>
+<g transform="translate(544 414)">
+<rect x="0" y="0" width="520" height="334" rx="12" fill="#16181E" stroke="#2A2D37"/>
+<text x="20" y="31" fill="#EDEEF2" font-size="20" font-weight="600" text-anchor="start">Quest pair</text>
+<text x="20" y="55" fill="#A7ABB7" font-size="13" font-weight="400" text-anchor="start">Physical button above · Touch input below</text>
+<text x="140" y="84" fill="#A7ABB7" font-size="13" font-weight="400" text-anchor="middle">Left</text>
+<circle cx="140" cy="111" r="25" fill="#1D1F27" stroke="#868A96" stroke-width="1.5"/>
+<text x="140" y="105" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">↑</text>
+<text x="140" y="126" fill="#868A96" font-size="19" font-weight="600" text-anchor="middle">—</text>
+<circle cx="90" cy="161" r="25" fill="#1D1F27" stroke="#FF8A1F" stroke-width="1.5"/>
+<text x="90" y="155" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">←</text>
+<text x="90" y="176" fill="#FF8A1F" font-size="19" font-weight="600" text-anchor="middle">Y</text>
+<circle cx="190" cy="161" r="25" fill="#1D1F27" stroke="#868A96" stroke-width="1.5"/>
+<text x="190" y="155" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">→</text>
+<text x="190" y="176" fill="#868A96" font-size="19" font-weight="600" text-anchor="middle">—</text>
+<circle cx="140" cy="211" r="25" fill="#1D1F27" stroke="#3AA8FF" stroke-width="1.5"/>
+<text x="140" y="205" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">↓</text>
+<text x="140" y="226" fill="#3AA8FF" font-size="19" font-weight="600" text-anchor="middle">X</text>
+<rect x="83" y="241" width="114" height="32" rx="8" fill="#1D1F27"/>
+<text x="140" y="262" fill="#A7ABB7" font-size="12" font-weight="400" text-anchor="middle">View: Menu</text>
+<rect x="83" y="286" width="114" height="32" rx="8" fill="#1D1F27"/>
+<text x="140" y="307" fill="#A7ABB7" font-size="12" font-weight="400" text-anchor="middle">Bumper: —</text>
+<text x="380" y="84" fill="#A7ABB7" font-size="13" font-weight="400" text-anchor="middle">Right</text>
+<circle cx="380" cy="111" r="25" fill="#1D1F27" stroke="#868A96" stroke-width="1.5"/>
+<text x="380" y="105" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">Y</text>
+<text x="380" y="126" fill="#868A96" font-size="19" font-weight="600" text-anchor="middle">—</text>
+<circle cx="330" cy="161" r="25" fill="#1D1F27" stroke="#868A96" stroke-width="1.5"/>
+<text x="330" y="155" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">X</text>
+<text x="330" y="176" fill="#868A96" font-size="19" font-weight="600" text-anchor="middle">—</text>
+<circle cx="430" cy="161" r="25" fill="#1D1F27" stroke="#FF8A1F" stroke-width="1.5"/>
+<text x="430" y="155" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">B</text>
+<text x="430" y="176" fill="#FF8A1F" font-size="19" font-weight="600" text-anchor="middle">B</text>
+<circle cx="380" cy="211" r="25" fill="#1D1F27" stroke="#3AA8FF" stroke-width="1.5"/>
+<text x="380" y="205" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">A</text>
+<text x="380" y="226" fill="#3AA8FF" font-size="19" font-weight="600" text-anchor="middle">A</text>
+<rect x="323" y="241" width="114" height="32" rx="8" fill="#1D1F27"/>
+<text x="380" y="262" fill="#A7ABB7" font-size="12" font-weight="400" text-anchor="middle">Menu: —</text>
+<rect x="323" y="286" width="114" height="32" rx="8" fill="#1D1F27"/>
+<text x="380" y="307" fill="#A7ABB7" font-size="12" font-weight="400" text-anchor="middle">Bumper: —</text>
+</g>
+</g>
+</svg>

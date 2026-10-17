@@ -54,7 +54,7 @@ def test_adapter_and_launcher(tmp_path, quest_manifest):
         assert z.read("lib/arm64-v8a/libopenxr_loader_original.so") == b"\x7fELF-original-loader"
         assert z.read("lib/arm64-v8a/libopenxr_loader_generic.so").startswith(b"\x7fELF")
         assert (z.read("lib/arm64-v8a/libframe_settings.so")
-                == b"scale=1.0\nfoveation_fix=1\ncontroller_fix=1\nscene_emul=1\n")
+                == b"scale=1.0\nfoveation_fix=1\ncontroller_fix=1\nquest_buttons=0\nscene_emul=1\n")
         assert names.count("lib/arm64-v8a/libopenxr_loader_generic.so") == 1
 
 
