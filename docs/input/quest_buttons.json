@@ -1,0 +1,45 @@
+{
+  "_comment": "Single source of the quest_buttons mapping (FrameBridge adapter setting). Keys are Touch input names under /user/hand/<hand>/input/, values the Frame Controller inputs the binding is also suggested for. A button entry covers its click and touch components; menu covers click only. native/adapter's table, tests/test_quest_buttons.py and scripts/controller_diagram.py follow this file. See docs/input/QUEST_BUTTONS.md.",
+  "extension": "XR_VALVE_frame_controller_interaction",
+  "touch_profile": "/interaction_profiles/oculus/touch_controller",
+  "frame_profile": "/interaction_profiles/valve/frame_controller_valve",
+  "source": "https://partner.steamgames.com/doc/steamhardware/steamframe/input",
+  "common": {
+    "squeeze/value": ["squeeze/value"],
+    "trigger/value": ["trigger/value"],
+    "trigger/touch": ["trigger/touch"],
+    "thumbstick": ["thumbstick"],
+    "thumbstick/x": ["thumbstick/x"],
+    "thumbstick/y": ["thumbstick/y"],
+    "thumbstick/click": ["thumbstick/click"],
+    "thumbstick/touch": ["thumbstick/touch"],
+    "grip/pose": ["grip/pose"],
+    "aim/pose": ["aim/pose"]
+  },
+  "outputs": {"haptic": ["haptic"]},
+  "dropped": ["thumbrest/touch", "system/click"],
+  "buttons": {
+    "left": ["x", "y"],
+    "right": ["a", "b"]
+  },
+  "modes": {
+    "0": {
+      "name": "SteamVR default",
+      "note": "FrameBridge suggests nothing for the Frame profile; SteamVR remaps Touch itself (documented by Valve). Listed for the diagram only.",
+      "left": {"x": ["dpad_down"], "y": ["dpad_left", "dpad_up", "dpad_right"], "menu": ["view"]},
+      "right": {"a": ["a"], "b": ["x", "y", "b"]}
+    },
+    "1": {
+      "name": "Mirror",
+      "note": "Every face button works; the left controller mirrors the right: bottom + inner = X/A, top + outer = Y/B.",
+      "left": {"x": ["dpad_down", "dpad_right"], "y": ["dpad_up", "dpad_left"], "menu": ["view"]},
+      "right": {"a": ["a", "x"], "b": ["b", "y"]}
+    },
+    "2": {
+      "name": "Quest pair",
+      "note": "Two buttons per controller, placed diagonally like Quest Touch; the other face buttons do nothing.",
+      "left": {"x": ["dpad_down"], "y": ["dpad_left"], "menu": ["view"]},
+      "right": {"a": ["a"], "b": ["b"]}
+    }
+  }
+}
