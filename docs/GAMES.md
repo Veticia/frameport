@@ -147,6 +147,7 @@ Generated from [catalog/games](../catalog/games) by `scripts/compat_list.py`.
 | Time Crisis VR (Experimental) | Quest | ✅ Works |  |
 | Totally Baseball | Quest | ✅ Works |  |
 | Toy Master | Quest | ✅ Works |  |
+| ToyTrains | Quest | ✅ Works |  |
 | TRIANGLE STRATEGY | Quest | ✅ Works |  |
 | Under Cover | Quest | ✅ Works |  |
 | Vacation Simulator | Quest | ✅ Works |  |
