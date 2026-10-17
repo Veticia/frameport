@@ -135,6 +135,7 @@ Generated from [catalog/games](../catalog/games) by `scripts/compat_list.py`.
 | SUPERHOT VR | PC VR | ✅ Works |  |
 | SUPERHOT VR | Quest | ✅ Works |  |
 | SynthRiders | Quest | ✅ Works |  |
+| Table Troopers | Quest | ✅ Works |  |
 | Taskmaster | Quest | ✅ Works |  |
 | Tea For God | Quest | ✅ Works |  |
 | TetrisEffect | Quest | ✅ Works |  |
