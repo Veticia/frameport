@@ -64,6 +64,9 @@ def test_other_mmap_calls_are_left_alone(tmp_path, kwargs):
     ctx = context(tmp_path, data)
     with ctx.ws:
         assert not nr.UnrealNoReserve().apply(ctx)
+        # nothing to rewrite is not a failed build (GitHub #393: Lies Beneath failed "0 rewritten, 0 left")
+        name, ok, detail = nr.UnrealNoReserve().validate(ctx)[0]
+        assert ok and detail == "none in this build"
 
 
 def test_call_to_another_function_is_left_alone(monkeypatch):

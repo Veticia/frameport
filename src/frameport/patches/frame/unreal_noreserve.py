@@ -152,8 +152,9 @@ class UnrealNoReserve(Patch):
         if not lib or ws.abi != "arm64-v8a":
             return []
         todo, done = mmap_sites(ws.read_lib(lib))
-        return [("Unreal memory reservations use MAP_NORESERVE", bool(done) and not todo,
-                 f"{len(done)} rewritten, {len(todo)} left")]
+        # nothing to rewrite (an engine build without these reservations, e.g. Lies Beneath, GitHub #393) passes
+        return [("Unreal memory reservations use MAP_NORESERVE", not todo,
+                 f"{len(done)} rewritten, {len(todo)} left" if todo or done else "none in this build")]
 
 
 register(UnrealNoReserve)
