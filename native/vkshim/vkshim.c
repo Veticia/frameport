@@ -106,6 +106,8 @@ static int validation;       // vk_validation: add Khronos' validation layer (bu
 static int hide_fdm;         // vk_hide_fdm: the game doesn't see VK_EXT_fragment_density_map(2)
 static int want_dump;        // vk_shader_dump: write the game's SPIR-V modules to files/fp_vk_shaders/
 static int want_pipeline_log;  // vk_pipeline_log: log failing pipeline creations (pipeline_log.h)
+static int no_fossilize;     // vk_no_fossilize: take Lepton's Fossilize layer out of GraphicsEnv's list
+static int pipeline_fallback;  // vk_pipeline_fallback: retry a failed graphics pipeline with blank shaders
 static char app_files[400];  // /sdcard/Android/data/<package>/files
 
 static void read_settings(const char *path) {
@@ -119,6 +121,8 @@ static void read_settings(const char *path) {
         if (!strncmp(line, "vk_spec_fixes=", 14)) spec_fixes = atoi(line + 14) != 0;
         if (!strncmp(line, "vk_shader_dump=", 15)) want_dump = atoi(line + 15) != 0;
         if (!strncmp(line, "vk_pipeline_log=", 16)) want_pipeline_log = atoi(line + 16) != 0;
+        if (!strncmp(line, "vk_no_fossilize=", 16)) no_fossilize = atoi(line + 16) != 0;
+        if (!strncmp(line, "vk_pipeline_fallback=", 21)) pipeline_fallback = atoi(line + 21) != 0;
         if (!strncmp(line, "vk_query_slots=", 15)) {
             int v = atoi(line + 15);
             query_slots = v == 1 ? 2 : v >= 2 && v <= 4 ? v : 1;  // 1 = on (the settings dialog's switch) = 2 slots
@@ -183,6 +187,52 @@ static uint32_t *fixed_shader(const uint32_t *code, size_t size, size_t *out_siz
     return NULL;
 }
 
+// Android's loader reads GraphicsEnv's debug layer list (Lepton's gpu_debug_layers) at each vkCreateInstance; this
+// takes one layer out of it (same libgraphicsenv calls as native/zinkfix, which adds its own layer)
+struct cxx_string { size_t cap; size_t size; char *data; };
+#define GE_INSTANCE "_ZN7android11GraphicsEnv11getInstanceEv"
+#define GE_GET_LAYERS "_ZN7android11GraphicsEnv14getDebugLayersEv"
+#define GE_SET_LAYERS "_ZN7android11GraphicsEnv14setDebugLayersENSt3__112basic_stringIcNS1_11char_traitsIcEENS1_9allocatorIcEEEE"
+
+static const char *cxx_chars(const void *s, size_t *len) {
+    const unsigned char *b = s;
+    if (!b) { *len = 0; return NULL; }
+    if (b[0] & 1) {
+        const struct cxx_string *l = s;
+        *len = l->size;
+        return l->data;
+    }
+    *len = b[0] >> 1;
+    return (const char *)b + 1;
+}
+
+static void drop_debug_layer(void *vk, const char *name) {
+    void *(*get_instance)(void) = (void *(*)(void))dlsym(vk, GE_INSTANCE);
+    const void *(*get_layers)(void *) = (const void *(*)(void *))dlsym(vk, GE_GET_LAYERS);
+    void (*set_layers)(void *, struct cxx_string *) = (void (*)(void *, struct cxx_string *))dlsym(vk, GE_SET_LAYERS);
+    void *env = get_instance && get_layers && set_layers ? get_instance() : NULL;
+    size_t len = 0;
+    const char *cur = env ? cxx_chars(get_layers(env), &len) : NULL;
+    if (!env || len > 4096 || (len && !cur)) {
+        LOG("vk shim: can't change the debug layer list (GraphicsEnv not found)");
+        return;
+    }
+    char old[4097], *out = malloc(len + 16);
+    if (!out) return;
+    memcpy(old, cur ? cur : "", len);
+    old[len] = 0;
+    size_t n = 0;
+    for (char *save = NULL, *tok = strtok_r(old, ":", &save); tok; tok = strtok_r(NULL, ":", &save)) {
+        if (!strcmp(tok, name)) continue;
+        n += (size_t)sprintf(out + n, "%s%s", n ? ":" : "", tok);
+    }
+    struct cxx_string tmp = {((len + 16) & ~(size_t)15) | 1, n, out};
+    set_layers(env, &tmp);
+    if ((tmp.cap & 1) && tmp.data == out) free(out);
+    const char *now = cxx_chars(get_layers(env), &len);
+    LOG("vk shim: debug layers now \"%.*s\" (without %s)", (int)len, now ? now : "", name);
+}
+
 static void init(void) {
     read_all_settings();
     if (nfixes) LOG("vk shim: %d shader fix(es) configured", nfixes);
@@ -194,6 +244,7 @@ static void init(void) {
         pl_on = 1;
         LOG("vk shim: logging failed pipeline creations and sampler Y'CbCr conversions");
     }
+    if (pipeline_fallback) LOG("vk shim: failed graphics pipelines get blank shaders");
     if (spec_fixes) LOG("vk shim: Vulkan spec fixes on (depth images can be cleared, no depth resolve in shader-resolve "
                         "subpasses)");
     real_vk = dlopen("libvulkan.so", RTLD_NOW | RTLD_LOCAL);
@@ -202,8 +253,16 @@ static void init(void) {
         real_gdpa = (PFN_vkGetDeviceProcAddr)dlsym(real_vk, "vkGetDeviceProcAddr");
         real_rp2_trampoline = (PFN_vkCreateRenderPass2)dlsym(real_vk, "vkCreateRenderPass2");
         real_csm_trampoline = (PFN_vkCreateShaderModule)dlsym(real_vk, "vkCreateShaderModule");
+        if (no_fossilize) drop_debug_layer(real_vk, "VK_LAYER_fossilize");
     }
     LOG("vk shim: libvulkan.so %s", real_gipa && real_gdpa ? "OK" : "MISSING");
+}
+
+// The engine's first vkCreateInstance can come from another thread before any wrapped call runs init(), so the layer
+// list is changed when the engine loads this library
+__attribute__((constructor)) static void early_init(void) {
+    read_all_settings();
+    if (no_fossilize) pthread_once(&once, init);
 }
 
 // ---------------------------------------------------------------- pointer checks
@@ -868,13 +927,94 @@ static VKAPI_ATTR void VKAPI_CALL cmd_pipeline_barrier2_khr(VkCommandBuffer cb, 
 
 // ---------------------------------------------------------------- pipeline log (vk_pipeline_log, diagnostics)
 
+// GitHub #349: Turnip fails some of Transformers' pipelines (-1 = its "ir3 variant failed"), and Unreal treats a
+// failed pipeline as fatal. A failed pipeline is retried with a fragment shader that writes zero to location 0, then
+// with a vertex shader that only writes gl_Position as well: the draw then shows nothing instead of ending the game.
+static const uint32_t FALLBACK_FS[] = {
+    0x07230203, 0x00010000, 0x00070000, 0x0000000b, 0x00000000, 0x00020011, 0x00000001, 0x0003000e,
+    0x00000000, 0x00000001, 0x0006000f, 0x00000004, 0x00000001, 0x6e69616d, 0x00000000, 0x00000002,
+    0x00030010, 0x00000001, 0x00000007, 0x00040047, 0x00000002, 0x0000001e, 0x00000000, 0x00030016,
+    0x00000003, 0x00000020, 0x00040017, 0x00000004, 0x00000003, 0x00000004, 0x0004002b, 0x00000003,
+    0x00000005, 0x00000000, 0x0007002c, 0x00000004, 0x00000006, 0x00000005, 0x00000005, 0x00000005,
+    0x00000005, 0x00040020, 0x00000007, 0x00000003, 0x00000004, 0x00020013, 0x00000008, 0x00030021,
+    0x00000009, 0x00000008, 0x0004003b, 0x00000007, 0x00000002, 0x00000003, 0x00050036, 0x00000008,
+    0x00000001, 0x00000000, 0x00000009, 0x000200f8, 0x0000000a, 0x0003003e, 0x00000002, 0x00000006,
+    0x000100fd, 0x00010038,
+};
+static const uint32_t FALLBACK_VS[] = {
+    0x07230203, 0x00010000, 0x00070000, 0x0000000c, 0x00000000, 0x00020011, 0x00000001, 0x0003000e,
+    0x00000000, 0x00000001, 0x0006000f, 0x00000000, 0x00000001, 0x6e69616d, 0x00000000, 0x00000002,
+    0x00040047, 0x00000002, 0x0000000b, 0x00000000, 0x00030016, 0x00000003, 0x00000020, 0x00040017,
+    0x00000004, 0x00000003, 0x00000004, 0x0004002b, 0x00000003, 0x00000005, 0x00000000, 0x0004002b,
+    0x00000003, 0x00000006, 0x3f800000, 0x0007002c, 0x00000004, 0x00000007, 0x00000005, 0x00000005,
+    0x00000005, 0x00000006, 0x00040020, 0x00000008, 0x00000003, 0x00000004, 0x00020013, 0x00000009,
+    0x00030021, 0x0000000a, 0x00000009, 0x0004003b, 0x00000008, 0x00000002, 0x00000003, 0x00050036,
+    0x00000009, 0x00000001, 0x00000000, 0x0000000a, 0x000200f8, 0x0000000b, 0x0003003e, 0x00000002,
+    0x00000007, 0x000100fd, 0x00010038,
+};
+
+static pthread_mutex_t fallback_lock = PTHREAD_MUTEX_INITIALIZER;
+static VkDevice fallback_device;
+static VkShaderModule fallback_module[2];  // [0] fragment, [1] vertex; kept for the device's lifetime
+
+static VkShaderModule fallback_shader(VkDevice device, int vertex) {
+    pthread_mutex_lock(&fallback_lock);
+    if (fallback_device != device) {
+        fallback_device = device;  // one device per game in practice; a new one gets new modules
+        fallback_module[0] = fallback_module[1] = VK_NULL_HANDLE;
+    }
+    if (!fallback_module[vertex]) {
+        PFN_vkCreateShaderModule csm = (PFN_vkCreateShaderModule)any_fn(device, FN_CSM);
+        VkShaderModuleCreateInfo mi = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, NULL, 0,
+                                       vertex ? sizeof FALLBACK_VS : sizeof FALLBACK_FS,
+                                       vertex ? FALLBACK_VS : FALLBACK_FS};
+        if (csm && csm(device, &mi, NULL, &fallback_module[vertex]) != VK_SUCCESS) fallback_module[vertex] = VK_NULL_HANDLE;
+    }
+    VkShaderModule m = fallback_module[vertex];
+    pthread_mutex_unlock(&fallback_lock);
+    return m;
+}
+
+static VkResult fallback_pipeline(VkDevice device, VkPipelineCache cache, const VkGraphicsPipelineCreateInfo *ci,
+                                  const VkAllocationCallbacks *alloc, VkPipeline *out,
+                                  PFN_vkCreateGraphicsPipelines real, VkResult failed) {
+    static int logged;
+    VkPipelineShaderStageCreateInfo st[6];
+    memcpy(st, ci->pStages, sizeof *st * ci->stageCount);
+    VkGraphicsPipelineCreateInfo p = *ci;
+    p.pStages = st;
+    VkResult r = failed;
+    for (int pass = 0; pass < 2 && r < 0; pass++) {  // 0: fragment shader only, 1: vertex shader too
+        int replaced = 0;
+        for (uint32_t s = 0; s < p.stageCount; s++) {
+            int vertex = st[s].stage == VK_SHADER_STAGE_VERTEX_BIT;
+            if (st[s].stage != VK_SHADER_STAGE_FRAGMENT_BIT && !(pass && vertex)) continue;
+            VkShaderModule m = fallback_shader(device, vertex);
+            if (!m) continue;
+            st[s].pNext = NULL;
+            st[s].flags = 0;
+            st[s].module = m;
+            st[s].pName = "main";
+            st[s].pSpecializationInfo = NULL;
+            replaced++;
+        }
+        if (!replaced) continue;
+        r = real(device, cache, 1, &p, alloc, out);
+        if (logged++ < 20)
+            LOG("vk shim: failed pipeline (%d) retried with a blank %s shader: %d", failed,
+                pass ? "vertex + fragment" : "fragment", r);
+    }
+    return r < 0 ? failed : r;
+}
+
 static VKAPI_ATTR VkResult VKAPI_CALL create_graphics_pipelines(VkDevice device, VkPipelineCache cache, uint32_t count,
                                                                const VkGraphicsPipelineCreateInfo *ci,
                                                                const VkAllocationCallbacks *alloc, VkPipeline *out) {
     PFN_vkCreateGraphicsPipelines real = (PFN_vkCreateGraphicsPipelines)any_fn(device, FN_CGP);
     if (!real) return VK_ERROR_INITIALIZATION_FAILED;
     VkResult r = real(device, cache, count, ci, alloc, out);
-    pl_graphics(count, ci, out, r);
+    if (pl_on) pl_graphics(count, ci, out, r);
+    if (pipeline_fallback && r < 0 && count == 1 && ci && ci->pStages && ci->stageCount <= 6) r = fallback_pipeline(device, cache, ci, alloc, out, real, r);
     return r;
 }
 
@@ -950,7 +1090,7 @@ static PFN_vkVoidFunction wrap(const char *name) {
     case FN_EDEP: return hide_fdm ? (PFN_vkVoidFunction)vkEnumerateDeviceExtensionProperties : NULL;
     case FN_CDEV: return hide_fdm || spec_fixes ? (PFN_vkVoidFunction)vkCreateDevice : NULL;
     case FN_CIV: return spec_fixes ? (PFN_vkVoidFunction)create_image_view : NULL;
-    case FN_CGP: return pl_on ? (PFN_vkVoidFunction)create_graphics_pipelines : NULL;
+    case FN_CGP: return pl_on || pipeline_fallback ? (PFN_vkVoidFunction)create_graphics_pipelines : NULL;
     case FN_CCP: return pl_on ? (PFN_vkVoidFunction)create_compute_pipelines : NULL;
     case FN_CSAMP: return pl_on ? (PFN_vkVoidFunction)create_sampler : NULL;
     case FN_CDSL: return pl_on ? (PFN_vkVoidFunction)create_set_layout : NULL;

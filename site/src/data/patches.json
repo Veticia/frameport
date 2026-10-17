@@ -324,6 +324,16 @@
   "title": "Hide Vulkan foveation",
   "group": "Game settings"
  },
+ "adapter.vk_no_fossilize": {
+  "anchor": "adapter-vk_no_fossilize",
+  "title": "Without Steam's shader cache layer",
+  "group": "Game settings"
+ },
+ "adapter.vk_pipeline_fallback": {
+  "anchor": "adapter-vk_pipeline_fallback",
+  "title": "Skip refused graphics",
+  "group": "Game settings"
+ },
  "adapter.vk_pipeline_log": {
   "anchor": "adapter-vk_pipeline_log",
   "title": "Vulkan pipeline failures (log)",

@@ -718,3 +718,20 @@ can be enabled and persist after restart. Check actual runtime refresh/pacing se
 identity alone does not implement refresh-rate support. Rebuild with Quest 2 for the control: original `Oculus Quest2`,
 original Quest 2 UUID, type 9 if logged, and previous option visibility. Also smoke-test a Unity OVRPlugin game
 with the default Quest 3 choice for regressions. No device access was used during implementation.
+## Vulkan pipelines refused: Fossilize and Turnip (Transformers, #349)
+
+Transformers Beyond Reality: Redux (Unreal, Vulkan) ended its first frames with Unreal's "Shader compilation failures
+are Fatal." (2026-10-17, headless on the dev Frame). `vk_pipeline_log=1` showed every graphics pipeline failing in
+pairs: the precache attempt with `VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT` (flags 0x100) answers
+`1000297000` (= VK_PIPELINE_COMPILE_REQUIRED, normal), the real compile answers `-1` (VK_ERROR_OUT_OF_HOST_MEMORY)
+in the same millisecond, and the shim never logged a single success. The dumped SPIR-V was valid (spirv-val), one
+module a constant-colour fragment shader. Ruled out in one run each: the app's VkPipelineCache, its
+VkAllocationCallbacks (retry without either/both), Valve's VALVE_rpo/VALVE_fdm_injection (`device.foveation: off`).
+Khronos' validation layer added a crash of its own (null deref in its vkCreateRenderPass2 on the game's create info,
+the shim changed nothing there): don't use it for this game. Removing `VK_LAYER_fossilize` from GraphicsEnv's debug
+layer list (`android::GraphicsEnv::setDebugLayers`, as `native/zinkfix` adds its layer) made the pipelines compile:
+360 modules instead of 10, frames submitted. Two Fossilize instances are still created by other threads before the
+engine loads the shim; they aren't the renderer's. About six pipelines with the game's multiview vertex shader
+(module 12944, ViewIndex) still fail in Turnip; a blank fragment shader alone doesn't help, blank vertex + fragment
+does. Settings `vk_no_fossilize` + `vk_pipeline_fallback` (catalog entry): headless RUNNING after 72 s at 72 fps.
+Headset check pending (some objects may be missing).

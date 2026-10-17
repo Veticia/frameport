@@ -2,7 +2,7 @@
 
 # Patches
 
-Every patch and game setting FramePort knows: 182 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
+Every patch and game setting FramePort knows: 184 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
 
 Each entry says what the patch does, whether it changes the APK or only the install, when FramePort suggests it, its options, the catalog games whose recipe names it and the launch-test signatures that suggest it. Patches that are on by default are on for every game, so the catalog rarely names them.
 
@@ -12,7 +12,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 
 - [Patches from OVRPort](#group-overport) (25)
 - [Steam Frame patches](#group-frame) (61)
-- [Game settings](#group-adapter) (73)
+- [Game settings](#group-adapter) (75)
 - [Files and settings on the Frame](#group-device) (10)
 - [PC VR (Proton and Revive)](#group-pcvr) (13)
 
@@ -171,6 +171,8 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Retry refused picture formats](#adapter-swapchain_fix) | `adapter.swapchain_fix` | Game settings |  |
 | [Steady controller input after focus](#adapter-sync_guard) | `adapter.sync_guard` | Game settings | 3 |
 | [Hide Vulkan foveation](#adapter-vk_hide_fdm) | `adapter.vk_hide_fdm` | Game settings | 1 |
+| [Without Steam's shader cache layer](#adapter-vk_no_fossilize) | `adapter.vk_no_fossilize` | Game settings | 1 |
+| [Skip refused graphics](#adapter-vk_pipeline_fallback) | `adapter.vk_pipeline_fallback` | Game settings | 1 |
 | [Vulkan pipeline failures (log)](#adapter-vk_pipeline_log) | `adapter.vk_pipeline_log` | Game settings |  |
 | [Stop objects popping in and out](#adapter-vk_query_slots) | `adapter.vk_query_slots` | Game settings |  |
 | [Vulkan shader dump (diagnostics)](#adapter-vk_shader_dump) | `adapter.vk_shader_dump` | Game settings |  |
@@ -2285,6 +2287,40 @@ For Unreal Engine 5 games that crash on the Frame (for example Metro Awakening).
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
 
 > Vulkan shim (frame.vk_sanitize): the game doesn't see VK_EXT_fragment_density_map(2). Unreal Engine 5 turns on fragment-density-map foveation when the driver offers it and expects the density map from the headset, which the Frame doesn't provide: image views and barriers for a missing image, then a crash in the Frame's Vulkan driver (for example Metro Awakening). Valve's own foveation layer isn't affected.
+
+### <a id="adapter-vk_no_fossilize"></a>Without Steam's shader cache layer
+
+Some games can't create any graphics with it (for example Transformers Beyond Reality).
+
+- `adapter.vk_no_fossilize`
+- **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
+- **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
+- **Options:**
+  - Value: int, default `0`.
+  - Game settings → Troubleshooting → "Without Steam's shader cache layer" (advanced).
+- **Catalog games (1):** Transformers Beyond Reality: Redux.
+- **Suggested by launch-test signatures:**
+  - `vulkan-pipeline-refused` (fatal): The Frame's graphics driver refused to build some of the game's shaders, and Unreal ends the game at the first one (for example Transformers Beyond Reality).
+- **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
+
+> Vulkan shim (frame.vk_sanitize): takes Lepton's Fossilize shader-cache layer out of the game's Vulkan layers (Android's debug layer list) when the engine loads its Vulkan library. With Fossilize loaded every graphics pipeline of Transformers Beyond Reality failed (VK_ERROR_OUT_OF_HOST_MEMORY), which Unreal treats as fatal (GitHub #349). Lepton has no switch for it; instances created before the engine loads the shim keep it.
+
+### <a id="adapter-vk_pipeline_fallback"></a>Skip refused graphics
+
+When the Frame's driver refuses one of the game's shaders, that object is left out instead of the game ending.
+
+- `adapter.vk_pipeline_fallback`
+- **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
+- **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
+- **Options:**
+  - Value: int, default `0`.
+  - Game settings → Troubleshooting → "Skip refused graphics" (advanced).
+- **Catalog games (1):** Transformers Beyond Reality: Redux.
+- **Suggested by launch-test signatures:**
+  - `vulkan-pipeline-refused` (fatal): The Frame's graphics driver refused to build some of the game's shaders, and Unreal ends the game at the first one (for example Transformers Beyond Reality).
+- **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
+
+> Vulkan shim (frame.vk_sanitize): a graphics pipeline the Frame's driver refuses is created again with a fragment shader that writes zero, then with a vertex shader that only sets the position as well, so the draw shows nothing instead of Unreal ending with "Shader compilation failures are Fatal." (for example a few multiview vertex shaders in Transformers Beyond Reality, GitHub #349). Logged as "retried with a blank".
 
 ### <a id="adapter-vk_pipeline_log"></a>Vulkan pipeline failures (log)
 
