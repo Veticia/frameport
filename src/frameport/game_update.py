@@ -53,6 +53,21 @@ def configuration_fingerprint(recipe: dict, package: str = "", superseded=None) 
     return fingerprint(configuration(recipe, package, superseded))
 
 
+def configuration_matches(recipe: dict, applied: str | None, package: str = "", superseded=None) -> bool:
+    current = configuration(recipe, package, superseded)
+    if fingerprint(current) == applied:
+        return True
+    if "adapter.quest_buttons" in (recipe.get("patches") or {}):
+        return False
+    # set_settings records the live value in the agent's configuration fingerprint. Any inherited mode is
+    # current: changing the library default is applied explicitly, without making the whole library outdated.
+    for mode in (1, 2):
+        current["settings"]["quest_buttons"] = mode
+        if fingerprint(current) == applied:
+            return True
+    return False
+
+
 @dataclass(frozen=True)
 class UpdatePlan:
     rebuild: bool = False
@@ -89,8 +104,8 @@ def plan_update(game: dict, deployment: dict | None, *, apk_only: bool = False,
         rebuild = True
     sha = build.get("alt_sha256") if recipe.get("use_alt") else build.get("sha256")
     apk = missing or rebuild or not sha or dep.get("sha256") != sha
-    configure = apk or dep.get("configuration_fp") != configuration_fingerprint(
-        recipe, package, build.get("superseded"))
+    configure = apk or not configuration_matches(recipe, dep.get("configuration_fp"),
+                                                 package, build.get("superseded"))
     if data_manifest is None:
         data_manifest = game.get("data_manifest")
     data = False
