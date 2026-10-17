@@ -229,6 +229,11 @@
   "title": "Animate fingers from touch",
   "group": "Game settings"
  },
+ "adapter.quest_buttons": {
+  "anchor": "adapter-quest_buttons",
+  "title": "Controller buttons",
+  "group": "Game settings"
+ },
  "adapter.rect_clamp": {
   "anchor": "adapter-rect_clamp",
   "title": "Keep pictures in bounds",

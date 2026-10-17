@@ -84,9 +84,11 @@ def illustration(data: dict, colors: dict, mode: str | None = None) -> str:
             text(cx, 84, hand.capitalize(), 13, colors["TEXT_2"], "middle")
             if key is None:
                 low, high = ("X", "Y") if hand == "left" else ("A", "B")
-                button(cx - 23, 196, low, low)
-                button(cx + 23, 141, high, high)
-                small(cx, 257, "Menu", "Menu" if hand == "left" else "—")
+                inner = 23 if hand == "left" else -23
+                button(cx + inner, 196, low, low)
+                button(cx - inner, 141, high, high)
+                if hand == "left":
+                    small(cx, 257, "Menu", "Menu")
             else:
                 mapped = inverse(data["modes"][key], hand)
                 positions = [(0, -50, "dpad_up", "↑"), (-50, 0, "dpad_left", "←"),

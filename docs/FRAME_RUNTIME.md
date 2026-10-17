@@ -135,6 +135,26 @@
 - Display 72 Hz by default in tests. Head pose is only tracked while the headset is worn; otherwise flags 0x3 and
   the session stays below FOCUSED.
 
+### Frame Controller input
+
+The runtime offers `XR_VALVE_frame_controller_interaction`, with interaction profile
+`/interaction_profiles/valve/frame_controller_valve`. [Valve's input reference](https://partner.steamgames.com/doc/steamhardware/steamframe/input)
+describes two gamepad halves. Under `/user/hand/<hand>/input/`:
+
+- Left: `dpad_up`, `dpad_down`, `dpad_left`, `dpad_right`, `view` (click and touch).
+- Right: `a`, `b`, `x`, `y`, `menu` (click and touch). The face diamond is A bottom, B right, X left, Y top.
+- Both: `system`, `bumper`; `squeeze` and `trigger` (click, touch, value); `thumbstick` (vector, x, y, click,
+  touch); `grip/pose`, `aim/pose`. Haptics use `/user/hand/<hand>/output/haptic`.
+
+SteamVR prefers a game's Frame Controller binding. Without one, its Touch remap sends left d-pad down as Touch X
+and left/up/right as Touch Y; right A as Touch A and X/Y/B as Touch B. Left View sends Touch Menu.
+FrameBridge's `quest_buttons` preference (`0` default, `1` Mirror, `2` Quest pair) enables the extension when offered
+and suggests a Frame binding translated from the game's Touch suggestions. Common pressure/trigger/thumbstick,
+pose and haptic paths keep their Touch counterparts; thumbrest touch and system click are dropped, bumpers stay
+unbound. The player's SteamVR custom bindings can override suggestions. This works on both bridge ABIs, without
+the arm64-only extension shim. See [Controller buttons](CONTROLLERS.md) and the [mapping contract](input/QUEST_BUTTONS.md).
+Device verification of the new modes is pending integration with the native stream.
+
 ## Lua native pointer compatibility
 
 Frame's Android processes can map libraries above the lowest 2^47 bytes of address space. The verified xLua API 105
