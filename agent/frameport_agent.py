@@ -5872,7 +5872,9 @@ def cmd_uninstall(args):
     removed_sc = False
     if args.get("remove_shortcut") and steam_users():
         # Steam keeps its own copy of shortcuts.vdf and writes it back: change it only with Steam closed (worker)
-        removed_sc = cmd_shortcuts({"remove": [{"exe": f'"{anchor}/launch.sh"', "appid": dep.get("appid")}]})["started"]
+        # "later" queues the removal and "off" does nothing now: neither starts a worker (no "started")
+        removed_sc = bool(cmd_shortcuts({"remove": [{"exe": f'"{anchor}/launch.sh"',
+                                                     "appid": dep.get("appid")}]}).get("started"))
     if args.get("remove_shortcut"):
         try:
             devkit_unregister(pkg, steam_running=run(["pgrep", "-x", "steam"]).returncode == 0)

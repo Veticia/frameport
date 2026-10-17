@@ -830,6 +830,24 @@ def test_uninstall_removes_the_shortcut_with_steam_closed(monkeypatch, tmp_path)
     assert payload["remove"] == [{"exe": f'"{anchor}/launch.sh"', "appid": 7}]
 
 
+@pytest.mark.parametrize("mode", ["later", "off"])
+def test_uninstall_with_library_mode_later_or_off(monkeypatch, tmp_path, mode):
+    """#305: in "later" the removal is queued and in "off" nothing starts; uninstall must still finish (found on
+    the device: KeyError 'started' after the removal was already queued, the game stayed installed)."""
+    a = load_agent(monkeypatch, tmp_path)
+    anchor = tmp_path / "Applications/quest-frame/com.x.y"
+    anchor.mkdir(parents=True)
+    (anchor / "deployment.json").write_text(json.dumps({"package": "com.x.y", "base": str(anchor), "appid": 7}))
+    monkeypatch.setattr(a, "container_running", lambda appid: False)
+    monkeypatch.setattr(a, "steam_users", lambda: ["1"])
+    monkeypatch.setattr(a, "library_mode", lambda args=None: mode)
+    monkeypatch.setattr(a, "ensure_library_hooks", lambda: None)
+    monkeypatch.setattr(a, "run", lambda cmd, *k, **kw: SimpleNamespace(returncode=0, stdout=""))
+    r = a.cmd_uninstall({"package": "com.x.y", "remove_shortcut": True})
+    # "off" still removes an existing shortcut right away (only adding is off); "later" queues it
+    assert r["removed"] and r["shortcut_removed"] == (mode == "off")
+
+
 def test_prune_also_matches_the_earlier_tag_name(monkeypatch, tmp_path):
     a = load_agent(monkeypatch, tmp_path)
     vdf = str(tmp_path / "shortcuts.vdf")
