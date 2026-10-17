@@ -189,6 +189,22 @@ def test_dispatcher_rejects_unknown_and_partial_matches():
     assert patch_dispatcher(b'unknown runtime', 'quest2') == b'unknown runtime'
 
 
+def test_unknown_dispatcher_keeps_quest2_instead_of_failing_the_build():
+    """Quest 3 is the default for every Quest game: an APK converted with another OVRPort runtime (found with an
+    already converted Batman copy) must still build, keeping OVRPort's Quest 2 answers."""
+    from types import SimpleNamespace
+
+    from frameport.patches import base
+
+    base.load_all()
+    put = []
+    ws = SimpleNamespace(lib=lambda n: n, has=lambda p: True, read_lib=lambda n: b"another runtime",
+                         put=lambda p, d: put.append(p))
+    ctx = SimpleNamespace(analysis=SimpleNamespace(vr_kind="quest", extra={}), params={}, ws=ws, checks=[], notes=[])
+    assert base.get("device.headset_model").apply(ctx) is False
+    assert not put and ctx.checks and "Quest 2" in ctx.checks[0][2]
+
+
 def test_real_dispatcher_when_available():
     import os
 

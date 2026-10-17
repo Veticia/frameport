@@ -91,7 +91,14 @@ class HeadsetModel(Patch):
         if not ws.has(ws.lib(loader)):
             ctx.checks.append((self.id, None, "No OVRPort dispatcher; only FrameBridge's systemName override applies."))
             return False
-        fixed = patch_dispatcher(ws.read_lib(loader), key)
+        try:
+            fixed = patch_dispatcher(ws.read_lib(loader), key)
+        except ValueError:
+            # Quest 3 is everyone's default: an APK converted with another OVRPort runtime (e.g. an already converted
+            # copy) keeps OVRPort's Quest 2 answers instead of failing its build
+            ctx.checks.append((self.id, None, "This OVRPort dispatcher isn't a known build; the game keeps seeing a "
+                                              "Quest 2 (only FrameBridge's systemName override applies)."))
+            return False
         ws.put(ws.lib(loader), fixed)
         ctx.notes.append(f"{loader}: systemName={SYSTEM_NAMES[key].decode()}, HeadsetId={UUIDS[key].hex()}")
         return True
