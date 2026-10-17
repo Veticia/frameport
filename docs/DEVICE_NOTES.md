@@ -718,3 +718,21 @@ can be enabled and persist after restart. Check actual runtime refresh/pacing se
 identity alone does not implement refresh-rate support. Rebuild with Quest 2 for the control: original `Oculus Quest2`,
 original Quest 2 UUID, type 9 if logged, and previous option visibility. Also smoke-test a Unity OVRPlugin game
 with the default Quest 3 choice for regressions. No device access was used during implementation.
+
+## Quest controller mode (`quest_buttons`, 2026-10-17)
+
+Adapter setting `quest_buttons` (0 SteamVR default, 1 Mirror, 2 Quest pair; contract docs/input/QUEST_BUTTONS.md,
+user page docs/CONTROLLERS.md). FrameBridge enables `XR_VALVE_frame_controller_interaction` and, after a game's Touch
+suggestion succeeds, suggests `/interaction_profiles/valve/frame_controller_valve` bindings translated from the
+accepted Touch set (SteamVR uses a Frame binding before its own Touch remap: Touch B/Y on all three top buttons).
+
+Headless check on the device (I Am Cat, Unity + OVRPlugin, mode 2, `input_diag=1`): the runtime offers and enables the
+extension in a Lepton app, and accepts the generated Frame suggestion (`quest_buttons: frame_controller bindings
+(mode 2, 27 bindings, 7 dropped): 0`); the game's Touch (34 paths) and hand-interaction suggestions were accepted as
+before; 72 fps, no new errors. Translations as in the JSON: left `x/*` -> `dpad_down/*`, `y/*` -> `dpad_left/*`,
+`menu/click` -> `view/click`. Not provable headless (tracking needs the headset worn): that SteamVR then reads the
+buttons from the Frame binding; one launch in the headset settles it.
+
+Pitfall seen during the test: OVRPort runs from two sessions on the same data folder share
+`overport-workspace/dec/working.apk` and fail at once (`OVRPort failed (exit 1)`, `FileAlreadyExistsException` in
+OVRPort's own output, which the CLI doesn't print without a verbose reporter). Build one game at a time per data folder.

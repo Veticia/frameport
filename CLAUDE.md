@@ -553,6 +553,7 @@ Output is deterministic (same input + runtime → same bytes), which is what mak
 - VrApi-direct engines (CryEngine Climb 2, POTW) need the VrApi bridge; the bridge drops whole frames on unknown layer
   types (→ black screen with audio).
 
+**Quest controller mode:** adapter `quest_buttons` (0/1/2, per game + library `input.quest_buttons`) suggests Frame Controller bindings translated from the game's Touch set (`suggest_frame`, mapping docs/input/quest_buttons.json = single source for C table, tests, diagram `scripts/controller_diagram.py`); runtime accepts them headless. → docs/DEVICE_NOTES.md#quest-controller-mode-quest_buttons-2026-10-17
 **Steam Frame controller models:** adapter setting `controller_models` (`native/adapter/render_model.c`, emulates XR_FB_render_model) + agent `install_controller_models` (Frame's SteamVR models → glb at finalize); no catalog game uses runtime models; Valve's models are never committed or copied off the Frame. → docs/DEVICE_NOTES.md#steam-frame-controller-models
 **overport's dispatcher (`libopenxr_loader.so`) only forwards functions in its own table** (`overportOXR: Unknown
 proc addr: …`), so adapter emulations of functions it doesn't know are unreachable. For XR_FB_render_model,
