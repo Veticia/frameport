@@ -243,8 +243,15 @@ def _monitor_details(session) -> None:
 def _monitor_settled(session, timeout: float = 30) -> None:
     """Still pictures of the Monitor: wait until the frozen stream has replayed its history (then one more second
     for the page to draw the last sample)."""
-    if fakes.FrozenMonitorSession.SETTLED.wait(timeout):
-        time.sleep(1)
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:  # the newest session, settled, and still the newest a moment later
+        session_ = fakes.FrozenMonitorSession.LATEST
+        if session_ is None:
+            time.sleep(0.2)
+        elif session_.settled.wait(max(0.0, end - time.monotonic())):
+            time.sleep(1)
+            if fakes.FrozenMonitorSession.LATEST is session_ and session_.settled.is_set():
+                return
 
 
 def _type_tab(session) -> None:
