@@ -99,6 +99,35 @@ class SettingsView:
         from ...core import library
         from ...install.installer import upload_threads
 
+        def steam_changed(e):
+            mode = e.control.value
+            library.set_setting("install.steam_library", mode)
+            if self.app.frame_state == "connected":
+                self.app.run_bg(lambda: self.app.target.connect().frame.agent("library_mode", mode=mode))
+
+        def restart(e):
+            app = self.app
+            if app.frame_state != "connected":
+                app.toast(tr("Connect to the Frame first."))
+                return
+            def work(confirm=False):
+                result = app.target.connect().frame.agent("restart_steam", confirm=confirm)
+                if result.get("confirmation_required"):
+                    C.confirm(app.page, tr("A game is running"),
+                              tr("Restarting Steam ends the running game. Continue?"), tr("Restart Steam now"),
+                              lambda: app.run_bg(lambda: work(True)), danger=True)
+                else:
+                    app.toast(tr("Steam is restarting. FramePort on the Frame will close."))
+            C.confirm(app.page, tr("Restart Steam now?"),
+                      tr("This applies pending library changes and closes Desktop Mode and FramePort on the Frame."),
+                      tr("Restart Steam now"), lambda: app.run_bg(work))
+
+        steam = ft.Row([C.dropdown(label=tr("Steam library"),
+                                  value=library.setting("install.steam_library", "now"), width=T.px(360),
+                                  options=[ft.DropdownOption("now", tr("Now (default)")),
+                                           ft.DropdownOption("later", tr("Later — next Steam start")),
+                                           ft.DropdownOption("off", tr("Off — launch from FramePort"))],
+                                  on_select=steam_changed), C.help_icon("steam_library")], spacing=T.S1)
         def changed(e):
             library.set_setting("install.launch_test", bool(e.control.value))
         def keep_changed(e):
@@ -130,7 +159,11 @@ class SettingsView:
         parallel = C.dropdown(label=tr("Parallel uploads"), value=str(upload_threads()), width=T.px(240),
                               options=[ft.DropdownOption(str(n), str(n)) for n in range(1, 9)],
                               on_select=threads_changed)
-        return ft.Column([launch, parallel,
+        return ft.Column([steam, C.meta(tr("Now waits while a game, Desktop Mode, or local FramePort is open. "
+                                          "Later lets you keep installing without restarting Steam. "
+                                          "Off uses FramePort Play without Steam per-game integration.")),
+                          C.ghost(tr("Restart Steam now"), ft.Icons.RESTART_ALT, restart),
+                          launch, parallel,
                           C.meta(tr("Large files upload together using OpenSSH when available. "
                                     "Default: 3. Lower this on a busy network.")),
                           video, keep,

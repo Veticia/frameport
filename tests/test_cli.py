@@ -19,3 +19,41 @@ def test_errors_are_one_line_on_stderr(monkeypatch, capsys):
     monkeypatch.setenv("FRAMEPORT_DEBUG", "1")
     with pytest.raises(NoValidConnectionsError):
         cli.main()
+
+
+@pytest.mark.parametrize("mode", ["now", "later", "off"])
+def test_steam_library_setting_cli(monkeypatch, mode):
+    from types import SimpleNamespace
+
+    from typer.testing import CliRunner
+
+    from frameport import cli
+    from frameport.core import library
+
+    calls = []
+    frame = SimpleNamespace(agent=lambda command, **kw: calls.append((command, kw)) or {})
+    monkeypatch.setattr(cli, "_target", lambda _: SimpleNamespace(connect=lambda: SimpleNamespace(frame=frame)))
+    result = CliRunner().invoke(cli.app, ["frame", "steam-library", mode])
+    assert result.exit_code == 0, result.output
+    assert library.setting("install.steam_library") == mode
+    assert calls == [("library_mode", {"mode": mode})]
+
+
+def test_restart_steam_cli_confirmation(monkeypatch):
+    from types import SimpleNamespace
+
+    from typer.testing import CliRunner
+
+    from frameport import cli
+
+    calls = []
+    def agent(command, **kw):
+        calls.append(kw)
+        return {} if kw.get("confirm") else {"confirmation_required": True}
+    frame = SimpleNamespace(agent=agent)
+    monkeypatch.setattr(cli, "_target", lambda _: SimpleNamespace(connect=lambda: SimpleNamespace(frame=frame)))
+    result = CliRunner().invoke(cli.app, ["frame", "restart-steam"], input="n\n")
+    assert result.exit_code != 0 and calls == [{"confirm": False}]
+    calls.clear()
+    result = CliRunner().invoke(cli.app, ["frame", "restart-steam"], input="y\n")
+    assert result.exit_code == 0 and calls == [{"confirm": False}, {"confirm": True}]

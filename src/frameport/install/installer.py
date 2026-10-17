@@ -827,7 +827,15 @@ def add_to_steam(frame: Frame, packages: list[str], reporter: Reporter, wait: fl
     import time
 
     reporter.stage("Add to Steam library")
-    frame.agent("shortcuts", packages=packages, restart=True)
+    from ..core import library
+
+    mode = library.setting("install.steam_library", "now")
+    frame.agent("library_mode", mode=mode)
+    submitted = frame.agent("shortcuts", packages=packages, restart=True, mode=mode)
+    if submitted.get("disabled") or submitted.get("state") == "pending":
+        reporter.check("Steam library", None, "disabled; use FramePort Play" if mode == "off" else
+                       "queued for the next Steam start; you can keep installing")
+        return submitted
     end = time.time() + wait
     status = {}
     while time.time() < end:
@@ -840,6 +848,8 @@ def add_to_steam(frame: Frame, packages: list[str], reporter: Reporter, wait: fl
             break
         if status.get("state") == "waiting":  # Steam restarts later: after the game, or back in Gaming Mode
             reporter.check("Steam library", None,
+                           "added after FramePort on the Frame closes (Steam has to restart for it)"
+                           if status.get("reason") == "frameport" else
                            "added when you're back in Gaming Mode (Steam has to restart for it)"
                            if status.get("reason") == "desktop" else
                            "added when the game that's running now is closed (Steam has to restart for it)")

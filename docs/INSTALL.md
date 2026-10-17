@@ -86,8 +86,24 @@ FramePort can run on the Frame itself, without a PC:
 2. In Desktop Mode, download `FramePort-linux-arm64.tar.gz`, unpack it (`tar xzf FramePort-linux-arm64.tar.gz`) and
    start `FramePort/FramePort`.
 
-Games appear in the Steam library when you go back to Gaming Mode. Please report anything odd with **Report a
-problem…**.
+With the default **Steam library: Now**, games appear after you close FramePort and return to Gaming Mode.
+FramePort also waits while its window is open in Gaming Mode, so you can install several games in one session.
+Please report anything odd with **Report a problem…**.
+
+Settings → Installing → **Steam library** controls future installs:
+
+- **Now** (default): restart Steam after adding shortcuts, waiting while a game, Desktop Mode, or FramePort's local
+  window is open (up to 12 hours). Unchanged shortcuts need no restart.
+- **Later**: save shortcuts without restarting Steam. Keep installing; changes are applied at the next Steam
+  service start, including after a reboot. **Restart Steam now** applies them immediately. It closes Desktop Mode
+  and FramePort running on the Frame, and asks again if a game is running.
+- **Off**: skip new Steam shortcuts; existing entries stay. FramePort's **Play** runs the installed launcher directly.
+  Steam and SteamVR must already be running. Steam's per-game overlay, controller setup, and Exit game integration
+  are unavailable; stop the game from FramePort's Monitor. Pending games in Later also use this direct Play path.
+
+CLI: `frameport frame steam-library now|later|off` saves the setting and applies it to the connected Frame.
+`frameport frame restart-steam` applies pending entries now; `--yes` confirms ending a running game.
+These settings concern game shortcuts; installing a missing Steam runtime such as Proton can still require a restart.
 
 ## Installing games
 

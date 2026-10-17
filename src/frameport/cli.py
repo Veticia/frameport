@@ -915,6 +915,31 @@ def saves_undo(package: str = typer.Argument(..., help="the game (package or par
     typer.echo(f"{pkg}: the saves from before the last restore are back ({r.get('restored', 0)} file(s))")
 
 
+@frame_app.command("steam-library")
+def frame_steam_library(mode: str = typer.Argument(..., help="now, later or off"),
+                        frame: Optional[str] = typer.Option(None, help=FRAME_HELP)):
+    """Save Steam shortcut behaviour for future installs and Play, and apply it on the Frame."""
+    from .core import library
+
+    if mode not in ("now", "later", "off"):
+        raise typer.BadParameter("choose now, later or off")
+    _target(frame).connect().frame.agent("library_mode", mode=mode)
+    library.set_setting("install.steam_library", mode)
+    typer.echo(mode)
+
+
+@frame_app.command("restart-steam")
+def frame_restart_steam(frame: Optional[str] = typer.Option(None, help=FRAME_HELP),
+                        yes: bool = typer.Option(False, "--yes", help="confirm ending a running game")):
+    """Restart Steam now and apply pending library changes. Closes local FramePort/Desktop Mode too."""
+    agent = _target(frame).connect().frame
+    result = agent.agent("restart_steam", confirm=yes)
+    if result.get("confirmation_required"):
+        typer.confirm("A game is running. End it and restart Steam?", abort=True)
+        result = agent.agent("restart_steam", confirm=True)
+    typer.echo(json.dumps(result))
+
+
 @frame_app.command("info")
 def frame_info(frame: Optional[str] = typer.Option(None, help=FRAME_HELP)):
     """The Frame's SteamOS build, runtimes, storage and installed games (JSON)."""
