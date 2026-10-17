@@ -240,6 +240,13 @@ def _monitor_details(session) -> None:
     fakes.open_monitor_details(session.app)
 
 
+def _monitor_settled(session, timeout: float = 30) -> None:
+    """Still pictures of the Monitor: wait until the frozen stream has replayed its history (then one more second
+    for the page to draw the last sample)."""
+    if fakes.FrozenMonitorSession.SETTLED.wait(timeout):
+        time.sleep(1)
+
+
 def _type_tab(session) -> None:
     fakes.open_type_tab(session.app)
 
@@ -399,4 +406,5 @@ HOOKS = {"fake_install": _fake_install, "wait_jobs": _wait_jobs, "held_install":
          "settings_section": _settings_section, "first_run": _first_run, "pairing_done": _pairing_done,
          "frame_asks": _frame_asks,
          "easter_eggs": _easter_eggs, "fps_dip": _fps_dip, "perfect_pacing": _perfect_pacing,
-         "battery": _battery, "long_upload": _long_upload, "press_keys": _press_keys}
+         "battery": _battery, "long_upload": _long_upload, "press_keys": _press_keys,
+         "monitor_settled": _monitor_settled}

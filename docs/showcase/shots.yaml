@@ -87,6 +87,7 @@ shots:
     steps:
       - go: monitor
       - wait_for: "Processes"
+      - hook: monitor_settled   # the history replay finished (a slow runner shot it halfway: numbers differed)
 
   # newer screens (docs/SHOWCASE.md's gallery; the README picks what it needs)
   - name: live-view        # idle: a running stream shows its relay's random port and the data rate (no stable picture)

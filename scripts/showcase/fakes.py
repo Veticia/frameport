@@ -634,6 +634,10 @@ class FrozenMonitorSession(FakeMonitorSession):
     """The fake stream for still pictures: the two minutes of history, then nothing new (every render of a page shows
     the same numbers, whenever the screenshot is taken)."""
 
+    # set once a replay of the history is complete (the Monitor tab asks for one when it opens: set_modules("all"));
+    # the monitor_settled hook waits for it, else a slow machine shot the page halfway through the replay
+    SETTLED = threading.Event()
+
     def _run(self) -> None:
         self.t = 0
         while not self.closed:
@@ -641,7 +645,13 @@ class FrozenMonitorSession(FakeMonitorSession):
                 self.on_sample(self._sample())
                 self.t += 1
             else:
+                FrozenMonitorSession.SETTLED.set()
                 time.sleep(0.2)
+
+    def set_modules(self, m):
+        if m == "all":
+            FrozenMonitorSession.SETTLED.clear()
+        return super().set_modules(m)
 
 
 class LiveMonitorSession(FakeMonitorSession):
