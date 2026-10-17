@@ -12,7 +12,8 @@ def test_video_patches_outdate_only_the_recipes_that_gain_them():
     from frameport.patches.base import get, recipe_fingerprint
     from frameport.ui.components import install_state
 
-    assert get("frame.adapter").revision == 1 and not get("frame.adapter").package_revisions
+    # revision 2 (#365) adds the dormant foveation diagnostic to every build; this test is about the package check
+    assert get("frame.adapter").revision == 2 and not get("frame.adapter").package_revisions
     before = {"patches": {"frame.adapter": {}}}
     after = {"patches": {"frame.adapter": {}, "frame.hw_video_decode": {}, "adapter.surface_native": {"value": 1}}}
     for package, recipe, expected in (("com.camouflaj.manta", after, "outdated"),

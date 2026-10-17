@@ -227,15 +227,15 @@ class FilesView:
             from ...install.drives import free_text
 
             rows.append(ft.Container(C.meta(tr("Drives").upper()), padding=ft.Padding(T.S2, T.S3, 0, T.px(2))))
-            rows.extend(self._location_row(loc, ft.Icons.STORAGE_ROUNDED,
+            rows.extend(self._location_row(loc, ft.Icons.STORAGE_OUTLINED,
                                           " · ".join(filter(None, [free_text(loc),
                                                                  tr("Read-only") if loc.get("read_only") else ""])))
                         for loc in self.drives)
         kinds = {d["package"]: d.get("kind") for d in (self.app.frame_info or {}).get("installed", [])}
         installed = self._installed_games()
         for section, heading, icon in (("quest", tr("Game storage"), ft.Icons.SPORTS_ESPORTS_OUTLINED),
-                                       ("pcvr", tr("PC VR games"), ft.Icons.DESKTOP_WINDOWS_OUTLINED),
-                                       ("linux", tr("Linux apps"), ft.Icons.TERMINAL_OUTLINED)):
+                                       ("pcvr", tr("PC VR games"), ft.Icons.DESKTOP_WINDOWS_ROUNDED),
+                                       ("linux", tr("Linux apps"), ft.Icons.TERMINAL_ROUNDED)):
             games = [g for g in installed if game_section(kinds.get(g[0])) == section]
             if not games:
                 continue

@@ -178,8 +178,11 @@ def test_migration_rederives_rift_recipes(tmp_path, monkeypatch):
     games = library.load()["games"]
     r = games["rift.ue"]["recipe"]
     assert r["as_is"] and "pcvr.revive" in r["patches"] and "pcvr.oculus_unreal" in r["patches"]
-    # Quest games untouched by the Rift migrations (they only gain the default-on binary fixes)
-    assert set(games["com.q.ue"]["recipe"]["patches"]) <= {"frame.swapchain_limit", "frame.vk_sanitize"}
+    # Quest games untouched by the Rift migrations (they only gain the default-on binary fixes and, from the
+    # headset-model migration, the Quest 3 identity every Quest game gets)
+    assert set(games["com.q.ue"]["recipe"]["patches"]) <= {"frame.swapchain_limit", "frame.vk_sanitize",
+                                                           "device.headset_model"}
+    assert "device.headset_model" not in r["patches"]  # never for PC VR games
 
 def test_oculus_hmd_helper_artifact():
     """The prebuilt helper is a freestanding Windows x64 console exe that only imports kernel32."""
