@@ -400,7 +400,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrCreateInstance(const XrInstanceCreateInfo *info
         names[kept++] = "XR_KHR_android_create_instance";
         LOG("added %s", "XR_KHR_android_create_instance");
     }
-    quest_buttons_extensions(available, available_count, names, &kept);
+    int frame_enabled = quest_buttons_extensions(available, available_count, names, &kept);
     {   // no graphics API extension at all: Meta's runtime still accepts a GLES session, the Frame's doesn't
         // (Lambda1VR's TBXR enables only XR_EXT_local_floor). Add GLES, which every such app uses, if offered.
         int graphics = 0, gles_offered = 0;
@@ -475,7 +475,6 @@ XRAPI_ATTR XrResult XRAPI_CALL xrCreateInstance(const XrInstanceCreateInfo *info
     free(available);
     mx_audio_initialize(); mx_batman_geometry_initialize();
     XrResult result = fn(&fixed, instance);
-    if (XR_FAILED(result)) quest_buttons_enabled = 0;
     free(names);
     LOG("xrCreateInstance result=%d", result);
     emulate_color_space = fb_color_space && XR_SUCCEEDED(result) && requested_color_space;
@@ -486,7 +485,14 @@ XRAPI_ATTR XrResult XRAPI_CALL xrCreateInstance(const XrInstanceCreateInfo *info
             LOG("color_space: emulating XR_FB_color_space; REC709 SDR compatibility, no colour conversion");
         }
     }
-    if (XR_SUCCEEDED(result)) { active_instance = *instance; mx_audio_initialize(); mx_batman_geometry_initialize(); }
+    if (XR_SUCCEEDED(result)) {
+        pthread_mutex_lock(&bindings_lock);
+        active_instance = *instance;
+        reset_bindings(frame_enabled);
+        pthread_mutex_unlock(&bindings_lock);
+        mx_audio_initialize();
+        mx_batman_geometry_initialize();
+    }
     return result;
 }
 
@@ -2110,6 +2116,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrGetCurrentInteractionProfile(XrSession session,
     PFN_xrGetCurrentInteractionProfile fn =
         (PFN_xrGetCurrentInteractionProfile)lookup(active_instance, "xrGetCurrentInteractionProfile");
     if (!fn) return XR_ERROR_FUNCTION_UNSUPPORTED;
+    pthread_mutex_lock(&bindings_lock);
     XrResult result = detached_current_profile(user, state, fn(session, user, state));
     if (input_diag && XR_SUCCEEDED(result) && state) input_diag_current_profile(user, state->interactionProfile);
     if (layer_debug && active_instance) {  // which device each hand has, as the runtime reports it
@@ -2126,18 +2133,20 @@ XRAPI_ATTR XrResult XRAPI_CALL xrGetCurrentInteractionProfile(XrSession session,
     }
     if (XR_SUCCEEDED(result) && state) {
         // A Frame binding replaces SteamVR's Touch remap; Quest games still expect a Touch-shaped profile.
-        if (quest_buttons && quest_buttons_enabled && state->interactionProfile) {
+        if (quest_buttons && quest_buttons_enabled && generated_frame_bindings && !app_suggested_frame &&
+            state->interactionProfile) {
             PFN_xrPathToString str = (PFN_xrPathToString)lookup(active_instance, "xrPathToString");
             PFN_xrStringToPath path = (PFN_xrStringToPath)lookup(active_instance, "xrStringToPath");
             char name[XR_MAX_PATH_LENGTH];
             uint32_t size = 0;
             XrPath touch;
             if (str && path && XR_SUCCEEDED(str(active_instance, state->interactionProfile, sizeof(name), &size, name)) &&
-                strstr(name, "/valve/") && XR_SUCCEEDED(path(active_instance, TOUCH_PROFILE, &touch)))
+                !strcmp(name, FRAME_PROFILE) && XR_SUCCEEDED(path(active_instance, TOUCH_PROFILE, &touch)))
                 state->interactionProfile = touch;
         }
         current_profile_fix(user, state);
     }
+    pthread_mutex_unlock(&bindings_lock);
     return result;
 }
 

@@ -300,6 +300,12 @@ static int app_suggested_touch;
 #include "profile_report.c"  // remapped_profile, current_profile_fix (xrGetCurrentInteractionProfile)
 #include "detached_controllers.c"  // detached controllers' paths on a runtime without them
 
+static void reset_bindings(int frame_enabled) {
+    quest_buttons_enabled = frame_enabled;
+    app_suggested_frame = generated_frame_bindings = app_suggested_touch = 0;
+    remapped_profile[0] = 0;
+}
+
 static int in_list(const char *s, const char *const *list, size_t n) {
     for (size_t i = 0; i < n; ++i)
         if (!strcmp(s, list[i])) return 1;
@@ -422,7 +428,7 @@ static int add_binding(XrInstance instance, PFN_xrStringToPath to_path, XrAction
 // Mirrors docs/input/quest_buttons.json; the host test derives its expected bindings from that contract.
 static const char *const FRAME_COMMON[] = {"squeeze", "squeeze/value", "trigger", "trigger/value", "trigger/touch",
     "thumbstick",
-    "thumbstick/x", "thumbstick/y", "thumbstick/click", "thumbstick/touch", "grip/pose", "aim/pose"};
+    "thumbstick/x", "thumbstick/y", "thumbstick/click", "thumbstick/touch", "grip", "grip/pose", "aim", "aim/pose"};
 static const char *const FRAME_DROPPED[] = {"thumbrest/touch", "system/click"};
 static const struct {
     const char *hand, *touch;
@@ -495,13 +501,28 @@ static void suggest_frame(XrInstance instance, PFN_xrSuggestInteractionProfileBi
         }
         if (kept == before) ++dropped;
     }
+    if (!kept) {
+        LOG("quest_buttons: frame_controller bindings (mode %d, 0 bindings, %u dropped): not suggested",
+            quest_buttons, dropped);
+        free(bindings);
+        return;  // A previously accepted Frame set stays in effect: OpenXR cannot replace it with an empty set.
+    }
     XrInteractionProfileSuggestedBinding copy = {XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING, NULL,
                                                 frame, kept, bindings};
     result = fn(instance, &copy);
+    if (XR_SUCCEEDED(result)) generated_frame_bindings = 1;
 done:
     LOG("quest_buttons: frame_controller bindings (mode %d, %u bindings, %u dropped): %d",
         quest_buttons, kept, dropped, result);
     free(bindings);
+}
+
+// Run this for every Touch attempt so Frame bindings come from exactly the set the runtime accepted.
+static XrResult suggest_touch_set(XrInstance instance, PFN_xrSuggestInteractionProfileBindings fn,
+                                  PFN_xrPathToString to_string, const XrInteractionProfileSuggestedBinding *suggested) {
+    XrResult r = fn(instance, suggested);
+    if (XR_SUCCEEDED(r)) suggest_frame(instance, fn, to_string, suggested);
+    return r;
 }
 
 // Suggests Touch bindings with finger proximity bound to the touch inputs (proximity_emul), falling back to the
@@ -509,11 +530,12 @@ done:
 static XrResult suggest_touch(XrInstance instance, PFN_xrSuggestInteractionProfileBindings fn,
                               PFN_xrPathToString to_string, const XrInteractionProfileSuggestedBinding *suggested) {
     PFN_xrStringToPath to_path = (PFN_xrStringToPath)lookup(instance, "xrStringToPath");
-    if (!proximity_emul || runtime_has_proximity || !to_path || !to_string) return fn(instance, suggested);
+    if (!proximity_emul || runtime_has_proximity || !to_path || !to_string)
+        return suggest_touch_set(instance, fn, to_string, suggested);
     XrAction thumb = thumb_proximity_action, index = proximity_emul > 1 ? trigger_proximity_action : XR_NULL_HANDLE;
     uint32_t n = suggested->countSuggestedBindings, kept = 0, dropped = 0, added = 0;
     XrActionSuggestedBinding *b = calloc(n + 2 * 5, sizeof(*b));
-    if (!b) return fn(instance, suggested);
+    if (!b) return suggest_touch_set(instance, fn, to_string, suggested);
     for (uint32_t i = 0; i < n; ++i) {
         char path[XR_MAX_PATH_LENGTH];
         uint32_t size = 0;
@@ -534,15 +556,15 @@ static XrResult suggest_touch(XrInstance instance, PFN_xrSuggestInteractionProfi
         if (index) added += add_binding(instance, to_path, b, &kept, index, name, "trigger/touch");
     }
     XrResult r;
-    if (!added && !dropped) r = fn(instance, suggested);
+    if (!added && !dropped) r = suggest_touch_set(instance, fn, to_string, suggested);
     else {
         XrInteractionProfileSuggestedBinding copy = *suggested;
         copy.countSuggestedBindings = kept;
         copy.suggestedBindings = b;
-        r = fn(instance, &copy);
+        r = suggest_touch_set(instance, fn, to_string, &copy);
         LOG("proximity_emul: finger proximity bound to touch (%u binding(s) added, %u proximity path(s) replaced): %d",
             added, dropped, r);
-        if (XR_FAILED(r)) r = fn(instance, suggested);
+        if (XR_FAILED(r)) r = suggest_touch_set(instance, fn, to_string, suggested);
     }
     free(b);
     return r;
@@ -569,7 +591,6 @@ static XrResult remap_to_touch(XrInstance instance, PFN_xrSuggestInteractionProf
     copy.countSuggestedBindings = kept;
     copy.suggestedBindings = b;
     XrResult r = kept ? suggest_touch(instance, fn, to_string, &copy) : XR_ERROR_PATH_UNSUPPORTED;
-    if (XR_SUCCEEDED(r)) suggest_frame(instance, fn, to_string, &copy);
     free(b);
     LOG("controller profile %s -> oculus/touch_controller (%u bindings, %u dropped): %d", profile + 22, kept,
         n - kept, r);
@@ -584,6 +605,9 @@ static XRAPI_ATTR XrResult XRAPI_CALL hook_xrSuggestInteractionProfileBindings(X
     PFN_xrSuggestInteractionProfileBindings fn =
         (PFN_xrSuggestInteractionProfileBindings)lookup(instance, "xrSuggestInteractionProfileBindings");
     if (!fn) return XR_ERROR_FUNCTION_UNSUPPORTED;
+    // The last accepted call per profile wins. Keep the game's call, fallback, generated set and flags together.
+    // Internal helpers use the next-layer function directly, so fallback paths never take this mutex twice.
+    pthread_mutex_lock(&bindings_lock);
     XrInteractionProfileSuggestedBinding copy;
     XrActionSuggestedBinding *kept = suggested && suggested->countSuggestedBindings
         ? calloc(suggested->countSuggestedBindings, sizeof(*kept)) : NULL;
@@ -591,6 +615,7 @@ static XRAPI_ATTR XrResult XRAPI_CALL hook_xrSuggestInteractionProfileBindings(X
     // a profile with only detached-controller bindings: nothing the runtime could bind
     XrResult r = use != suggested && !use->countSuggestedBindings ? XR_SUCCESS : suggest_bindings(instance, fn, use);
     free(kept);
+    pthread_mutex_unlock(&bindings_lock);
     return r;
 }
 
@@ -611,9 +636,9 @@ static XrResult suggest_bindings(XrInstance instance, PFN_xrSuggestInteractionPr
     XrResult r = known && !strcmp(profile, TOUCH_PROFILE) ? suggest_touch(instance, fn, to_string, suggested)
                                                          : fn(instance, suggested);
     input_diag_suggested(instance, suggested, r, to_string);  // the runtime's answer to the game's own suggestion
-    if (known && XR_SUCCEEDED(r)) {
-        if (!strcmp(profile, FRAME_PROFILE) && quest_buttons && quest_buttons_enabled) app_suggested_frame = 1;
-        else if (!strcmp(profile, TOUCH_PROFILE)) suggest_frame(instance, fn, to_string, suggested);
+    if (known && XR_SUCCEEDED(r) && !strcmp(profile, FRAME_PROFILE) && quest_buttons && quest_buttons_enabled) {
+        app_suggested_frame = 1;
+        generated_frame_bindings = 0;
     }
     if (!profile_remap || !known) return r;
     if (!strcmp(profile, TOUCH_PROFILE)) {
