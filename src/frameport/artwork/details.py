@@ -19,7 +19,6 @@ import urllib.parse
 from ..core import cache
 from . import fetch, sources
 
-STEAM_DETAILS = "https://store.steampowered.com/api/appdetails?appids={id}&l=en"
 MAX_SHOTS = 6
 
 
@@ -51,10 +50,7 @@ def steam_app(title: str) -> dict | None:
     hit = sources.match_steam(title)
     if not hit:
         return None
-    data = cache.cached_json(f"steamapp-{hit['id']}.json", STEAM_DETAILS.format(id=hit["id"]), max_age=sources.MAX_AGE,
-                             fallback={})
-    d = (data or {}).get(str(hit["id"])) or {}
-    return d.get("data") if d.get("success") else None
+    return sources.steam_details(hit["id"])
 
 
 def fetch_details(entry: dict, screenshots: bool = True) -> dict:
@@ -68,6 +64,11 @@ def fetch_details(entry: dict, screenshots: bool = True) -> dict:
     except Exception:  # noqa: BLE001 - offline
         app = None
     if app:
+        pkg = entry.get("quest_package") if entry.get("kind") == "rift" else entry["package"]
+        out.setdefault("matches", {})["oculusdb"] = {
+            "by": "package" if pkg and app.get("packageName") == pkg else "title",
+            "key": pkg if pkg and app.get("packageName") == pkg else title,
+        }
         out["sources"].append("oculusdb")
         out["description"] = _text(app.get("display_long_description"))
         out["genres"] = [g for g in app.get("genre_names") or [] if g]
@@ -82,6 +83,7 @@ def fetch_details(entry: dict, screenshots: bool = True) -> dict:
     except Exception:  # noqa: BLE001
         st = None
     if st:
+        out.setdefault("matches", {})["steam"] = {"by": "title", "key": title}
         out["sources"].append("steam")
         out["steam_appid"] = st.get("steam_appid")
         out["short"] = _text(st.get("short_description"))
@@ -101,6 +103,26 @@ def fetch_details(entry: dict, screenshots: bool = True) -> dict:
             out["screenshots"] = save_screenshots(entry["package"], [s.get("path_full") for s in
                                                                      st.get("screenshots") or []])
     return {k: v for k, v in out.items() if v not in (None, "", [])}
+
+
+def title_matched(entry: dict) -> bool:
+    """Legacy Steam and Rift name matches must be refreshed after a rename."""
+    details = entry.get("details") or {}
+    matches = details.get("matches") or {}
+    for source in details.get("sources") or []:
+        if source in matches:
+            if matches[source].get("by") == "title":
+                return True
+        elif source == "steam" or source == "oculusdb" and entry.get("kind") == "rift":
+            return True
+    return False
+
+
+def clear_screenshots(package: str) -> None:
+    d = fetch.artwork_dir(package)
+    for pattern in ("shot_*.jpg", "t_shot_*"):
+        for path in d.glob(pattern):
+            path.unlink(missing_ok=True)
 
 
 def save_screenshots(package: str, urls: list[str]) -> list[str]:

@@ -34,6 +34,9 @@ def net(monkeypatch):
             term = url.split("/search/")[1].split("?")[0]
             rows = db["rift"] if "headsets=RIFT" in url else db["all"]
             return [r for r in rows if r.get("_term", "").lower() in term.lower().replace("%20", " ")]
+        if "appdetails" in url:
+            appid = url.split("appids=")[1].split("&")[0]
+            return {appid: {"success": True, "data": {"steam_appid": int(appid)}}}
         if "storesearch" in url:
             return {"items": db["steam"]}
         return fallback

@@ -1995,15 +1995,21 @@ class FramePortApp:
         """Store the new name, then update the game's Steam entry where it's installed and reachable now (the Frame:
         same shortcut, Steam restarts once; this PC's Steam for PC VR games). A Frame that isn't connected gets it
         with the game page's "Update name on Frame" or the next install."""
-        before = (library.game(pkg) or {}).get("title")
+        from ..artwork.details import title_matched
+
+        previous = library.game(pkg) or {}
+        before = previous.get("title")
+        refetch = title_matched(previous)
         try:
-            g = pipeline.rename_game(pkg, value)
+            g = pipeline.rename_game(pkg, value, refresh_details=False)
         except ValueError as exc:
             self.toast(str(exc), error=True)
             return
         title = self._title(pkg)
         if g.get("title") == before:
             return
+        if refetch:
+            self.refresh_details(pkg)
         on_frame = self.frame_state == "connected" and \
             C.install_state(g, self.frame_info) in ("installed", "outdated")
         on_pc = g.get("kind") == "rift" and pkg in self.pc_installs()

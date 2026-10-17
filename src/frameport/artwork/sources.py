@@ -92,6 +92,31 @@ def match_quest(title: str) -> str | None:
     return None
 
 
+STEAM_DETAILS = "https://store.steampowered.com/api/appdetails?appids={id}&l=en"
+
+
+def sexual_content(app: dict) -> bool:
+    """Steam's sexual-content categories; general mature content (5) alone is allowed."""
+    descriptors = app.get("content_descriptors") or {}
+    ids = {str(i) for i in descriptors.get("ids") or []}
+    if ids & {"1", "3", "4"}:
+        return True
+    try:
+        age = int(app.get("required_age") or 0)
+    except (TypeError, ValueError):
+        age = 0
+    notes = str(descriptors.get("notes") or "").lower()
+    return age >= 18 and any(word in notes for word in ("sexual", "nudity", "nude", "porn"))
+
+
+def steam_details(appid: int | str) -> dict | None:
+    data = cache.cached_json(f"steamapp-{appid}.json", STEAM_DETAILS.format(id=appid), max_age=MAX_AGE,
+                             fallback={})
+    result = (data or {}).get(str(appid)) or {}
+    app = result.get("data") if result.get("success") else None
+    return app if app and not sexual_content(app) else None
+
+
 def match_steam(title: str) -> dict | None:
     want = norm(title)
     return next((i for i in steam_search(title) if norm(i.get("name") or "") == want), None)
@@ -124,6 +149,8 @@ def apply_oculusdb(package: str, app: dict) -> bool:
 
 
 def apply_steam(package: str, appid: int | str) -> bool:
+    if not steam_details(appid):
+        return False
     got = False
     for kind, file in STEAM_FILES.items():
         data = _get(STEAM_CDN.format(id=appid, file=file))

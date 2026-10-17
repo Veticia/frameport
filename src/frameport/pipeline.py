@@ -524,7 +524,7 @@ def title_suggestions(entry: dict) -> list[str]:
     return out
 
 
-def rename_game(package: str, title: str | None) -> dict:
+def rename_game(package: str, title: str | None, *, refresh_details: bool = True) -> dict:
     """Rename a game in the library. The new title is locked (scans, artwork and store lookups and catalog updates
     keep it); an empty title or the automatic name unlocks it again. Returns the entry. Installed copies keep their
     old Steam name until sync_title (or the next install) updates them."""
@@ -534,7 +534,9 @@ def rename_game(package: str, title: str | None) -> dict:
     old: dict = {}
 
     def change(g: dict) -> None:
-        old.update(title=g.get("title"))
+        from .artwork.details import title_matched
+
+        old.update(title=g.get("title"), title_matched=title_matched(g))
         auto = automatic_title(g)
         if not title or title == auto:
             g["title"] = auto
@@ -544,10 +546,19 @@ def rename_game(package: str, title: str | None) -> dict:
             g.setdefault("auto_title", auto)
             g["title"] = title
             g["title_locked"] = True
+        if g["title"] != old["title"] and old["title_matched"]:
+            g.pop("details", None)
         if g["title"] != old["title"] and any(w != PC_LABEL for w in g.get("installs") or {}):
             g["steam_name_stale"] = True  # the Frame's Steam library shows the old name until sync_title
     entry = library.update_game(package, change)
     if entry.get("title") != old.get("title"):
+        if old["title_matched"]:
+            from .artwork.details import clear_screenshots
+
+            clear_screenshots(package)
+            if refresh_details:
+                fetch_details(package)
+                entry = library.game(package)
         try:  # FramePort's own cover/banner (no store art) are coloured by the name: make them again
             from .artwork.steam import ensure_cover
 
