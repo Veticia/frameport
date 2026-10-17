@@ -124,6 +124,8 @@ def _open(app: FramePortApp, package: str, g: dict | None, values: dict, foveati
     global_mode = quest_buttons_default()
     inherited = {"on": (g is not None and QUEST_BUTTONS not in (g.get("recipe") or {}).get("patches", {}))
                  if inherit_quest_buttons is None else inherit_quest_buttons}
+    if inherited["on"]:
+        values["quest_buttons"] = global_mode
     controller_preview = diagram(values["quest_buttons"])
     foveation = dict(foveation_values) if foveation_values is not None else foveation_preference(g or {})
     foveation_controls = []
@@ -196,7 +198,8 @@ def _open(app: FramePortApp, package: str, g: dict | None, values: dict, foveati
         if key == "quest_buttons" and g is not None:
             name = next(label for mode, label in UI[key]["control"][1] if mode == global_mode)
             choices.insert(0, ("global", tr("Use global default ({mode})").format(mode=tr(name))))
-        return C.dropdown(value="global" if key == "quest_buttons" and inherited["on"] else str(v), width=T.px(260),
+        return C.dropdown(value="global" if key == "quest_buttons" and inherited["on"] else str(v),
+                           width=T.px(300 if key == "quest_buttons" else 220),
                            options=[ft.DropdownOption(key=str(c), text=tr(label)) for c, label in choices],
                            on_select=lambda e: set_value(key, e.control.value))
 

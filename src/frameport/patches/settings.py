@@ -54,7 +54,8 @@ SETTINGS = [
     ("quest_buttons", "int", 0, "Controller buttons",
      "Choose how the Frame's face buttons send Quest Touch inputs: 0 = SteamVR default, 1 = Mirror, "
      "2 = Quest pair. Used at the next launch; SteamVR custom bindings can override it. Requires the runtime's "
-     "XR_VALVE_frame_controller_interaction extension. See docs/CONTROLLERS.md for the mapping."),
+     "XR_VALVE_frame_controller_interaction extension. Mapping: "
+     "https://github.com/spoopyghosty0/frameport/blob/main/docs/CONTROLLERS.md"),
     ("swapchain_fix", "int", 1, "Swapchain format fallback",
      "Retry rejected GLES formats/MSAA with sRGB, samples=1."),
     ("cube_standin", "int", 1, "Stand-in cube swapchains",

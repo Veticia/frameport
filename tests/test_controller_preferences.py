@@ -6,13 +6,14 @@ from types import SimpleNamespace
 
 import flet as ft
 import pytest
-from test_game_update import game_and_dep
+from test_game_update import game_and_dep, installed_agent
 from test_patches import _analysis
 
+from frameport import pipeline
 from frameport.core import controllers, library
 from frameport.core.events import Cancelled, Reporter
 from frameport.core.models import Recipe
-from frameport.game_update import configuration_fingerprint, plan_update
+from frameport.game_update import configuration, configuration_fingerprint, plan_update
 from frameport.install.installer import configuration_args, install_context
 from frameport.patches import base
 from frameport.patches.frame.adapter import settings_text
@@ -101,6 +102,27 @@ def test_saving_game_keeps_inheritance_and_explicit_zero():
     assert ad.recipe_values(library.game(game["package"]))["quest_buttons"] == 2
 
 
+def test_agent_live_default_write_does_not_mark_inherited_game_outdated(monkeypatch, tmp_path):
+    game, _ = game_and_dep()
+    package = game["package"]
+    agent, _, record = installed_agent(monkeypatch, tmp_path)
+    record.update(configuration=configuration(game["recipe"], package),
+                  configuration_fp=configuration_fingerprint(game["recipe"], package))
+    agent.write_deployment(package, record)
+    for mode in (1, 2, 0):
+        agent.cmd_set_settings({"package": package, "settings": {"quest_buttons": mode}})
+        deployed = agent.deployment(package)
+        assert not plan_update(game, deployed).changed
+    agent.cmd_set_settings({"package": package, "settings": {"quest_buttons": 1}})
+    deployed = agent.deployment(package)
+    # Explicit overrides still need to match, and unrelated runtime changes are never ignored.
+    game["recipe"]["patches"][controllers.QUEST_BUTTONS] = {"value": 0}
+    assert plan_update(game, deployed).configure
+    game["recipe"]["patches"].pop(controllers.QUEST_BUTTONS)
+    game["recipe"]["patches"]["adapter.scale"] = {"value": 1.8}
+    assert plan_update(game, deployed).configure
+
+
 def test_dialog_global_option_and_diagram_follow_choice():
     library.set_setting("input.quest_buttons", 1)
     game = store()
@@ -118,6 +140,21 @@ def test_dialog_global_option_and_diagram_follow_choice():
     assert image.src.endswith("quest-buttons-0.svg")
     dialogs[-1].actions[-1].on_click(None)
     assert library.game(game["package"])["recipe"]["patches"][controllers.QUEST_BUTTONS] == {"value": 0}
+
+
+def test_dialog_reset_restores_global_value_without_pinning_it():
+    library.set_setting("input.quest_buttons", 2)
+    game = store({"frame.adapter": {}, controllers.QUEST_BUTTONS: {"value": 1}})
+    dialogs = []
+    app = SimpleNamespace(page=SimpleNamespace(show_dialog=dialogs.append, pop_dialog=lambda: None),
+                          target=None, toast=lambda *a, **k: None, refresh_view=lambda: None,
+                          _title=lambda p: "Quest")
+    ad._open(app, game["package"], game, ad.recipe_values(game))
+    dialogs[-1].actions[0].on_click(None)
+    assert next(c for c in walk(dialogs[-1]) if isinstance(c, ft.Image) and "quest-buttons" in c.src
+                ).src.endswith("quest-buttons-2.svg")
+    dialogs[-1].actions[-1].on_click(None)
+    assert controllers.QUEST_BUTTONS not in library.game(game["package"])["recipe"]["patches"]
 
 
 class Target:
@@ -145,6 +182,14 @@ def test_apply_default_skips_overrides_and_non_quest_games():
     with pytest.raises(Cancelled):
         controllers.apply_default(target, reporter)
     assert len(target.calls) == 1
+
+
+def test_live_suggestion_push_uses_inherited_value(monkeypatch):
+    library.set_setting("input.quest_buttons", 2)
+    monkeypatch.setattr(pipeline, "apply_suggestions", lambda *a: Recipe("test.quest"))
+    target = Target([])
+    assert pipeline.apply_suggestions_live("test.quest", ["adapter.scale=1"], target)
+    assert target.calls[0][1]["quest_buttons"] == 2
 
 
 def test_settings_apply_uses_frame_job_queue_and_selected_default():
