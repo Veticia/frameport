@@ -49,7 +49,8 @@ static int is_scene_extension(const char *name) { (void)name; return 0; }
 #include "quest_buttons.c"
 
 static char paths[1024][XR_MAX_PATH_LENGTH];
-static int path_count, offered, enum_calls;
+static int path_count, offered, enum_calls, create_calls;
+static XrResult reject_touch_once;
 static XrResult touch_result, frame_result, create_result;
 static XrPath runtime_profile;
 static XRAPI_ATTR XrResult XRAPI_CALL fake_string_to_path(XrInstance i, const char *s, XrPath *out) {
@@ -76,7 +77,10 @@ static XRAPI_ATTR XrResult XRAPI_CALL fake_suggest(XrInstance i, const XrInterac
         printf("%llu %s\n", (unsigned long long)(uintptr_t)s->suggestedBindings[k].action,
                paths[s->suggestedBindings[k].binding - 1]);
     if (!strcmp(profile, FRAME_PROFILE)) return frame_result;
-    if (!strcmp(profile, "/interaction_profiles/oculus/touch_controller")) return touch_result;
+    if (!strcmp(profile, "/interaction_profiles/oculus/touch_controller")) {
+        if (reject_touch_once) { XrResult r = reject_touch_once; reject_touch_once = 0; return r; }
+        return touch_result;
+    }
     return XR_ERROR_PATH_UNSUPPORTED;
 }
 static XRAPI_ATTR XrResult XRAPI_CALL fake_enumerate(const char *layer, uint32_t cap, uint32_t *n,
@@ -95,7 +99,7 @@ static XRAPI_ATTR XrResult XRAPI_CALL fake_enumerate(const char *layer, uint32_t
 static XRAPI_ATTR XrResult XRAPI_CALL fake_create(const XrInstanceCreateInfo *info, XrInstance *instance) {
     printf("CREATE %u\n", info->enabledExtensionCount);
     for (uint32_t k = 0; k < info->enabledExtensionCount; ++k) printf("EXT %s\n", info->enabledExtensionNames[k]);
-    *instance = (XrInstance)(uintptr_t)1;
+    if (XR_SUCCEEDED(create_result)) *instance = (XrInstance)(uintptr_t)++create_calls;
     return create_result;
 }
 static XRAPI_ATTR XrResult XRAPI_CALL fake_current(XrSession s, XrPath hand, XrInteractionProfileState *out) {
@@ -141,7 +145,22 @@ int main(int argc, char **argv) {
     printf("ENABLED %d\n", quest_buttons_enabled);
     char command[32], profile[XR_MAX_PATH_LENGTH];
     while (scanf("%31s", command) == 1) {
-        if (!strcmp(command, "profile")) {
+        if (!strcmp(command, "create")) {
+            int result;
+            if (scanf("%d %d", &offered, &result) != 2) return 2;
+            create_result = (XrResult)result;
+            xrCreateInstance(&ci, &instance);
+            printf("ENABLED %d\nACTIVE %llu\n", quest_buttons_enabled, (unsigned long long)(uintptr_t)active_instance);
+        } else if (!strcmp(command, "proximity")) {
+            unsigned thumb, trigger;
+            if (scanf("%u %u", &thumb, &trigger) != 2) return 2;
+            thumb_proximity_action = (XrAction)(uintptr_t)thumb;
+            trigger_proximity_action = (XrAction)(uintptr_t)trigger;
+        } else if (!strcmp(command, "reject_touch_once")) {
+            int result;
+            if (scanf("%d", &result) != 1) return 2;
+            reject_touch_once = (XrResult)result;
+        } else if (!strcmp(command, "profile")) {
             if (scanf("%255s", profile) != 1) return 2;
             runtime_profile = !strcmp(profile, "none") ? XR_NULL_PATH : P(profile);
             XrInteractionProfileState state = {XR_TYPE_INTERACTION_PROFILE_STATE};
@@ -193,7 +212,7 @@ def run(harness, mode=1, commands="", *, offered=1, requested=False, diag=False,
         controller_fix=False, create_result=0, proximity=0):
     p = subprocess.run([str(harness), str(mode), str(offered), str(int(requested)), str(int(diag)),
                         str(int(remap)), str(int(controller_fix)), str(create_result), str(proximity)],
-                       input=commands, capture_output=True, text=True)
+                       input=commands, capture_output=True, text=True, timeout=5)
     assert p.returncode == 0, p.stderr
     return p
 
@@ -339,12 +358,16 @@ def test_touch_pro_success_ignores_frame_failure(harness):
     assert p.stdout.endswith("RESULT 0\n")
 
 
-def test_all_dropped_bindings_are_counted(harness):
+@pytest.mark.parametrize("mode", [1, 2])
+@pytest.mark.parametrize("previous", [False, True])
+def test_all_dropped_bindings_are_counted(harness, mode, previous):
     first = [(1, "/user/hand/right/input/a/click")]
     dropped = [(1, "/user/hand/left/input/thumbrest/touch")]
-    p = run(harness, commands=suggest(first) + suggest(dropped))
-    assert calls(p) == [(TOUCH, first), (FRAME, translate(first, 1)), (TOUCH, dropped), (FRAME, [])]
-    assert "0 bindings, 1 dropped" in p.stderr
+    commands = (suggest(first) if previous else "") + suggest(dropped) + f"profile {FRAME}\n"
+    p = run(harness, mode, commands=commands)
+    assert calls(p) == ([(TOUCH, first), (FRAME, translate(first, mode))] if previous else []) + [(TOUCH, dropped)]
+    assert (f"quest_buttons: frame_controller bindings (mode {mode}, 0 bindings, 1 dropped): not suggested") in p.stderr
+    assert p.stdout.endswith(f"PROFILE {TOUCH if previous else FRAME}\n")
 
 
 @pytest.mark.parametrize("first", [False, True])
@@ -396,7 +419,8 @@ def test_setting_numbers_only_invalid_values_disable(harness, value):
 
 @pytest.mark.parametrize("offered", [0, 1])
 def test_current_profile_controller_fix_off(harness, offered):
-    p = run(harness, commands=f"profile {FRAME}\nprofile {TOUCH}\nprofile none\n"
+    bindings = [(1, "/user/hand/right/input/a/click")]
+    p = run(harness, commands=suggest(bindings) + f"profile {FRAME}\nprofile {TOUCH}\nprofile none\n"
             "profile /interaction_profiles/khr/generic_controller\n", offered=offered)
     profiles = [line.removeprefix("PROFILE ") for line in p.stdout.splitlines() if line.startswith("PROFILE ")]
     assert profiles == [TOUCH if offered else FRAME, TOUCH, "none", "/interaction_profiles/khr/generic_controller"]
@@ -423,13 +447,94 @@ def test_off_preserves_runtime_call_bytes(harness):
     assert "quest_buttons:" not in p.stderr
 
 
-def test_proximity_expansion_does_not_become_frame_bindings(harness):
+@pytest.mark.parametrize("mode", [1, 2])
+@pytest.mark.parametrize("profile", [TOUCH, PRO])
+def test_proximity_expansion_becomes_frame_bindings(harness, mode, profile):
     bindings = [(1, "/user/hand/left/input/thumb_fb/proximity_fb"),
                 (2, "/user/hand/right/input/trigger/value")]
-    p = run(harness, commands=suggest(bindings), proximity=1)
+    # Pro's unsupported proximity path is filtered out during remap, as before; known action handles still expand.
+    p = run(harness, mode, commands="proximity 1 3\n" + suggest(bindings, profile), proximity=2, remap=True)
     recorded = calls(p)
-    assert recorded[0][0] == TOUCH and len(recorded[0][1]) > len(bindings)
-    assert recorded[1] == (FRAME, translate(bindings, 1))
+    touch = recorded[-2]
+    assert touch[0] == TOUCH and len(touch[1]) > len(bindings)
+    assert recorded[-1] == (FRAME, translate(touch[1], mode))
+    frame_actions = {action for action, _ in recorded[-1][1]}
+    assert {1, 2, 3} <= frame_actions
+
+
+@pytest.mark.parametrize("mode", [1, 2])
+def test_bare_pose_parents_are_translated(harness, mode):
+    bindings = [(i, f"/user/hand/{hand}/input/{pose}") for i, (hand, pose) in
+                enumerate(((h, p) for h in ("left", "right") for p in ("grip", "aim")), 1)]
+    assert all(CONTRACT["common"][pose] == [pose] for pose in ("grip", "aim"))
+    p = run(harness, mode, suggest(bindings))
+    assert calls(p) == [(TOUCH, bindings), (FRAME, translate(bindings, mode))]
+
+
+@pytest.mark.parametrize("scenario,expected", [
+    ("none", FRAME), ("rejected", FRAME), ("generated", TOUCH),
+    ("own", FRAME), ("generated_then_own", FRAME), ("generated_then_rejected", TOUCH),
+])
+def test_profile_rewrite_requires_generated_binding(harness, scenario, expected):
+    bindings = [(1, "/user/hand/right/input/a/click")]
+    commands = ""
+    if scenario.startswith("generated"):
+        commands += suggest(bindings)
+    elif scenario == "rejected":
+        commands += suggest(bindings, frame_result=-22)
+    if scenario.endswith("own"):
+        commands += suggest(bindings, FRAME)
+    elif scenario == "generated_then_rejected":
+        commands += suggest(bindings, FRAME, frame_result=-22)
+    p = run(harness, commands=commands + f"profile {FRAME}\n")
+    assert p.stdout.endswith(f"PROFILE {expected}\n")
+
+
+@pytest.mark.parametrize("controller_fix", [False, True])
+def test_other_valve_profiles_keep_existing_controller_fix_behavior(harness, controller_fix):
+    other = "/interaction_profiles/valve/index_controller"
+    bindings = [(1, "/user/hand/right/input/a/click")]
+    p = run(harness, commands=suggest(bindings) + f"profile {other}\n", controller_fix=controller_fix)
+    assert p.stdout.endswith(f"PROFILE {TOUCH if controller_fix else other}\n")
+
+
+@pytest.mark.parametrize("offered", [0, 1])
+@pytest.mark.parametrize("owner", ["generated", "app"])
+def test_failed_second_instance_preserves_live_binding_state(harness, offered, owner):
+    bindings = [(1, "/user/hand/right/input/a/click")]
+    commands = suggest(bindings, FRAME if owner == "app" else TOUCH)
+    commands += f"create {offered} -2\nprofile {FRAME}\n" + suggest(bindings)
+    p = run(harness, commands=commands)
+    assert "ENABLED 1\nACTIVE 1\n" in p.stdout
+    assert f"PROFILE {FRAME if owner == 'app' else TOUCH}\n" in p.stdout
+    expected = [(FRAME, bindings), (TOUCH, bindings)] if owner == "app" else [
+        (TOUCH, bindings), (FRAME, translate(bindings, 1)), (TOUCH, bindings), (FRAME, translate(bindings, 1))]
+    assert calls(p) == expected
+
+
+@pytest.mark.parametrize("owner", ["generated", "app"])
+def test_successful_second_instance_resets_binding_ownership(harness, owner):
+    bindings = [(1, "/user/hand/right/input/a/click")]
+    commands = suggest(bindings, FRAME if owner == "app" else TOUCH)
+    commands += f"create 1 0\nprofile {FRAME}\n" + suggest(bindings)
+    p = run(harness, commands=commands)
+    assert "ENABLED 1\nACTIVE 2\n" in p.stdout
+    assert f"PROFILE {FRAME}\n" in p.stdout
+    initial = [(FRAME, bindings)] if owner == "app" else [(TOUCH, bindings), (FRAME, translate(bindings, 1))]
+    assert calls(p) == initial + [(TOUCH, bindings), (FRAME, translate(bindings, 1))]
+
+
+@pytest.mark.parametrize("profile", [TOUCH, PRO])
+def test_nested_proximity_fallback_does_not_deadlock_and_translates_accepted_set(harness, profile):
+    bindings = [(1, "/user/hand/left/input/x/click")]
+    commands = "proximity 3 4\nreject_touch_once -22\n" + suggest(bindings, profile) + suggest(bindings)
+    p = run(harness, commands=commands, remap=True, proximity=2)
+    recorded = calls(p)
+    offset = int(profile == PRO)
+    assert recorded[offset][0] == TOUCH and len(recorded[offset][1]) > len(bindings)
+    assert recorded[offset + 1:offset + 3] == [(TOUCH, bindings), (FRAME, translate(bindings, 1))]
+    # A second hook transaction also completes: all fallback paths released the mutex.
+    assert recorded[-1] == (FRAME, translate(recorded[-2][1], 1))
 
 
 def test_settings_and_hook_wiring():

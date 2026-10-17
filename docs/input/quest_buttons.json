@@ -15,7 +15,9 @@
     "thumbstick/y": ["thumbstick/y"],
     "thumbstick/click": ["thumbstick/click"],
     "thumbstick/touch": ["thumbstick/touch"],
+    "grip": ["grip"],
     "grip/pose": ["grip/pose"],
+    "aim": ["aim"],
     "aim/pose": ["aim/pose"]
   },
   "outputs": {"haptic": ["haptic"]},
