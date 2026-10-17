@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from frameport.install import files, drives
+from frameport.install import files
 from frameport.ui.views.files import FilesView, drive_locations, game_location
 
 
@@ -45,7 +45,8 @@ def test_game_install_locations(kind):
 def test_background_discovery_cached_and_game_open_uses_base(monkeypatch):
     calls = []
     frame = SimpleNamespace(home="/home/x")
-    app = SimpleNamespace(target=SimpleNamespace(frame=frame), frame_info={"installed": [
+    app = SimpleNamespace(target=SimpleNamespace(frame=frame, drives=lambda: calls.append("drives") or [
+        {"path": "/media/SD", "read_only": True}]), frame_info={"installed": [
         {"package": "linux", "kind": "linux", "base": "/media/SD/FramePort/linux"}]},
         run_bg=lambda fn, *args: fn(*args))
     v = FilesView(app)
@@ -53,8 +54,6 @@ def test_background_discovery_cached_and_game_open_uses_base(monkeypatch):
     monkeypatch.setattr(v, "load", lambda: None)
     monkeypatch.setattr(files, "storage_targets", lambda f, *a: calls.append("storage") or [
         {"id": "videos", "path": "/home/x/Videos", "android": "/sdcard/Movies"}])
-    monkeypatch.setattr(drives, "list_drives", lambda f: calls.append("drives") or [
-        {"path": "/media/SD", "read_only": True}])
     v._load_locations("linux")
     assert v.loc["path"] == "/media/SD/FramePort/linux"
     assert v.loc["read_only"] and all(c.disabled for c in v.toolbar.controls[:3])
@@ -100,11 +99,11 @@ def test_installed_games_include_all_kinds_sorted(monkeypatch):
 
 def test_empty_drives_cached(monkeypatch):
     calls = []
-    v = FilesView(SimpleNamespace(target=SimpleNamespace(frame=SimpleNamespace(home="/home/x")),
+    v = FilesView(SimpleNamespace(target=SimpleNamespace(frame=SimpleNamespace(home="/home/x"),
+                                                     drives=lambda: calls.append(1) or []),
                                  frame_info={"installed": []}))
     monkeypatch.setattr(v, "_render_locations", lambda: None)
     monkeypatch.setattr(files, "storage_targets", lambda f: [])
-    monkeypatch.setattr(drives, "list_drives", lambda f: calls.append(f) or [])
     v._load_locations(None)
     v._load_locations(None)
     assert v.drives == [] and len(calls) == 1

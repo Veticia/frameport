@@ -1,8 +1,9 @@
 """Files: browse and manage files on the Steam Frame (instead of a separate file-transfer app).
 
 Locations are the folders Quest games see (Videos / Downloads / Documents, shared by every game as /sdcard/Movies,
-/sdcard/Download, /sdcard/Documents), each installed Quest game's own storage, PC VR/Linux install folders, extra drives, and the Frame's home folder. Everything runs
-over the app's SSH connection (SFTP); uploads and downloads are jobs in the Activity panel. Persistent like the
+/sdcard/Download, /sdcard/Documents), each installed Quest game's own storage, PC VR/Linux install folders, extra
+drives, and the Frame's home folder. Everything runs over the app's SSH connection (SFTP); uploads and downloads
+are jobs in the Activity panel. Persistent like the
 Library: the chosen location and folder survive switching tabs.
 """
 from __future__ import annotations
@@ -275,10 +276,10 @@ class FilesView:
             self.status.value = tr("Couldn't read the Frame's folders: {exc}").format(exc=explain(exc))
             C.update(self.status)
         if self.drives is None:
-            from ...install.drives import list_drives
-
-            try:
-                self.drives = drive_locations(list_drives(frame))
+            try:  # the Frame target's list (as the Storage section and Move to… use), kept for the space check too
+                listed = self.app.target.drives()
+                self.app.frame_drives = listed
+                self.drives = drive_locations(listed)
             except Exception:  # older agents / temporarily unavailable; retry on the next mount
                 pass
         self._render_locations()
@@ -411,7 +412,8 @@ class FilesView:
         if e is None:
             return [*([(tr("Upload files…"), ft.Icons.UPLOAD_FILE_OUTLINED, self.upload_files),
                     (tr("Upload folder…"), ft.Icons.DRIVE_FOLDER_UPLOAD_OUTLINED, self.upload_folder),
-                    (tr("New folder…"), ft.Icons.CREATE_NEW_FOLDER_OUTLINED, lambda ev: self.new_folder())] if self._writable() else []),
+                    (tr("New folder…"), ft.Icons.CREATE_NEW_FOLDER_OUTLINED, lambda ev: self.new_folder())]
+                   if self._writable() else []),
                     None,
                     *([(tr("Select all"), ft.Icons.SELECT_ALL_ROUNDED, lambda ev: self._select_all())]
                       if any(self._selectable(x) for x in self.entries) else []),
