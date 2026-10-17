@@ -11,11 +11,11 @@ from pathlib import Path
 
 from ..artwork import fetch as artwork
 from ..build import sha256
+from ..core.controllers import effective_adapter_settings
 from ..core.events import Cancelled, Reporter
 from ..core.models import Recipe, data_manifest
 from ..frame.connection import Frame, sh_quote
 from ..patches import base
-from ..patches.frame.headset_model import adapter_settings
 
 
 @dataclass
@@ -31,7 +31,7 @@ class InstallPlan:
 
 
 def install_context(recipe: Recipe) -> base.InstallContext:
-    ctx = base.InstallContext(recipe.package, {}, {}, {}, adapter_settings(recipe.patches))
+    ctx = base.InstallContext(recipe.package, {}, {}, {}, effective_adapter_settings(recipe.patches))
     # device.foveation last: the player's explicit choice beats a recipe's lepton_env VK_INSTANCE_LAYERS
     for pid, params in sorted(recipe.patches.items(), key=lambda kv: kv[0] == "device.foveation"):
         patch = base.get(pid)
@@ -58,6 +58,8 @@ def configuration_args(entry: dict, recipe: Recipe) -> dict:
     build = entry.get("build") or {}
     applied = configuration(original, recipe.package, build.get("superseded"))
     settings = dict(applied["settings"])
+    # Preferences affect the runtime payload, never the recorded fingerprint.
+    settings["quest_buttons"] = ctx.adapter_settings["quest_buttons"]
     if foveation_preference(entry).get("mode") in ("tracked", "fixed"):
         settings.update(foveation_fix=1, foveation_storage_fix=1)
     return dict(settings=settings, files={k: v.decode() if isinstance(v, bytes) else v

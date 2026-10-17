@@ -1769,10 +1769,11 @@ def apply_suggestions_live(package: str, suggestions: list[str], target: Target 
     recipe = apply_suggestions(package, suggestions)
     if target is None or not adapter_only(suggestions):
         return False
-    from .patches.settings import SETTINGS, adapter_settings
+    from .core.controllers import effective_adapter_settings
+    from .patches.settings import SETTINGS
 
     numeric = {key for key, kind, *_ in SETTINGS if kind in ("int", "float")}
-    target.set_settings(package, {k: v for k, v in adapter_settings(recipe.patches).items() if k in numeric})
+    target.set_settings(package, {k: v for k, v in effective_adapter_settings(recipe.patches).items() if k in numeric})
     return True
 
 

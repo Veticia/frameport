@@ -24,14 +24,14 @@ TOOL_WHY = {"java": tr("Runs OVRPort and apksigner"), "overport": tr("Converts Q
 # the page's sections in order (the index on the left lists them): what most users need first (updates of the app and
 # their games, installing, where games come from, looks), then what only some need (link handlers, tools FramePort
 # manages itself, PC VR on this PC), "Uninstall FramePort" last
-SECTIONS = ("updates", "installing", "folders", "appearance", "data", "feedback", "links", "tools", "pc", "about",
-            "remove")
+SECTIONS = ("updates", "installing", "controllers", "folders", "appearance", "data", "feedback", "links", "tools",
+            "pc", "about", "remove")
 
 
 def section_titles() -> dict[str, str]:
     """Index labels of SECTIONS (the sections' own headings may be longer)."""
     return {"appearance": tr("Appearance"), "updates": tr("Updates"), "links": tr("Install links"),
-            "folders": tr("Library folders"),
+            "folders": tr("Library folders"), "controllers": tr("Controllers"),
             "installing": tr("Installing"), "tools": tr("Tools"), "pc": tr("This PC"), "data": tr("Data"),
             "feedback": tr("Problems and feedback"), "about": tr("About"), "remove": tr("Uninstall FramePort")}
 
@@ -171,6 +171,41 @@ class SettingsView:
                                   tooltip=tr("Your own game files aren't touched.")),
                           ft.Container(height=T.S2), self.ssh_keys()],
                          spacing=T.S2, horizontal_alignment=ft.CrossAxisAlignment.START)
+
+    def controllers(self) -> ft.Control:
+        from ...core import controllers, library
+        from ..controllers import diagram, diagram_source
+
+        app = self.app
+        preview = diagram(controllers.quest_buttons_default())
+
+        def changed(e):
+            mode = int(e.control.value)
+            library.set_setting("input.quest_buttons", mode)
+            preview.src = diagram_source(mode)
+            C.update(preview)
+
+        def apply(e):
+            def run(job):
+                applied = controllers.apply_default(app.target, job.reporter)
+                app.toast(tr_n("Applied to {n} game. Takes effect at the next launch.",
+                               "Applied to {n} games. Takes effect at the next launch.", len(applied)))
+                return applied
+            app.submit(tr("Apply controller buttons to installed games"), run, kind="tool-frame")
+
+        choice = C.dropdown(label=tr("Default controller buttons"),
+                            value=str(controllers.quest_buttons_default()), width=T.px(300),
+                            options=[ft.DropdownOption(str(v), tr(label)) for v, label in controllers.CHOICES],
+                            on_select=changed)
+        return ft.Column([
+            C.body(tr("Choose which Quest Touch buttons the Frame's face buttons send.")),
+            choice, preview,
+            C.meta(tr("Used when installing or updating games that follow the global default. "
+                      "Each game's Game settings can override it. Changes take effect at the next launch.")),
+            C.link(tr("Controller mapping guide"), REPO_URL + "/blob/main/docs/CONTROLLERS.md"),
+            *([C.secondary(tr("Apply to installed games now"), G.SYNC, apply)]
+              if app.frame_state == "connected" else []),
+        ], spacing=T.S3, horizontal_alignment=ft.CrossAxisAlignment.START)
 
     def library_folders(self) -> ft.Control:
         """Settings → Library folders: the folders "Rescan folders" scans (core/folders.py, GitHub discussion #351).
@@ -653,6 +688,8 @@ class SettingsView:
             "folders": C.section(tr("Library folders"), C.card(self.library_folders(), padding=T.S4),
                                  help="library_folders"),
             "installing": C.section(tr("Installing"), C.card(self.installing(), padding=T.S4), help="launch_test"),
+            "controllers": C.section(tr("Controllers"), C.card(self.controllers(), padding=T.S4),
+                                     help="quest_buttons"),
             "tools": C.section(tr("Tools"), C.card(self.tools, padding=ft.Padding(T.S4, T.S2, T.S4, T.S2)),
                                subtitle=tr("FramePort keeps its own copies; nothing is installed system-wide"),
                                action=ft.Row([C.ghost(tr("Update tools"), ft.Icons.UPDATE_ROUNDED,

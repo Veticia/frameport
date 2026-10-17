@@ -47,11 +47,11 @@ def model(params):
     return MODELS[key]
 
 
-def adapter_settings(recipe_patches):
+def adapter_settings(recipe_patches, *, defaults=None):
     """Share the device choice with embedded settings and configuration-only updates."""
     from ..settings import adapter_settings as other_settings
 
-    out = other_settings(recipe_patches)
+    out = other_settings(recipe_patches, defaults=defaults)
     if "device.headset_model" in recipe_patches:
         out["headset_model"] = model(recipe_patches["device.headset_model"])[0]
     return out
