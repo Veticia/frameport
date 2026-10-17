@@ -234,9 +234,9 @@ def translate(bindings, mode):
             elif kind == "input" and component not in CONTRACT["dropped"]:
                 targets = CONTRACT["common"].get(component, [])
                 button, _, suffix = component.partition("/")
-                if ((button in buttons and suffix in ("click", "touch")) or
-                        (button == "menu" and suffix == "click")):
-                    targets = [f"{target}/{suffix}" for target in
+                if ((button in buttons and suffix in ("", "click", "touch")) or
+                        (button == "menu" and suffix in ("", "click"))):
+                    targets = [f"{target}/{suffix}" if suffix else target for target in
                                CONTRACT["modes"][str(mode)][hand].get(button, [])]
             out.extend((action, f"{prefix}{kind}/{target}") for target in targets)
     return out
@@ -248,6 +248,7 @@ def full_bindings():
         parts = [f"input/{p}" for p in CONTRACT["common"]]
         parts += [f"output/{p}" for p in CONTRACT["outputs"]]
         parts += [f"input/{button}/{component}" for button in buttons for component in ("click", "touch")]
+        parts += [f"input/{button}" for button in buttons] + ["input/menu"]
         parts += [f"input/{p}" for p in CONTRACT["dropped"]]
         parts += ["input/menu/click", "input/menu/touch", "input/unknown/click", "input/trigger/click",
                   "input/squeeze/click", "input/thumb_fb/proximity_fb", "output/unknown", "input/a/value"]
