@@ -10,6 +10,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT = ROOT / "docs/input/quest_buttons.json"
+# d-pad direction marks: triangle corners around the label's centre
+ARROWS = {"↑": ((0, -4), (-5, 3), (5, 3)), "↓": ((0, 4), (-5, -3), (5, -3)),
+          "←": ((-4, 0), (3, -5), (3, 5)), "→": ((4, 0), (-3, -5), (-3, 5))}
 DOC = ROOT / "docs/CONTROLLERS.md"
 START = "<!-- quest-buttons-table:start -->"
 END = "<!-- quest-buttons-table:end -->"
@@ -65,7 +68,11 @@ def illustration(data: dict, colors: dict, mode: str | None = None) -> str:
             color = colors["TEXT_3"]
         parts.append(f'<circle cx="{x}" cy="{y}" r="25" fill="{colors["SURFACE_2"]}" '
                      f'stroke="{color}" stroke-width="1.5"/>')
-        text(x, y - 6, physical, 11, colors["TEXT_2"], "middle")
+        if physical in ARROWS:  # drawn, not text: the app's SVG renderer has no arrow glyphs
+            (ax, ay), (bx, by), (cx_, cy_) = ((x + px, y - 10 + py) for px, py in ARROWS[physical])
+            parts.append(f'<polygon points="{ax},{ay} {bx},{by} {cx_},{cy_}" fill="{colors["TEXT_2"]}"/>')
+        else:
+            text(x, y - 6, physical, 11, colors["TEXT_2"], "middle")
         text(x, y + 15, touch, 19 if len(touch) == 1 else 13, color, "middle", 600)
 
     def small(x, y, physical, touch):

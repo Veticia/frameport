@@ -9,16 +9,16 @@
 <text x="20" y="55" fill="#A7ABB7" font-size="13" font-weight="400" text-anchor="start">Physical button above · Touch input below</text>
 <text x="140" y="84" fill="#A7ABB7" font-size="13" font-weight="400" text-anchor="middle">Left</text>
 <circle cx="140" cy="111" r="25" fill="#1D1F27" stroke="#FF8A1F" stroke-width="1.5"/>
-<text x="140" y="105" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">↑</text>
+<polygon points="140,97 135,104 145,104" fill="#A7ABB7"/>
 <text x="140" y="126" fill="#FF8A1F" font-size="19" font-weight="600" text-anchor="middle">Y</text>
 <circle cx="90" cy="161" r="25" fill="#1D1F27" stroke="#FF8A1F" stroke-width="1.5"/>
-<text x="90" y="155" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">←</text>
+<polygon points="86,151 93,146 93,156" fill="#A7ABB7"/>
 <text x="90" y="176" fill="#FF8A1F" font-size="19" font-weight="600" text-anchor="middle">Y</text>
 <circle cx="190" cy="161" r="25" fill="#1D1F27" stroke="#FF8A1F" stroke-width="1.5"/>
-<text x="190" y="155" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">→</text>
+<polygon points="194,151 187,146 187,156" fill="#A7ABB7"/>
 <text x="190" y="176" fill="#FF8A1F" font-size="19" font-weight="600" text-anchor="middle">Y</text>
 <circle cx="140" cy="211" r="25" fill="#1D1F27" stroke="#3AA8FF" stroke-width="1.5"/>
-<text x="140" y="205" fill="#A7ABB7" font-size="11" font-weight="400" text-anchor="middle">↓</text>
+<polygon points="140,205 135,198 145,198" fill="#A7ABB7"/>
 <text x="140" y="226" fill="#3AA8FF" font-size="19" font-weight="600" text-anchor="middle">X</text>
 <rect x="83" y="241" width="114" height="32" rx="8" fill="#1D1F27"/>
 <text x="140" y="262" fill="#A7ABB7" font-size="12" font-weight="400" text-anchor="middle">View: Menu</text>
