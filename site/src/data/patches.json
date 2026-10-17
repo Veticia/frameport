@@ -384,6 +384,11 @@
   "title": "Foveated rendering (Valve)",
   "group": "Files and settings on the Frame"
  },
+ "device.headset_model": {
+  "anchor": "device-headset_model",
+  "title": "Headset model",
+  "group": "Files and settings on the Frame"
+ },
  "device.hide_navbar": {
   "anchor": "device-hide_navbar",
   "title": "Hide Android's navigation bar",

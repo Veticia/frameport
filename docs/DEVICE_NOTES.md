@@ -656,3 +656,65 @@ per game; add_from_link clears the offer and keeps a name the user gave). CLI `f
 ## XR_FB_color_space (#336)
 
 OutRun Quest VR (`org.outrun.quest.vr`, its own Khronos loader, no OVRPlugin) logs "Rec.709 color space unavailable" right after xrCreateInstance and quits ~20 s later without a session: the Frame's runtime (and OVRPort's dispatcher) list no XR_FB_color_space. Adapter setting `fb_color_space` (off by default, `native/adapter/color_space.c`) offers the extension when the runtime lacks it, strips it from the runtime's create info, fills XrSystemColorSpacePropertiesFB with Rec.709 and answers xrEnumerateColorSpacesFB / xrSetColorSpaceFB (no conversion: the runtime has no API for it). The functions are reachable through FrameBridge's xrGetInstanceProcAddr and `framebridge_extension_proc` (xrshim); OVRPort's fixed dispatcher table can't forward them, hence off by default. Not yet tried on the device (the build was not downloaded: it ships Sega's game data). Log: `color_space: emulating XR_FB_color_space`.
+
+## Per-game headset identity (#373, 2026-10-17)
+
+Owner decision: all Quest / OVRPort conversions default to Quest 3; Customize → Headset model offers Quest 3,
+Quest 3S, Quest Pro and Quest 2. Rebuild and reinstall after changing it. Rift, Linux and 2D apps are excluded.
+Target: Asgard's Wrath 2's **Enhanced Rendering Features** and **90 Hz Mode**. This implementation has static and
+host tests; unlocking those options and actual 90 Hz presentation still need an owner headset check.
+
+Device evidence supplied by the owner (headless Transformers, OVRPort runtime 3.4.3-aa54c3f): Lepton's image already
+sets `ro.product.model=Lepton`, manufacturer `Valve`, device `lepton_arm64_only`. A `LEPTON_GFXRECON_*` boot-property
+line cannot replace existing write-once `ro.*` values. Removed the WIP headset property injection. Android
+`Build.MODEL` stays Lepton. A general app-start dex/reflection override is follow-up: the existing `Dex.return_early`
+tooling replaces method bodies, but does not supply a universal early startup hook that safely sets Build fields.
+
+OVRPlugin logged `venderId 10291, systemName Oculus Quest2` even with FrameBridge rewriting the name. The APK's
+`lib/arm64-v8a/libopenxr_loader.so` dispatcher sits above FrameBridge: `xrGetSystemProperties` at VA `0x18554`
+overwrites the name (`0x18620`–`0x18638`, string at file/VA `0x6034`) and returns its own
+`XR_META_headset_id` (`0x186e8` loads address `0x29338`, `0x18778`–`0x1877c` copies 16 bytes;
+UUID file offset `0x21338`). Vendor id remains 10291. A lower-layer-only override cannot fix those answers.
+
+Disassembly of the supplied Unreal `libOVRPlugin.so`:
+
+- `ovrp_GetSystemHeadsetType` at `0x251730` calls `ovrp_GetSystemHeadsetType2` at `0x247bb0`, which calls the
+  `0x2590b0` thunk → `0x292f80`.
+- System properties' name is copied to the global std::string `0x62d328` at `0x261b30`–`0x261b3c`.
+  `0x261b9c`–`0x261bb4` stores the headset-id-present flag (`0x62d2c0`) and UUID (`0x62d2c1`).
+- `0x292f80` checks that flag. When present it compares the UUID, in inline 64-bit constants, returning
+  Quest 1 = 8 (`0x293134`), Quest 2 = 9 (`0x2931ac`), Pro = 10 (`0x2931b8`),
+  Quest 3 = 11 (`0x2931c4`), Quest 3S = 12 (`0x293060`–`0x29309c`). Unknown UUID → 9.
+- Only without the UUID does `0x2930a8` fall back to systemName (older Quest/Pro names, default 9).
+  `0x292d60` is a separate product-name normalizer: it recognizes newer Meta names but returns the generic
+  `Meta Quest` for known Quest products. It is not the headset-type selector. Android Build is not consulted
+  in the traced headset-type path.
+- Cross-check: the available armv7 OVRPlugin's Thumb entry `0x120c5c` → thunk `0x12bc38` → `0x148ac8`
+  likewise tests UUID first (16-byte comparisons), then name at `0x148b1a`. This older build recognizes through
+  Quest 3 (return 11 at `0x148b14`), not Quest 3S. It is consistent with the Unreal mapping for Quest 2/Pro/3.
+
+Raw XrUuidEXT byte order (hyphens just group sequential bytes; do not swap GUID fields):
+
+| Model | UUID | Unreal headset type |
+| --- | --- | --- |
+| Quest 2 | `3064f239-15ed-4722-a659-5ea1ecd899c2` | 9 |
+| Quest Pro | `b58443c9-df86-40cd-8918-2a278e18ab71` | 10 |
+| Quest 3 | `082746ba-a071-4cf7-8f87-bade5cce43ce` | 11 |
+| Quest 3S | `9510492b-0d42-4872-bcf4-fb1a8def6f0e` | 12 |
+
+`device.headset_model` now applies at APK stage after FrameBridge. It verifies original name, UUID and the
+instructions loading both in the known dispatcher before writing either. Unknown builds fail with an explicit
+unsupported-dispatcher message and a Quest 2 escape hatch. Same-size data edits only: NUL-padded 14-byte name and
+16-byte UUID. Quest Pro uses the short dispatcher label `Quest Pro` because `Meta Quest Pro` plus NUL needs 15 bytes;
+its UUID selects type 10. Quest 2 changes no dispatcher bytes and adds no embedded headset setting (native default preserves the old name).
+FrameBridge retains the full standard name override
+for apps calling it directly; setting 2 preserves its original result. No UUID extension is invented in FrameBridge.
+
+Owner verification: rebuild/reinstall Asgard's Wrath 2 with Quest 3 selected. Capture the OVRPlugin line containing
+`venderId 10291, systemName Meta Quest 3`, and its `HeadsetId:` line (16 hex bytes matching Quest 3 above).
+Capture any game/OVRPlugin headset-type line: expect `Meta_Quest_3` / `Quest_3` / numeric 11 if the build logs it;
+absence of such a line is not proof of failure. In the headset check both named graphics options become available,
+can be enabled and persist after restart. Check actual runtime refresh/pacing separately when selecting 90 Hz;
+identity alone does not implement refresh-rate support. Rebuild with Quest 2 for the control: original `Oculus Quest2`,
+original Quest 2 UUID, type 9 if logged, and previous option visibility. Also smoke-test a Unity OVRPlugin game
+with the default Quest 3 choice for regressions. No device access was used during implementation.

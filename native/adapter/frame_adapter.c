@@ -177,12 +177,15 @@ static int equirect_stereo;  // 0 auto (mono if the layer limit can't hold both 
 static XrTime last_predicted_time;
 static void render_model_init(const char *package);
 
+#include "headset_model.c"
+
 static void read_settings(const char *path) {
     FILE *f = fopen(path, "r");
     if (!f) return;
     char line[256];
     float value;
     while (fgets(line, sizeof(line), f)) {
+        headset_model_setting(line);
         if (sscanf(line, "scale=%f", &value) == 1 && value >= 0.5f && value <= 2.0f) scale = value;
         if (sscanf(line, "foveation_fix=%f", &value) == 1) foveation_fix = value != 0;
         if (sscanf(line, "foveation_storage_fix=%f", &value) == 1) foveation_storage_fix = value != 0;
@@ -925,6 +928,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrGetSystemProperties(XrInstance instance, XrSyst
     PFN_xrGetSystemProperties fn = (PFN_xrGetSystemProperties)lookup(instance, "xrGetSystemProperties");
     if (!fn) return XR_ERROR_FUNCTION_UNSUPPORTED;
     XrResult result = fn(instance, system, properties);
+    if (XR_SUCCEEDED(result)) headset_model_properties(properties);
     if (XR_SUCCEEDED(result)) color_space_properties(properties);
     if (XR_SUCCEEDED(result) && properties && properties->graphicsProperties.maxLayerCount)
         runtime_max_layers = properties->graphicsProperties.maxLayerCount;

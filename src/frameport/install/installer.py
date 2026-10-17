@@ -15,7 +15,7 @@ from ..core.events import Cancelled, Reporter
 from ..core.models import Recipe, data_manifest
 from ..frame.connection import Frame, sh_quote
 from ..patches import base
-from ..patches.settings import adapter_settings
+from ..patches.frame.headset_model import adapter_settings
 
 
 @dataclass

@@ -359,6 +359,12 @@ def _migrate(data: dict) -> bool:
             games.pop(pkg)
         done.append("drop_stub_entries")
         changed = True
+    if "headset_model_quest3" not in done:
+        from ..patches.frame.headset_model import migrate
+
+        migrate(data)
+        done.append("headset_model_quest3")
+        changed = True
     return changed
 
 

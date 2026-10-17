@@ -14,9 +14,12 @@ OVRPLUGIN = "libOVRPlugin.so"
 
 
 def settings_text(recipe_patches: dict) -> bytes:
-    from ..settings import adapter_settings
+    from .headset_model import adapter_settings
 
-    return "".join(f"{k}={v}\n" for k, v in adapter_settings(recipe_patches).items()).encode()
+    settings = adapter_settings(recipe_patches)
+    if settings.get("headset_model") == 2:
+        settings.pop("headset_model")  # native default 0 preserves the old name; keep Quest 2 settings byte-stable
+    return "".join(f"{k}={v}\n" for k, v in settings.items()).encode()
 
 
 class FrameBridgeAdapter(Patch):

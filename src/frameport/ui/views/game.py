@@ -771,7 +771,10 @@ class GameView:
                         r.patches[pid] = {key: value}
                     r.reasons[pid] = tr("Chosen by you.")
                 else:
-                    r.patches.pop(pid, None)
+                    if pid == "device.headset_model":
+                        r.patches[pid] = {}  # the empty choice is Quest 3, the always-on default
+                    else:
+                        r.patches.pop(pid, None)
                 save(r)
                 if pid == "device.foveation":
                     app.open_game(package, advanced=True, show_all=self.show_all)

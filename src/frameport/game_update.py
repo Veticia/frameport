@@ -35,7 +35,8 @@ def apk_recipe_fingerprint(recipe: dict, package: str = "", superseded=None) -> 
 
 
 def configuration(recipe: dict, package: str = "", superseded=None) -> dict:
-    from .patches.settings import BASE_SETTINGS, SETTINGS, adapter_settings
+    from .patches.frame.headset_model import adapter_settings
+    from .patches.settings import BASE_SETTINGS, SETTINGS
 
     patches = upstream.without_superseded(recipe.get("patches") or {}, superseded)
     # Explicit defaults override settings embedded in an older APK when a recipe removes an override.

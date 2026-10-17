@@ -2,7 +2,7 @@
 
 # Patches
 
-Every patch and game setting FramePort knows: 181 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
+Every patch and game setting FramePort knows: 182 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
 
 Each entry says what the patch does, whether it changes the APK or only the install, when FramePort suggests it, its options, the catalog games whose recipe names it and the launch-test signatures that suggest it. Patches that are on by default are on for every game, so the catalog rarely names them.
 
@@ -13,7 +13,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 - [Patches from OVRPort](#group-overport) (25)
 - [Steam Frame patches](#group-frame) (61)
 - [Game settings](#group-adapter) (73)
-- [Files and settings on the Frame](#group-device) (9)
+- [Files and settings on the Frame](#group-device) (10)
 - [PC VR (Proton and Revive)](#group-pcvr) (13)
 
 ## Index
@@ -156,7 +156,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Refresh rate](#adapter-refresh_rate) | `adapter.refresh_rate` | Game settings | 3 |
 | [Wait for the game's GPU](#adapter-release_wait) | `adapter.release_wait` | Game settings |  |
 | [Re-create play space](#adapter-respace_kick) | `adapter.respace_kick` | Game settings |  |
-| [Sharpness](#adapter-scale) | `adapter.scale` | Game settings | 8 |
+| [Sharpness](#adapter-scale) | `adapter.scale` | Game settings | 9 |
 | [Room depth](#adapter-scene_depth) | `adapter.scene_depth` | Game settings |  |
 | [Pretend room layout](#adapter-scene_emul) | `adapter.scene_emul` | Game settings | 12 |
 | [Room height](#adapter-scene_height) | `adapter.scene_height` | Game settings |  |
@@ -183,6 +183,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Show as VR or as a flat window](#device-display_mode) | `device.display_mode` | Files and settings on the Frame |  |
 | [Settings files for the game](#device-files) | `device.files` | Files and settings on the Frame | 3 |
 | [Foveated rendering (Valve)](#device-foveation) | `device.foveation` | Files and settings on the Frame | 5 |
+| [Headset model](#device-headset_model) | `device.headset_model` | Files and settings on the Frame | default |
 | [Hide Android's navigation bar](#device-hide_navbar) | `device.hide_navbar` | Files and settings on the Frame |  |
 | [Game language](#device-language) | `device.language` | Files and settings on the Frame |  |
 | [Extra Lepton settings](#device-lepton_env) | `device.lepton_env` | Files and settings on the Frame | 3 |
@@ -2065,7 +2066,7 @@ Higher looks sharper but needs more power; lower runs smoother. 1.0× is the gam
 - **Options:**
   - Value: float, default `1.0` (always written).
   - Game settings → Picture → "Sharpness": slider 0.5–2 in steps of 0.1.
-- **Catalog games (8):** 4XVR Video Player, BlazeRush, cubism, FGO VR, I Expect You To Die 2, The 7th Guest VR, Vampire: The Masquerade - Justice, Walkabout Mini Golf.
+- **Catalog games (9):** 4XVR Video Player, BlazeRush, CrazyTaxiVR, cubism, FGO VR, I Expect You To Die 2, The 7th Guest VR, Vampire: The Masquerade - Justice and 1 more.
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
 
 > Multiplies the recommended eye-buffer width and height (0.5–2.0). 1.5 ≈ 2.25× pixels.
@@ -2460,6 +2461,20 @@ Render less detail outside your gaze; adjust the full-resolution area or darken 
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
 
 > Reduces shading away from the full-resolution area, following each eye's gaze. Default area size keeps the runtime's current profile unchanged. Custom radius is a fraction of the shorter eye-image dimension; the transition ends at twice that radius. Larger areas retain more detail but save less GPU work. Fixed stops the area following your eyes. The optional test darkens actual coarse-shaded fragments; rebuild/reinstall to toggle it. Tested on RE4, Deadpool and Asgard's Wrath 2. The Climb 2 gets a version-guarded private bridge at 1.0 scale; Batman gets its hash-verified allocation fix (unsupported OVRPlugin versions are refused). Other games may need additional fixes; turn this off if artifacts appear.
+
+### <a id="device-headset_model"></a>Headset model
+
+Choose the headset identity the game sees; Quest 3 is the default.
+
+- `device.headset_model` · on by default
+- **Changes:** Changes the APK (a rebuild and reinstall apply it).
+- **Suggested (on):** Quest 3 hardware is closest to Steam Frame: report Quest 3 by default.
+- **Options:** `model`: str, default empty — Headset model reported to the game.
+- **Suggested by launch-test signatures:**
+  - `quest2-headset-identity` (info): OVRPlugin sees OVRPort's Quest 2 identity.
+- **Source:** [patches/frame/headset_model.py](../src/frameport/patches/frame/headset_model.py)
+
+> Choose the OpenXR headset name and headset UUID reported to Quest games. Quest 3 is the default; Quest 2 preserves OVRPort's original answers. Requires a rebuild. Android Build.MODEL remains Lepton.
 
 ### <a id="device-hide_navbar"></a>Hide Android's navigation bar
 
