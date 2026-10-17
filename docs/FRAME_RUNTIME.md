@@ -396,7 +396,8 @@ over Quest games.
 
 ## Shared foveation controls (tested 2026-10-12)
 
-Under a Quest game's Advanced patches, choose **Foveated rendering → Eye-tracked**, then **Update on Frame**.
+Under a Quest game's **Game settings → Picture**, choose **Foveated rendering → Eye-tracked**, then **Save**.
+Changes apply at the next game start.
 The full-resolution area selector defaults to **Default (30% radius)**: no radius override, preserving the
 runtime profile used in the headset experiments. Larger radii retain more detail and save less shading work.
 Custom radii set `FOVE_INNER`; `FOVE_OUTER` is twice that value, matching the runtime's profile proportions.
@@ -404,7 +405,7 @@ The inspected runtime's built-in inner/outer pairs are 0.30/0.60, 0.25/0.50 and 
 The shared-texture injection path selects profile 1: 0.30 inner radius and 0.60 outer radius.
 
 `device.foveation` enables Valve's shared Vulkan injection and suppresses competing native foveation through
-`foveation_fix=1`. Recipes and shared catalog entries preserve mode, radius and test selection. This remains
+`foveation_fix=1`. Game settings stores mode, radius and test selection as a per-game library preference, outside shared recipes. This remains
 experimental: complete images were confirmed in RE4, Batman, Deadpool, The Climb 2 and Asgard's Wrath 2,
 not all Quest games or renderers. RE4 and Batman checks include title/calibration scenes; these are not
 equivalent to extended gameplay coverage. Asgard gameplay was visually confirmed, without an on/off benchmark.
@@ -420,14 +421,14 @@ installation. The runtime correction additionally checks the exact Valve library
 instructions before touching executable memory; unsupported libraries request injection be disabled and log
 the reason. No system library is changed. A SteamOS update requires revalidation of this compatibility path.
 Both-eye gaze following was confirmed in Climb's darkening diagnostic, but long-session stability remains
-experimental. Off rebuilds from the source APK and removes this private support, including its visibility fix.
+experimental. Off disables injection through launcher exports; the private APK compatibility support remains installed.
 
-**Darken lower-resolution regions (test)** adds an optional Vulkan shader diagnostic. It dims RGB where the
+**Darken coarse fragments (test)** enables the dormant Vulkan shader diagnostic. It dims RGB where the
 actual `FragSizeEXT` footprint exceeds one pixel; alpha is unchanged. Deadpool's shaded regions were confirmed
 to follow gaze in the headset. Unsupported shader output interfaces are skipped, and multiple passes may
 compound darkening, so this is a diagnostic rather than a precise composited mask. Do not benchmark with it on.
-Uncheck it and update from the original source APK to remove the diagnostic library, except in Climb where
-the same library also carries the compatibility correction. Darkening stays dormant without its launcher opt-in.
+Uncheck it and save Game settings to remove the launcher opt-in. The library stays installed and dormant;
+in Climb the same library also carries the compatibility correction.
 
 High-resolution Deadpool samples crossed from about 45 to 90 FPS with injection enabled, but temperatures and
 power rose as it rendered twice as many frames. Foveation does not guarantee lower temperature at uncapped FPS.
@@ -455,3 +456,20 @@ sighting, command lines checked once per process, render fds cached (rescanned e
 game processes without one), temperatures every 2 s, the CPU-cluster power rails every 5 s and the battery gauge every
 2-10 s, the stream measured ~10-13 ms CPU per 1 s tick on the device (idle clocks; idle or with 4XVR running) = about
 1 % of one core, ~0.15 % of the whole CPU. The I2C sensors (power monitors, battery gauge) are the slowest reads.
+
+### Foveation user preferences (discussion #365)
+
+Game settings → Picture provides Default / Eye-tracked / Fixed / Off, radius, and an advanced diagnostic switch.
+`set_settings` (agent 98) atomically rewrites just the managed launcher exports and records them in deployment.json;
+no APK rebuild, reinstall or live device intervention is needed. Changes apply at the next start. Default restores
+recipe/catalog launcher defaults; explicit preferences win. One-time library migration extracts old recipe choices
+and leaves internal APK compatibility support. Catalog defaults (including Climb 2 and Batman) still apply to new
+entries. Shared working configs omit `device.foveation` entirely.
+
+APK-side: adapter builds automatically prepare Batman's hash-verified allocation fix and Climb 2's
+renderer-guarded private bridge for verified builds, independently of the runtime choice. Unknown versions skip
+automatic compatibility edits; explicit catalog requests still fail validation rather than guessing offsets. FrameBridge
+builds include the dormant diagnostic layer (activated only by `FRAMEPORT_FOVEATION_TEST=1`), so future test toggles
+need only a launcher update. Existing builds need one normal update to acquire that support. Render resolution
+(supersampling) changes the game's render resolution: higher is sharper but slower. Climb 2 foveation still requires
+1.0 scale.

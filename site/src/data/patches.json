@@ -251,7 +251,7 @@
  },
  "adapter.scale": {
   "anchor": "adapter-scale",
-  "title": "Sharpness",
+  "title": "Render resolution (supersampling)",
   "group": "Game settings"
  },
  "adapter.scene_depth": {

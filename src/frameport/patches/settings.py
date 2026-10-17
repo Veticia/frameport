@@ -297,9 +297,19 @@ HIDDEN = {"surface_native", "gl_int_attribs"}
 GROUPS = [("picture", "Picture"), ("controllers", "Controllers"), ("screens", "Menus and screens"),
           ("room", "Mixed reality"), ("video360", "360° pictures and video"), ("troubleshooting", "Troubleshooting")]
 REFRESH_CHOICES = [(0.0, "Game's choice"), *((float(hz), f"{hz} Hz") for hz in (72, 80, 90, 96, 108, 120, 144))]
+FOVEATION_UI = {
+    "mode": dict(group="picture", level="common", label="Foveated rendering (Valve)",
+                 help="Reduces shading away from the full-resolution area. Changes apply at the next game start."),
+    "radius": dict(group="picture", level="common", label="Full-resolution area",
+                   help="Larger areas retain more detail but save less GPU work."),
+    "test": dict(group="picture", level="advanced", label="Darken coarse fragments (test)",
+                 help="Diagnostic only; do not use for benchmarking."),
+}
+
 UI: dict[str, dict] = {
-    "scale": dict(group="picture", level="common", label="Sharpness",
-                  help="Higher looks sharper but needs more power; lower runs smoother. 1.0× is the game's own.",
+    "scale": dict(group="picture", level="common", label="Render resolution (supersampling)",
+                  help="Changes the game's render resolution. Higher is sharper but slower; 1.0× is the game's own "
+                       "resolution.",
                   control=("slider", 0.5, 2.0, 0.1, "{:.1f}×")),
     "refresh_rate": dict(group="picture", level="common", label="Refresh rate",
                          help="How often the picture updates. Higher is smoother if the game can keep up.",
@@ -817,7 +827,7 @@ class Foveation(Patch):
                    "Default area size keeps the runtime's current profile unchanged. Custom radius is a fraction "
                    "of the shorter eye-image dimension; the transition ends at twice that radius. Larger areas "
                    "retain more detail but save less GPU work. Fixed stops the area following your eyes. "
-                   "The optional test darkens actual coarse-shaded fragments; rebuild/reinstall to toggle it. "
+                   "The optional test darkens actual coarse-shaded fragments. Runtime choices are in Game settings. "
                    "Tested on RE4, Deadpool and Asgard's Wrath 2. "
                    "The Climb 2 gets a version-guarded private bridge at 1.0 scale; Batman gets its "
                    "hash-verified allocation fix (unsupported OVRPlugin versions are refused). Other games may "
@@ -828,7 +838,8 @@ class Foveation(Patch):
     revision = 3
     order = 95  # after renderer/bridge replacements
     experimental = True
-    params = [Param("mode", "str", "", "tracked, fixed or off (empty = Valve's default)"),
+    params = [Param("support", "bool", False, "Internal APK compatibility support"),
+              Param("mode", "str", "", "Catalog default: tracked, fixed or off (empty = Valve's default)"),
               Param("radius", "float", 0.0, "Full-resolution radius; 0 keeps the current runtime default", 0, 0.45),
               Param("test", "bool", False, "Darken lower-resolution regions (diagnostic)")]
     CHOICES = (("", "Default"), ("tracked", "Eye-tracked"),
@@ -930,3 +941,24 @@ register(SteamGamepad)
 register(TextInputWindow)
 register(DisplayMode)
 register(Foveation)
+
+
+FOVEATION_ENV_KEYS = ("FDM_DEBUG", "ENABLE_VULKAN_FDM_INJECTION_LAYER",
+    "LEPTON_ENV_DISABLE_VULKAN_FDM_INJECTION_LAYER", "VK_INSTANCE_LAYERS", "FOVE_INNER", "FOVE_OUTER",
+    "LEPTON_ENV_FRAMEPORT_FOVEATION_TEST", "LEPTON_ENV_FRAMEPORT_CLIMB_STEREO_OFFSETS",
+    "LEPTON_ENV_FRAMEPORT_VRAPI_FDM_ISOLATE_MONO", "LEPTON_ENV_FRAMEPORT_VRAPI_KEEP_FOCUSED_IMAGE")
+
+
+def foveation_preference(entry):
+    if "foveation" in entry:
+        return dict(entry["foveation"])
+    params = ((entry.get("recipe") or {}).get("patches") or {}).get("device.foveation") or {}
+    return {k: v for k, v in params.items() if k in ("mode", "radius", "test")}
+
+
+def foveation_env(package, params, settings=None, baseline=None):
+    """Complete launcher override; None removes an obsolete export, including on Default."""
+    from .base import InstallContext
+    ctx = InstallContext(package, params, {}, dict(baseline or {}), dict(settings or {}))
+    Foveation().install(ctx)
+    return {key: ctx.env.get(key) for key in FOVEATION_ENV_KEYS}

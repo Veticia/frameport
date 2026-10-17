@@ -130,7 +130,9 @@ def test_build_leaves_out_the_haptic_workaround_with_a_fixed_runtime(tmp_path, m
     with zipfile.ZipFile(apk, "w") as z:
         z.writestr("lib/arm64-v8a/libopenxr_loader.so", runtime)
         z.writestr("lib/arm64-v8a/libopenxr_loader_generic.so", b"loader")
-    monkeypatch.setattr(adapter, "artifact", lambda abi, name: b"artifact " + name.encode())
+    real_artifact = adapter.artifact
+    monkeypatch.setattr(adapter, "artifact", lambda abi, name: real_artifact(abi, name)
+                        if name == adapter.GENERIC else b"artifact " + name.encode())
     recipe = Recipe("com.x", patches={"frame.adapter": {}, "adapter.haptic_fix": {"value": 1}})
     analysis = Analysis(package="com.x", version="1", label="X", abis=["arm64-v8a"], engine="Unity", xr="OpenXR",
                         graphics="Vulkan", direct_vrapi=False, libs=["libOVRPlugin.so"], launcher_activity=None,

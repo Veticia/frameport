@@ -46,10 +46,20 @@ def configuration_args(entry: dict, recipe: Recipe) -> dict:
     from ..game_update import configuration, configuration_fingerprint
 
     ctx = install_context(recipe)
+    from ..patches.settings import foveation_env, foveation_preference
+
+    overrides = foveation_env(recipe.package, foveation_preference(entry), ctx.adapter_settings, ctx.env)
+    for key, value in overrides.items():
+        if value is None:
+            ctx.env.pop(key, None)
+        else:
+            ctx.env[key] = value
     original = entry["recipe"]
     build = entry.get("build") or {}
     applied = configuration(original, recipe.package, build.get("superseded"))
-    settings = applied["settings"]
+    settings = dict(applied["settings"])
+    if foveation_preference(entry).get("mode") in ("tracked", "fixed"):
+        settings.update(foveation_fix=1, foveation_storage_fix=1)
     return dict(settings=settings, files={k: v.decode() if isinstance(v, bytes) else v
                                         for k, v in ctx.files.items()}, env=ctx.env,
                 flatscreen=show_window(ctx, _flatscreen(recipe.package)), config_sync=ctx.config_sync,

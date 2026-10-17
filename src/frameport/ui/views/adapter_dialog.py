@@ -1,6 +1,7 @@
 """Game settings (FrameBridge adapter settings) for non-technical users: only the settings that can matter for this
 game, in plain words, with switches, sliders and choices instead of number fields; advanced ones on request.
-Saved into the game's recipe (kept for reinstalls) and, when the game is on the Frame, applied there right away."""
+Adapter values are kept in the recipe; foveation is a separate library preference.
+Installed games receive settings and launcher changes without rebuilding the APK."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -11,7 +12,18 @@ from ... import pipeline
 from ...core import library
 from ...i18n import tr
 from ...patches import base
-from ...patches.settings import BASE_SETTINGS, GROUPS, HIDDEN, SETTINGS, UI, adapter_settings
+from ...patches.settings import (
+    BASE_SETTINGS,
+    FOVEATION_UI,
+    GROUPS,
+    HIDDEN,
+    SETTINGS,
+    UI,
+    Foveation,
+    adapter_settings,
+    foveation_options,
+    foveation_preference,
+)
 from .. import components as C
 from .. import theme as T
 
@@ -81,24 +93,67 @@ def show_adapter_dialog(app: FramePortApp, package: str) -> None:
             return
 
         def load():
-            cur = target.set_settings(package, {})["settings"]  # no changes: returns the current values
+            result = target.set_settings(package, {})  # no changes: returns the current values
+            cur = result["settings"]
             vals = {key: default(key) for key in SPECS}
             vals.update({k: _num(k, v) for k, v in cur.items() if k in SPECS})
-            _open(app, package, None, vals)
+            env = result.get("foveation_env") or {}
+            mode = ("off" if env.get("LEPTON_ENV_DISABLE_VULKAN_FDM_INJECTION_LAYER") == "1" else
+                    ("fixed" if "disable_offsets" in env.get("FDM_DEBUG", "") else "tracked")
+                    if env.get("ENABLE_VULKAN_FDM_INJECTION_LAYER") == "1" else "")
+            pref = {"mode": mode}
+            if mode in ("tracked", "fixed"):
+                pref.update(radius=float(env.get("FOVE_INNER") or 0),
+                            test=env.get("LEPTON_ENV_FRAMEPORT_FOVEATION_TEST") == "1")
+            _open(app, package, None, vals, pref)
         app.run_bg(load)
         return
     _open(app, package, g, recipe_values(g))
 
 
-def _open(app: FramePortApp, package: str, g: dict | None, values: dict) -> None:
+def _open(app: FramePortApp, package: str, g: dict | None, values: dict, foveation_values=None) -> None:
     analysis = library.analysis_from_dict(g["analysis"]) if g and g.get("analysis") else None
     suggested = recipe_values({"recipe": g["suggested"]}) if g and g.get("suggested") else \
         {key: default(key) for key in SPECS}
     values = dict(values)
+    foveation = dict(foveation_values) if foveation_values is not None else foveation_preference(g or {})
+    foveation_controls = []
+    foveation_rows = {}
+
+    def foveation_change(key, value):
+        foveation[key] = value
+        for name in ("radius", "test"):
+            if name in foveation_rows:
+                foveation_rows[name].visible = (foveation.get("mode") in ("tracked", "fixed") and
+                                               (name != "test" or advanced["on"]))
+                C.update(foveation_rows[name])
+
+    foveation_specs = (("mode", Foveation.CHOICES), ("radius", Foveation.RADIUS_CHOICES), ("test", None))
+    for key, choices in (foveation_specs if not g or g.get("kind", "quest") == "quest" else ()):
+        ui = FOVEATION_UI[key]
+        if choices:
+            value = str(foveation.get(key, "")) if key == "mode" else f"{float(foveation.get(key) or 0):g}"
+            choices = list(choices)
+            if value not in [str(v) for v, _ in choices]:
+                choices.append((value, value))
+            control = C.dropdown(value=value, width=T.px(220),
+                options=[ft.DropdownOption(key=str(v), text=tr(label)) for v, label in choices],
+                on_select=lambda e, k=key: foveation_change(k, float(e.control.value) if k == "radius"
+                                                         else e.control.value))
+        else:
+            control = C.switch(value=bool(foveation.get(key)),
+                               on_change=lambda e: foveation_change("test", bool(e.control.value)))
+        foveation_rows[key] = ft.Container(ft.Row([
+            ft.Column([C.body(tr(ui["label"]), T.TEXT, weight=ft.FontWeight.W_500),
+                       C.meta(tr(ui["help"]), T.TEXT_2)], spacing=T.px(2), expand=True), control],
+            spacing=T.S4, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+            padding=ft.Padding(0, T.px(8), 0, T.px(8)))
+        foveation_controls.append(foveation_rows[key])
     controls: dict[str, ft.Control] = {}   # key -> the input control
     rows: dict[str, ft.Container] = {}     # key -> its row (visibility)
     readouts: dict[str, ft.Text] = {}      # slider value labels
-    advanced = {"on": any(UI[k]["level"] == "advanced" and values[k] != default(k) for k in SPECS)}
+    advanced = {"on": bool(foveation.get("test"))
+                or any(UI[k]["level"] == "advanced" and values[k] != default(k) for k in SPECS)}
 
     def set_value(key, v):
         values[key] = _num(key, v)
@@ -146,11 +201,13 @@ def _open(app: FramePortApp, package: str, g: dict | None, values: dict) -> None
         if not keys:
             continue
         heading = C.body(tr(title), T.TEXT_2, weight=ft.FontWeight.W_600)
-        section = ft.Column([heading, *[row(k) for k in keys]], spacing=0)
+        section = ft.Column([heading, *[row(k) for k in keys],
+                             *(foveation_controls if group == "picture" else [])], spacing=0)
         sections.append((group, section, keys))
         body.append(section)
 
     def apply_visibility():
+        foveation_change("mode", foveation.get("mode", ""))
         for _group, section, keys in sections:
             shown = 0
             for k in keys:
@@ -169,13 +226,18 @@ def _open(app: FramePortApp, package: str, g: dict | None, values: dict) -> None
         for k in list(values):
             values[k] = suggested.get(k, default(k))
         app.page.pop_dialog()
-        _open(app, package, g, values)
+        _open(app, package, g, values, {})
 
     before = dict(values)
 
     def save(e):
+        if foveation.get("mode", "") not in ("tracked", "fixed"):
+            foveation.pop("radius", None)
+            foveation.pop("test", None)
+        foveation_options(foveation)
         app.page.pop_dialog()
         if g is not None:
+            library.set_fields(package, foveation=dict(foveation))
             save_to_recipe(package, values)
         reinstall = any(UI[k].get("reinstall") and values[k] != before[k] for k in SPECS)
         installed = app.target is not None and (g is None or C.install_state(g, app.frame_info) in
@@ -187,13 +249,13 @@ def _open(app: FramePortApp, package: str, g: dict | None, values: dict) -> None
         target = app.target
 
         def push():
-            target.set_settings(package, {k: values[k] for k in SPECS})
+            target.set_settings(package, {k: values[k] for k in SPECS}, foveation=foveation)
             app.toast(tr("Saved. Restart the game to use the new settings.") +
                       (tr(" Reinstall it for the controller models.") if reinstall else ""))
             app.refresh_view()
         app.run_bg(push)
 
-    show_adv = any(UI[k]["level"] == "advanced" for _, _, keys in sections for k in keys)
+    show_adv = bool(foveation_controls) or any(UI[k]["level"] == "advanced" for _, _, keys in sections for k in keys)
     content = ft.Column([
         C.body(tr("Changes take effect the next time the game starts. Not sure? Leave a setting as it is."), T.TEXT_2),
         *body,

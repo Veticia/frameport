@@ -35,6 +35,7 @@ class FrameBridgeAdapter(Patch):
         "Its settings are under Game settings."
     )
     category = "frame"
+    revision = 2  # dormant foveation diagnostic support; runtime choice never changes APK inputs
     order = 10
     default_on = True
 
@@ -46,6 +47,9 @@ class FrameBridgeAdapter(Patch):
         if not ws.has(ws.lib(GENERIC)):
             raise RuntimeError("OVRPort output has no libopenxr_loader_generic.so (not an OVRPort build?)")
         adapter = artifact(ws.abi, GENERIC)
+        if ws.abi == "arm64-v8a":
+            from .foveation import LAYER
+            adapter = elf.add_needed(adapter, LAYER)
         settings = settings_text(ctx.recipe_patches)
         changed = False
         if not ws.has(ws.lib(ORIGINAL)):
@@ -70,11 +74,19 @@ class FrameBridgeAdapter(Patch):
                 ws.add.pop(target, None)
                 ws.replace.pop(target, None)
                 changed = True
+        if ws.abi == "arm64-v8a":
+            from .foveation import diagnostic_support
+            changed |= diagnostic_support(ws)
         return changed
 
     def validate(self, ctx: ApkContext):
         ws = ctx.ws
-        ok = ws.has(ws.lib(ORIGINAL)) and ws.has(ws.lib(SETTINGS)) and ws.read_lib(GENERIC) == artifact(ws.abi, GENERIC)
+        ok = ws.has(ws.lib(ORIGINAL)) and ws.has(ws.lib(SETTINGS))
+        expected = artifact(ws.abi, GENERIC)
+        if ws.abi == "arm64-v8a":
+            from .foveation import LAYER
+            expected = elf.add_needed(expected, LAYER)
+        ok = ok and ws.read_lib(GENERIC) == expected
         return [("FrameBridge adapter present", ok, "adapter, original loader and settings library")]
 
 

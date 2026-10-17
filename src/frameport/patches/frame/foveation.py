@@ -58,10 +58,34 @@ def engine_lib(ws):
     return None
 
 
-def apply(ctx):
+def apk_options(ctx):
+    """Personal settings never select APK edits. Prepare only verified compatibility builds automatically."""
     from ..settings import foveation_options
 
-    mode, _radius, test = foveation_options(ctx.params)
+    requested = foveation_options(ctx.params)
+    if ctx.params.get("support") or requested[0] in ("", "off"):
+        ws = ctx.ws
+        if ctx.analysis.package == "com.camouflaj.manta":
+            if not ws.has(ws.lib("libOVRPlugin.so")):
+                return "", 0, False
+            try:
+                ordinary_storage(ws.read_lib("libOVRPlugin.so"))
+            except ValueError:
+                ctx.notes.append("unknown Batman OVRPlugin: automatic foveation allocation fix skipped")
+                return "", 0, False
+        elif ctx.analysis.package == "com.crytek.climb2":
+            if (not ws.has(ws.lib("libCryRenderVulkan.so")) or
+                    hashlib.sha256(ws.read_lib("libCryRenderVulkan.so")).hexdigest() != CLIMB_RENDERER):
+                ctx.notes.append("unknown Climb renderer: automatic foveation bridge skipped")
+                return "", 0, False
+        else:
+            return "", 0, False
+        return "tracked", 0, False
+    return requested
+
+
+def apply(ctx):
+    mode, _radius, test = apk_options(ctx)
     if mode not in ("tracked", "fixed"):
         return False
     ws = ctx.ws
@@ -103,9 +127,7 @@ def apply(ctx):
 
 
 def validate(ctx):
-    from ..settings import foveation_options
-
-    mode, _radius, test = foveation_options(ctx.params)
+    mode, _radius, test = apk_options(ctx)
     checks = []
     if mode in ("tracked", "fixed") and ctx.analysis.package == "com.camouflaj.manta":
         data = ctx.ws.read_lib("libOVRPlugin.so")
@@ -115,3 +137,23 @@ def validate(ctx):
         checks.append(("Foveation darkening layer loaded", bool(lib) and ctx.ws.has(ctx.ws.lib(LAYER))
                        and LAYER in elf.needed(ctx.ws.read_lib(lib)), lib or "no renderer"))
     return checks
+
+
+def diagnostic_support(ws):
+    """The diagnostic constructor is dormant without FRAMEPORT_FOVEATION_TEST=1."""
+    lib = engine_lib(ws) or "libopenxr_loader_generic.so"
+    data = ws.read_lib(lib)
+    changed = False
+    if LAYER not in elf.needed(data):
+        target = ws.lib(lib)
+        updated = elf.add_needed(data, LAYER)
+        if target in ws.add:
+            ws.add[target] = updated
+        else:
+            ws.put(target, updated)
+        changed = True
+    layer = artifact(ws.abi, LAYER)
+    if not ws.has(ws.lib(LAYER)) or ws.read_lib(LAYER) != layer:
+        ws.put(ws.lib(LAYER), layer)
+        changed = True
+    return changed

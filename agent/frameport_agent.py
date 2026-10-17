@@ -45,7 +45,7 @@ try:
 except ImportError:  # Windows: pc_revive loads this file for its VDF code only (GitHub #131)
     fcntl = None
 
-AGENT_VERSION = 97
+AGENT_VERSION = 98
 HOME = os.path.expanduser("~")
 STEAM = os.path.join(HOME, ".local/share/Steam")
 ANCHORS = os.path.join(HOME, "Applications/quest-frame")
@@ -4184,6 +4184,7 @@ def configure_install(args, prep, moved):
            "agent_version": AGENT_VERSION, "time": time.time()}
     if previous.get("eye_base"):  # the runtime's eye size learned from an earlier start (device.config_sync)
         dep["eye_base"] = previous["eye_base"]
+    dep["foveation_env"] = {key: (args.get("env") or {}).get(key) for key in FOVEATION_ENV_KEYS}
     dep["managed_config_files"] = new_managed
     # An app before agent v86 records none of these: what it installed is unknown, so a newer PC mustn't skip work
     # on the strength of an older record. Art the agent didn't replace keeps its record.
@@ -5448,6 +5449,31 @@ def cmd_keep_awake(args):
     return {"awake": False}
 
 
+FOVEATION_ENV_KEYS = {"FDM_DEBUG", "ENABLE_VULKAN_FDM_INJECTION_LAYER",
+    "LEPTON_ENV_DISABLE_VULKAN_FDM_INJECTION_LAYER", "VK_INSTANCE_LAYERS", "FOVE_INNER", "FOVE_OUTER",
+    "LEPTON_ENV_FRAMEPORT_FOVEATION_TEST", "LEPTON_ENV_FRAMEPORT_CLIMB_STEREO_OFFSETS",
+    "LEPTON_ENV_FRAMEPORT_VRAPI_FDM_ISOLATE_MONO", "LEPTON_ENV_FRAMEPORT_VRAPI_KEEP_FOCUSED_IMAGE"}
+
+
+def update_foveation_launcher(pkg, dep, env):
+    if not isinstance(env, dict) or set(env) - FOVEATION_ENV_KEYS or any(
+            v is not None and (not isinstance(v, str) or "\n" in v or "\r" in v) for v in env.values()):
+        raise AgentError("invalid foveation environment")
+    path = os.path.join(ANCHORS, pkg, "launch.sh")
+    text = open(path).read()
+    # Replace only managed exports; preserve all unrelated launcher customizations.
+    text = "".join(line for line in text.splitlines(keepends=True)
+                   if not any(line.startswith("export " + key + "=") for key in env))
+    lines = "".join(f"export {key}={shlex.quote(value)}\n" for key, value in env.items() if value is not None)
+    text = text.replace("\n", "\n" + lines, 1)
+    with open(path + ".tmp", "w") as f:
+        f.write(text)
+    os.chmod(path + ".tmp", 0o755)
+    os.replace(path + ".tmp", path)
+    dep["foveation_env"] = env
+    write_deployment(pkg, dep)
+
+
 def cmd_set_settings(args):
     pkg = check_pkg(args["package"])
     dep = deployment(pkg) or {}
@@ -5465,6 +5491,8 @@ def cmd_set_settings(args):
         if not re.fullmatch(r"[a-z_]+", k) or not re.fullmatch(r"-?(?:[0-9]+\.?[0-9]*|\.[0-9]+)", str(v)):
             raise AgentError(f"bad setting {k}={v}")  # checked before anything is written
         current[k] = str(v)
+    if "foveation_env" in args:
+        update_foveation_launcher(pkg, dep, args["foveation_env"])
     text = "".join(f"{k}={v}\n" for k, v in current.items())
     with open(conf, "w") as f:
         f.write(text)
@@ -5485,7 +5513,8 @@ def cmd_set_settings(args):
                     else int(number)
         dep["configuration_fp"] = hashlib.sha256(json.dumps(applied, sort_keys=True).encode()).hexdigest()[:32]
         write_deployment(pkg, dep)
-    return {"settings": current, "controller_models": models, "config_sync": synced,
+    return {"settings": current, "foveation_env": dep.get("foveation_env", {}),
+            "controller_models": models, "config_sync": synced,
             "refresh_rate": sync_refresh_rate(pkg, dep)}
 
 

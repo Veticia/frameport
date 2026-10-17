@@ -73,12 +73,24 @@ class FrameLeptonTarget(Target):
     def launch(self, package):
         return self.connect().frame.agent("launch", package=package, timeout=60)
 
-    def set_settings(self, package, settings):
+    def set_settings(self, package, settings, *, foveation=None):
         from ..core import library
+        from ..install.installer import install_context
+        from ..patches.settings import foveation_env, foveation_preference
 
-        superseded = ((library.game(package) or {}).get("build") or {}).get("superseded") or {}
+        entry = library.game(package) or {}
+        superseded = (entry.get("build") or {}).get("superseded") or {}
         settings = {key: value for key, value in settings.items() if f"adapter.{key}" not in superseded}
-        return self.connect().frame.agent("set_settings", package=package, settings=settings)
+        extra = {}
+        if settings or foveation is not None:
+            preference = foveation if foveation is not None else foveation_preference(entry)
+            ctx = install_context(library.recipe_from_dict(entry["recipe"])) if entry.get("recipe") else None
+            effective = {**(ctx.adapter_settings if ctx else {}), **settings}
+            if preference.get("mode") in ("tracked", "fixed"):
+                settings.update(foveation_fix=1, foveation_storage_fix=1)
+            if ctx or foveation is not None:
+                extra["foveation_env"] = foveation_env(package, preference, effective, ctx.env if ctx else {})
+        return self.connect().frame.agent("set_settings", package=package, settings=settings, **extra)
 
     def uninstall(self, package, keep_data=True):
         return self.connect().frame.agent("uninstall", package=package, keep_data=keep_data, remove_shortcut=True)

@@ -113,6 +113,16 @@ def _links(template: str, fields: dict[str, str], trim: list[str], layout: dict,
 
 def _working_config_fields(g: dict, recipe_yaml: str, status: str, notes: str, env: dict,
                            red: redact.Redactor | None) -> dict[str, str]:
+    import yaml
+
+    parsed = yaml.safe_load(recipe_yaml)
+    if isinstance(parsed, dict):
+        for key in ("foveation", "foveation_radius", "foveation_test"):
+            parsed.pop(key, None)
+        for key in ("patches", "reasons"):
+            if isinstance(parsed.get(key), dict):
+                parsed[key].pop("device.foveation", None)
+        recipe_yaml = yaml.safe_dump(parsed, sort_keys=False)
     red = red or redact.Redactor()
     title = g.get("title") or g["package"]
     kind = {"rift": "Oculus Rift (PC VR)", "linux": "Linux app (arm64)"}.get(g.get("kind"), "Meta Quest")

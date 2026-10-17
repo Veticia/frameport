@@ -336,7 +336,7 @@ class PcReviveTarget(Target):
                            f"{f.diagnosis} [{f.evidence[:160]}]")
         return result, log
 
-    def set_settings(self, package, settings):
+    def set_settings(self, package, settings, *, foveation=None):
         return {"settings": {}}
 
     def uninstall(self, package, keep_data=True):

@@ -133,16 +133,21 @@ def test_climb_private_bridge_guard_and_rebuild(tmp_path, quest_manifest, monkey
         assert foveation.LAYER in elf.needed(ws.read_lib("libvrapi.so"))
         assert not patch.apply(ctx)
         assert all(ok for _, ok, _ in patch.validate(ctx))
-    # Rebuilding with Off from source removes private APK support.
+    with ApkWorkspace(source) as ws:
+        ctx = base.ApkContext(ws, SimpleNamespace(package="com.crytek.climb2"), {}, Reporter(), {})
+        assert patch.apply(ctx)  # support is prepared even with the runtime preference at Default
+        assert foveation.LAYER in elf.needed(ws.read_lib("libvrapi.so"))
+        assert all(ok for _, ok, _ in patch.validate(ctx))
+    # Off retains verified APK support; the personal setting disables injection through the launcher.
     with ApkWorkspace(source) as ws:
         ctx = base.ApkContext(ws, SimpleNamespace(package="com.crytek.climb2"),
                               {"mode": "off"}, Reporter(), {})
-        assert not patch.apply(ctx)
-        assert ws.read_lib("libvrapi.so") == original
-        assert not ws.has(ws.lib(foveation.LAYER))
+        assert patch.apply(ctx)
+        assert ws.read_lib("libvrapi.so") != original
+        assert ws.has(ws.lib(foveation.LAYER))
 
 
-def test_ui_controls_save_size_test_and_mode_without_losing_other_patches(monkeypatch):
+def test_customize_does_not_offer_foveation_choice(monkeypatch):
     import flet as ft
 
     from frameport.core import library
@@ -167,16 +172,8 @@ def test_ui_controls_save_size_test_and_mode_without_losing_other_patches(monkey
             yield from walk(control.content)
 
     controls = list(walk(panel))
-    mode = next(c for c in controls if isinstance(c, ft.Dropdown) and c.value == "tracked")
-    radius = next(c for c in controls if isinstance(c, ft.Dropdown) and c.value == "0")
-    test = next(c for c in controls if isinstance(c, ft.Switch) and "Darken" in (c.label or ""))
-    radius.on_select(SimpleNamespace(control=SimpleNamespace(value="0.3")))
-    test.on_change(SimpleNamespace(control=SimpleNamespace(value=True)))
-    mode.on_select(SimpleNamespace(control=SimpleNamespace(value="fixed")))
-    assert saved[-1]["patches"]["device.foveation"] == {"mode": "fixed", "radius": 0.3, "test": True}
-    assert "frame.adapter" in saved[-1]["patches"]
-    mode.on_select(SimpleNamespace(control=SimpleNamespace(value="off")))
-    assert saved[-1]["patches"]["device.foveation"] == {"mode": "off"}
+    assert not any(isinstance(c, ft.Dropdown) and c.value == "tracked" for c in controls)
+    assert not saved
 
 
 def test_verified_batman_storage_and_other_byte_change_rejected():

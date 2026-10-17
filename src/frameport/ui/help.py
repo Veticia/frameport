@@ -140,7 +140,8 @@ HELP: dict[str, str] = _Translated({
                   "the library before the game.",
     "desktop_entry": "Adds the app to Desktop Mode's app menu and, if you like, its desktop. Some apps work better "
                      "there with a mouse and keyboard. An icon you delete from the desktop stays deleted.",
-    "adapter_settings": "Sharpness, refresh rate, controllers, menus and more for this game. Changes take effect the "
+    "adapter_settings": "Render resolution (supersampling), foveated rendering, refresh rate, controllers, menus and "
+                        "more for this game. Changes take effect the "
                         "next time it starts.",
     "frame_summary": "Quest ✓: Lepton is installed, so Quest games can run. PC VR ✓: Proton is installed, so PC VR "
                      "games can run on the Frame.",

@@ -38,6 +38,9 @@ def overport_ids(recipe: Recipe, alt: bool = False) -> list[str]:
 
 def apk_patches(selection: dict) -> list[base.Patch]:
     patches = [base.get(pid) for pid in selection if base.get(pid).stage == "apk"]
+    if "frame.adapter" in selection and "device.foveation" not in selection:
+        # Prepare verified game-specific support independently of the player's runtime preference.
+        patches.append(base.get("device.foveation"))
     return sorted(patches, key=lambda p: p.order)
 
 

@@ -156,7 +156,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Refresh rate](#adapter-refresh_rate) | `adapter.refresh_rate` | Game settings | 3 |
 | [Wait for the game's GPU](#adapter-release_wait) | `adapter.release_wait` | Game settings |  |
 | [Re-create play space](#adapter-respace_kick) | `adapter.respace_kick` | Game settings |  |
-| [Sharpness](#adapter-scale) | `adapter.scale` | Game settings | 9 |
+| [Render resolution (supersampling)](#adapter-scale) | `adapter.scale` | Game settings | 9 |
 | [Room depth](#adapter-scene_depth) | `adapter.scene_depth` | Game settings |  |
 | [Pretend room layout](#adapter-scene_emul) | `adapter.scene_emul` | Game settings | 12 |
 | [Room height](#adapter-scene_height) | `adapter.scene_height` | Game settings |  |
@@ -520,7 +520,7 @@ Runs a 32-bit game (Gear VR, Oculus Go, early Quest) on the Frame, which only ru
 
 FramePort's layer between the game and the Steam Frame: fills in what the Frame lacks (controllers, room, passthrough). Needed for every converted game.
 
-- `frame.adapter` · on by default
+- `frame.adapter` · on by default · revision 2
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** Required for every OpenXR/overport build on the Frame.
 - **Suggested by launch-test signatures:**
@@ -2056,16 +2056,16 @@ Re-creates the game's play space after the first frames. For testing.
 
 > Recreate spaces after the first frames (diagnostic).
 
-### <a id="adapter-scale"></a>Sharpness
+### <a id="adapter-scale"></a>Render resolution (supersampling)
 
-Higher looks sharper but needs more power; lower runs smoother. 1.0× is the game's own.
+Changes the game's render resolution. Higher is sharper but slower; 1.0× is the game's own resolution.
 
 - `adapter.scale`
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
   - Value: float, default `1.0` (always written).
-  - Game settings → Picture → "Sharpness": slider 0.5–2 in steps of 0.1.
+  - Game settings → Picture → "Render resolution (supersampling)": slider 0.5–2 in steps of 0.1.
 - **Catalog games (9):** 4XVR Video Player, BlazeRush, CrazyTaxiVR, cubism, FGO VR, I Expect You To Die 2, The 7th Guest VR, Vampire: The Masquerade - Justice and 1 more.
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
 
@@ -2410,7 +2410,7 @@ Files, environment and window options written on the Frame when a Quest game or 
 
 ### <a id="device-config_sync"></a>Keep the game's saved resolution in step
 
-Keeps the resolution the game saves in step with the headset's picture size (else the picture is shifted, with black borders, after a sharpness change).
+Keeps the resolution the game saves in step with the headset's picture size (else the picture is shifted, with black borders, after a render resolution change).
 
 - `device.config_sync`
 - **Changes:** Install only: written on the Frame when the game is installed; the APK isn't changed.
@@ -2454,13 +2454,14 @@ Render less detail outside your gaze; adjust the full-resolution area or darken 
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
 - **Options:**
-  - `mode`: str, default empty — tracked, fixed or off (empty = Valve's default)
+  - `support`: bool, default `False` — Internal APK compatibility support
+  - `mode`: str, default empty — Catalog default: tracked, fixed or off (empty = Valve's default)
   - `radius`: float, default `0.0`, 0–0.45 — Full-resolution radius; 0 keeps the current runtime default
   - `test`: bool, default `False` — Darken lower-resolution regions (diagnostic)
 - **Catalog games (5):** Ocean Rift, Quantum Void, Tea For God, The 7th Guest VR, Vampire: The Masquerade - Justice.
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
 
-> Reduces shading away from the full-resolution area, following each eye's gaze. Default area size keeps the runtime's current profile unchanged. Custom radius is a fraction of the shorter eye-image dimension; the transition ends at twice that radius. Larger areas retain more detail but save less GPU work. Fixed stops the area following your eyes. The optional test darkens actual coarse-shaded fragments; rebuild/reinstall to toggle it. Tested on RE4, Deadpool and Asgard's Wrath 2. The Climb 2 gets a version-guarded private bridge at 1.0 scale; Batman gets its hash-verified allocation fix (unsupported OVRPlugin versions are refused). Other games may need additional fixes; turn this off if artifacts appear.
+> Reduces shading away from the full-resolution area, following each eye's gaze. Default area size keeps the runtime's current profile unchanged. Custom radius is a fraction of the shorter eye-image dimension; the transition ends at twice that radius. Larger areas retain more detail but save less GPU work. Fixed stops the area following your eyes. The optional test darkens actual coarse-shaded fragments. Runtime choices are in Game settings. Tested on RE4, Deadpool and Asgard's Wrath 2. The Climb 2 gets a version-guarded private bridge at 1.0 scale; Batman gets its hash-verified allocation fix (unsupported OVRPlugin versions are refused). Other games may need additional fixes; turn this off if artifacts appear.
 
 ### <a id="device-headset_model"></a>Headset model
 

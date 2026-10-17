@@ -86,7 +86,7 @@ AXRB/                                   ← AXRB's download folder (Downloads/AX
 
 Every game has three places; the answers below refer to them.
 
-- **Game settings:** right-click the game in the **Library** → **Game settings…**. Sharpness, refresh rate,
+- **Game settings:** right-click the game in the **Library** → **Game settings…**. Render resolution (supersampling), refresh rate,
   controllers, menus and more, in plain words. Changes apply the next time the game starts.
 - **Patches:** click the game in the **Library** to open its page, then **Customize** (in the **Patches** section).
   Turn a patch on or off, then click **Update on Frame** at the top of the page.
@@ -154,7 +154,7 @@ need **Update on Frame**).
 | One eye shimmers while menus look steady | Game page → **Customize** → **Eye-tracked foveation (Valve)**: **Fixed**, else **Off** |
 | Menus or screens upside down | **Game settings…** → **Fix upside-down menus** |
 | Curved menus or video screens missing | **Game settings…** → **Show curved menus and screens** |
-| Blurry | **Game settings…** → raise **Sharpness** (costs frame rate) |
+| Blurry | **Game settings…** → raise **Render resolution (supersampling)** (costs frame rate) |
 
 The [patch reference](PATCHES.md) lists every patch with what it does. If nothing helps, report it with a short
 description of what you see.
@@ -164,7 +164,7 @@ description of what you see.
 How to tell: open **Monitor** in the sidebar while you play. Smooth play needs the game's frame rate at the refresh
 rate (for example 72 or 90 fps).
 
-- **Below the refresh rate:** right-click the game → **Game settings…** → lower **Sharpness** (for example to 0.8×) or
+- **Below the refresh rate:** right-click the game → **Game settings…** → lower **Render resolution (supersampling)** (for example to 0.8×) or
   pick a lower **Refresh rate**. After a session, the game's page may suggest a value.
 - **At the refresh rate but it still judders:** report it; that points to timing, not speed.
 
@@ -187,7 +187,7 @@ Right-click the game → **Game settings…**:
 How to tell: if it only happens on battery and never while plugged in, it's power, not FramePort. Heavy games can
 draw more than the battery delivers, especially at lower charge, and the Frame then turns off without an error.
 
-- Play plugged in, or right-click the game → **Game settings…** → lower **Sharpness** to reduce the load.
+- Play plugged in, or right-click the game → **Game settings…** → lower **Render resolution (supersampling)** to reduce the load.
 - It also turns off while plugged in: report it. The diagnostics include the log of the boot that ended.
 
 ## My progress isn't saved

@@ -148,7 +148,8 @@ def main() -> int:
         steps.insert(2, ("game-customize", lambda a: a.open_game(game, advanced=True)))
         steps += [("share-dialog", lambda a: a.share_config_dialog(game)),
                   ("report-dialog", lambda a: (a.page.pop_dialog(), a.report_problem_dialog(game))),
-                  ("custom-art-dialog", lambda a: (a.page.pop_dialog(), a.custom_artwork(game)))]
+                  ("custom-art-dialog", lambda a: (a.page.pop_dialog(), a.custom_artwork(game))),
+                  ("game-settings-dialog", lambda a: (a.page.pop_dialog(), a.settings_dialog(game)))]
         # a pretend install of --game, mid-upload: the transit in the sidebar, the game page and Activity
         steps += [("transit-game", lambda a: (a.page.pop_dialog(), start_fake_install(a, game), a.open_game(game))),
                   ("transit-activity", lambda a: a.show_activity(True))]

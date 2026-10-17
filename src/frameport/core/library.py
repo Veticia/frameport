@@ -180,6 +180,16 @@ def _migrate(data: dict) -> bool:
     """One-time updates of stored recipes when a new default is introduced (each runs once per library)."""
     done = data.setdefault("settings", {}).setdefault("migrations", [])
     changed = False
+    if "foveation_preference" not in done:
+        for g in (data.get("games") or {}).values():
+            recipe = g.get("recipe") or {}
+            params = (recipe.get("patches") or {}).get("device.foveation")
+            if params is not None:
+                g.setdefault("foveation", dict(params))
+                recipe["patches"]["device.foveation"] = {"support": True}
+                recipe.get("reasons", {}).pop("device.foveation", None)
+        done.append("foveation_preference")
+        changed = True
     if "no_crash_reporter" not in done:
         # the Unreal crash reporter is disabled by default for PC VR Unreal games, also those added before
         for g in (data.get("games") or {}).values():

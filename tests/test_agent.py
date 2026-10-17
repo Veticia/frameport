@@ -2081,3 +2081,38 @@ def test_launcher_starts_lepton_again_once_when_the_game_restarts_itself(monkeyp
     (tmp_path / "starts").unlink()
     subprocess.run([str(launcher)], timeout=30, env={**env, "FRAMEPORT_NO_RESTART": "1"}, start_new_session=True)
     assert (tmp_path / "starts").read_text().count("started") == 1
+
+
+def test_foveation_settings_rewrite_only_launcher_exports(monkeypatch, tmp_path):
+    a = load_agent(monkeypatch, tmp_path)
+    anchor = tmp_path / "anchors" / "test.game"
+    anchor.mkdir(parents=True)
+    base = tmp_path / "game"
+    base.mkdir()
+    launch = anchor / "launch.sh"
+    launch.write_text("#!/bin/bash\nexport UNRELATED='keep me'\nexport FDM_DEBUG=old\n"
+                      "export FOVE_INNER=0.1\nrun_game\n")
+    a.ANCHORS = str(anchor.parent)
+    dep = {"base": str(base)}
+    writes = []
+    monkeypatch.setattr(a, "deployment", lambda pkg: dep)
+    monkeypatch.setattr(a, "write_deployment", lambda pkg, record: writes.append(copy_record(record)))
+    monkeypatch.setattr(a, "install_controller_models", lambda *args: {})
+    monkeypatch.setattr(a, "sync_game_config", lambda *args: {})
+    monkeypatch.setattr(a, "sync_refresh_rate", lambda *args: {})
+    env = {"FDM_DEBUG": "enable,disable_offsets", "FOVE_INNER": None,
+           "ENABLE_VULKAN_FDM_INJECTION_LAYER": "1"}
+    result = a.cmd_set_settings({"package": "test.game", "settings": {"scale": 1.2}, "foveation_env": env})
+    text = launch.read_text()
+    assert "export FDM_DEBUG=enable,disable_offsets" in text and "FOVE_INNER=" not in text
+    assert "export UNRELATED='keep me'\n" in text and text.endswith("run_game\n")
+    assert result["foveation_env"] == env and writes[-1]["foveation_env"] == env
+    assert (base / "settings.conf").read_text() == "scale=1.2\n"
+    assert not list(anchor.glob("*.tmp"))
+    with pytest.raises(a.AgentError):
+        a.cmd_set_settings({"package": "test.game", "foveation_env": {"PATH": "bad"}})
+    assert launch.read_text() == text
+
+
+def copy_record(record):
+    return json.loads(json.dumps(record))

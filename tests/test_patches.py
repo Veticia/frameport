@@ -46,6 +46,8 @@ def test_adapter_and_launcher(tmp_path, quest_manifest):
         for pid in ("frame.adapter", "frame.launcher"):
             ctx = base.ApkContext(ws, _analysis(), {}, Reporter(), recipe)
             assert base.get(pid).apply(ctx)
+        assert all(ok for _, ok, _ in base.get("frame.adapter").validate(ctx))
+        assert ws.has(ws.lib("libVkLayer_fdm_darken.so"))  # dormant until the launcher test opt-in
         out = ws.write(tmp_path / "out.apk")
     with zipfile.ZipFile(out) as z:
         names = z.namelist()
@@ -67,7 +69,10 @@ def test_adapter_refreshes_existing_wrapper(tmp_path, quest_manifest):
         patch = base.get("frame.adapter")
         ctx = base.ApkContext(ws, _analysis(), {}, Reporter(), {"frame.adapter": {}})
         assert patch.apply(ctx)
-        assert ws.read_lib("libopenxr_loader_generic.so") == artifact(ws.abi, "libopenxr_loader_generic.so")
+        from frameport.analysis import elf
+        from frameport.patches.frame.foveation import LAYER
+        assert ws.read_lib("libopenxr_loader_generic.so") == elf.add_needed(
+            artifact(ws.abi, "libopenxr_loader_generic.so"), LAYER)
         assert ws.read_lib("libopenxr_loader_original.so") == b"original-loader"
         assert not patch.apply(ctx)
 
