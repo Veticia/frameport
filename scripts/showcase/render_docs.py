@@ -180,6 +180,8 @@ def render(shots: list[dict], variables: dict, defaults: dict, out: Path, log=pr
                     break
             else:
                 server.errors.append(f"{shot['name']}: three renders, no two alike (an unstable page?)")
+                for k, p in enumerate(takes):  # kept for --keep (CI's artifact): what differs between the renders
+                    p.replace(out / f"unstable-{shot['name']}-{k}.png")
             for p in takes:
                 p.unlink(missing_ok=True)
             if final.exists():
