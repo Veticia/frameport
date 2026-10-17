@@ -420,7 +420,8 @@ static int add_binding(XrInstance instance, PFN_xrStringToPath to_path, XrAction
 }
 
 // Mirrors docs/input/quest_buttons.json; the host test derives its expected bindings from that contract.
-static const char *const FRAME_COMMON[] = {"squeeze/value", "trigger/value", "trigger/touch", "thumbstick",
+static const char *const FRAME_COMMON[] = {"squeeze", "squeeze/value", "trigger", "trigger/value", "trigger/touch",
+    "thumbstick",
     "thumbstick/x", "thumbstick/y", "thumbstick/click", "thumbstick/touch", "grip/pose", "aim/pose"};
 static const char *const FRAME_DROPPED[] = {"thumbrest/touch", "system/click"};
 static const struct {
@@ -467,13 +468,17 @@ static void suggest_frame(XrInstance instance, PFN_xrSuggestInteractionProfileBi
                 for (size_t b = 0; b < sizeof(FRAME_BUTTONS) / sizeof(*FRAME_BUTTONS); ++b) {
                     const char *button = FRAME_BUTTONS[b].touch;
                     size_t len = strlen(button);
-                    if (strcmp(hand, FRAME_BUTTONS[b].hand) || strncmp(input, button, len) || input[len] != '/') continue;
-                    const char *component = input + len + 1;
-                    if (strcmp(component, "click") && (strcmp(button, "menu") == 0 || strcmp(component, "touch"))) continue;
+                    if (strcmp(hand, FRAME_BUTTONS[b].hand) || strncmp(input, button, len) ||
+                        (input[len] != '/' && input[len])) continue;
+                    // a bare button path (input/x) is legal OpenXR: the runtime picks click, so keep it bare
+                    const char *component = input[len] ? input + len + 1 : "";
+                    if (*component && strcmp(component, "click") &&
+                        (strcmp(button, "menu") == 0 || strcmp(component, "touch"))) continue;
                     for (int t = 0; t < 2; ++t) {
                         const char *name = FRAME_BUTTONS[b].targets[quest_buttons - 1][t];
                         if (!name) continue;
-                        snprintf(button_targets[t], sizeof(button_targets[t]), "input/%s/%s", name, component);
+                        snprintf(button_targets[t], sizeof(button_targets[t]), "input/%s%s%s", name,
+                                 *component ? "/" : "", component);
                         targets[t] = button_targets[t];
                     }
                     break;

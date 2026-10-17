@@ -1,11 +1,13 @@
 {
-  "_comment": "Single source of the quest_buttons mapping (FrameBridge adapter setting). Keys are Touch input names under /user/hand/<hand>/input/, values the Frame Controller inputs the binding is also suggested for. A button entry covers its click and touch components; menu covers click only. native/adapter's table, tests/test_quest_buttons.py and scripts/controller_diagram.py follow this file. See docs/input/QUEST_BUTTONS.md.",
+  "_comment": "Single source of the quest_buttons mapping (FrameBridge adapter setting). Keys are Touch input names under /user/hand/<hand>/input/, values the Frame Controller inputs the binding is also suggested for. A button entry covers its bare path (e.g. input/x, which OpenXR resolves to click) and its click and touch components; menu covers the bare path and click only. native/adapter's table, tests/test_quest_buttons.py and scripts/controller_diagram.py follow this file. See docs/input/QUEST_BUTTONS.md.",
   "extension": "XR_VALVE_frame_controller_interaction",
   "touch_profile": "/interaction_profiles/oculus/touch_controller",
   "frame_profile": "/interaction_profiles/valve/frame_controller_valve",
   "source": "https://partner.steamgames.com/doc/steamhardware/steamframe/input",
   "common": {
+    "squeeze": ["squeeze"],
     "squeeze/value": ["squeeze/value"],
+    "trigger": ["trigger"],
     "trigger/value": ["trigger/value"],
     "trigger/touch": ["trigger/touch"],
     "thumbstick": ["thumbstick"],
