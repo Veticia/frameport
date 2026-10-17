@@ -24,6 +24,19 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def native_checksums(names: list[str]) -> dict[str, str | None] | None:
+    """Current bundled checksums for selected APK artifacts; None means the manifest is unavailable."""
+    from .core.paths import artifacts_dir
+
+    try:
+        lines = (artifacts_dir() / "SHA256SUMS").read_text().splitlines()
+    except OSError:
+        return None
+    checksums = {parts[1].strip().removeprefix("./"): parts[0]
+                 for line in lines if len(parts := line.split(maxsplit=1)) == 2}
+    return {name: checksums.get(name) for name in names}
+
+
 def overport_ids(recipe: Recipe, alt: bool = False) -> list[str]:
     """OVRPort defaults (OVRPort's order) first, then extras in recipe order, then the alt-build extras."""
     chosen = [pid for pid in recipe.patches if base.get(pid).category == "overport"]

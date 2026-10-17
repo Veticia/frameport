@@ -18,12 +18,26 @@ def effective_adapter_settings(patches: dict) -> dict:
     return adapter_settings(patches, defaults={"quest_buttons": quest_buttons_default()})
 
 
-def apply_default(target, reporter) -> list[str]:
+def _adapter_current(game: dict, installed: dict) -> bool:
+    from ..build import native_checksums
+
+    build = game.get("build") or {}
+    # A newer local build does not prove that its adapter reached the installed APK.
+    sha = installed.get("sha256")
+    if not sha or sha not in (build.get("sha256"), build.get("alt_sha256")):
+        return False
+    recorded = (build.get("build_inputs") or {}).get("native") or {}
+    adapters = [name for name in recorded if name.endswith("/libopenxr_loader_generic.so")]
+    current = native_checksums(adapters) or {}
+    return bool(adapters) and all(recorded[name] and recorded[name] == current.get(name) for name in adapters)
+
+
+def apply_default(target, reporter) -> dict[str, list[str]]:
     """Push only inherited Quest preferences. Read the library and device off the UI thread."""
     mode = quest_buttons_default()
     reporter.stage("Apply controller buttons")
     games = {g["package"]: g for g in library.games()}
-    applied = []
+    applied, needs_update = [], []
     for installed in target.installed():
         reporter.check_cancel()
         package = installed["package"]
@@ -38,6 +52,8 @@ def apply_default(target, reporter) -> list[str]:
         if QUEST_BUTTONS in patches or (not game and QUEST_BUTTONS in recorded):
             continue
         target.set_settings(package, {"quest_buttons": mode})
-        applied.append(package)
-        reporter.log(f"{package}: quest_buttons={mode} (next launch)")
-    return applied
+        current = _adapter_current(game, installed)
+        (applied if current else needs_update).append(package)
+        when = "next launch" if current else "needs Update on Frame first"
+        reporter.log(f"{package}: quest_buttons={mode} ({when})")
+    return {"applied": applied, "needs_update": needs_update}

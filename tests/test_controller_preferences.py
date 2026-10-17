@@ -10,7 +10,7 @@ from test_game_update import game_and_dep, installed_agent
 from test_patches import _analysis
 
 from frameport import pipeline
-from frameport.core import controllers, library
+from frameport.core import controllers, library, paths
 from frameport.core.events import Cancelled, Reporter
 from frameport.core.models import Recipe
 from frameport.game_update import configuration, configuration_fingerprint, plan_update
@@ -175,13 +175,55 @@ def test_apply_default_skips_overrides_and_non_quest_games():
     target = Target([{"package": "test.quest"}, {"package": "inherited"}, {"package": "flat"},
                      {"package": "rift", "kind": "pcvr"}, {"package": "linux", "kind": "linux"},
                      {"package": "remote-override", "recipe": {"patches": [controllers.QUEST_BUTTONS]}}])
-    assert controllers.apply_default(target, Reporter()) == ["inherited"]
+    assert controllers.apply_default(target, Reporter()) == {"applied": [], "needs_update": ["inherited"]}
     assert target.calls == [("inherited", {"quest_buttons": 2})]
     reporter = Reporter()
     reporter.cancelled.set()
     with pytest.raises(Cancelled):
         controllers.apply_default(target, reporter)
     assert len(target.calls) == 1
+
+
+@pytest.fixture
+def adapter_manifest(monkeypatch, tmp_path):
+    manifest = tmp_path / "artifacts" / "SHA256SUMS"
+    manifest.parent.mkdir()
+    manifest.write_text("\n".join(f"{'a' * 64}  ./{abi}/libopenxr_loader_generic.so"
+                                  for abi in ("arm64-v8a", "armeabi-v7a")) + "\n")
+    monkeypatch.setattr(paths, "artifacts_dir", lambda: manifest.parent)
+    return manifest
+
+
+@pytest.mark.parametrize("abi", ["arm64-v8a", "armeabi-v7a"])
+@pytest.mark.parametrize(("recorded", "installed_sha", "ready"), [
+    ("a" * 64, "apk", True),
+    ("a" * 64, "alternate", True),
+    ("b" * 64, "apk", False),
+    (None, "apk", False),
+    ("a" * 64, "older-apk", False),
+    ("a" * 64, None, False),
+])
+def test_apply_reports_current_old_and_unknown_adapters(adapter_manifest, abi, recorded, installed_sha, ready):
+    game = store()
+    native = {f"{abi}/libopenxr_loader_generic.so": recorded, f"{abi}/unrelated.so": "old"}
+    library.set_fields(game["package"], build={"sha256": "apk", "alt_sha256": "alternate",
+                                             "build_inputs": {"native": native}})
+    target = Target([{"package": game["package"], "sha256": installed_sha}])
+    result = controllers.apply_default(target, Reporter())
+    assert result == {"applied": [game["package"]] if ready else [],
+                      "needs_update": [] if ready else [game["package"]]}
+    assert target.calls == [(game["package"], {"quest_buttons": 0})]
+
+
+def test_apply_does_not_trust_unknown_adapter_or_manifest(adapter_manifest):
+    game = store()
+    library.set_fields(game["package"], build={"sha256": "apk", "build_inputs": {"native": {}}})
+    target = Target([{"package": game["package"], "sha256": "apk"}])
+    assert controllers.apply_default(target, Reporter())["needs_update"] == [game["package"]]
+    library.set_fields(game["package"], build={"sha256": "apk", "build_inputs": {"native": {
+        "arm64-v8a/libopenxr_loader_generic.so": "a" * 64}}})
+    adapter_manifest.unlink()
+    assert controllers.apply_default(target, Reporter())["needs_update"] == [game["package"]]
 
 
 def test_live_suggestion_push_uses_inherited_value(monkeypatch):
@@ -192,8 +234,11 @@ def test_live_suggestion_push_uses_inherited_value(monkeypatch):
     assert target.calls[0][1]["quest_buttons"] == 2
 
 
-def test_settings_apply_uses_frame_job_queue_and_selected_default():
-    target, jobs = Target([{"package": "inherited"}]), []
+def test_settings_apply_uses_frame_job_queue_and_selected_default(adapter_manifest):
+    game = store()
+    library.set_fields(game["package"], build={"sha256": "apk", "build_inputs": {"native": {
+        "arm64-v8a/libopenxr_loader_generic.so": "a" * 64}}})
+    target, jobs = Target([{"package": game["package"], "sha256": "apk"}, {"package": "old"}]), []
     app = SimpleNamespace(frame_state="connected", target=target,
                           submit=lambda *a, **k: jobs.append((a, k)), toast=lambda *a: None)
     controls = list(walk(SettingsView(app).controllers()))
@@ -203,8 +248,25 @@ def test_settings_apply_uses_frame_job_queue_and_selected_default():
     apply.on_click(None)
     args, kwargs = jobs[0]
     assert kwargs["kind"] == "tool-frame" and not target.calls
-    args[1](SimpleNamespace(reporter=Reporter()))
-    assert target.calls == [("inherited", {"quest_buttons": 1})]
+    message = args[1](SimpleNamespace(reporter=Reporter()))
+    assert "Applied to 1 game." in message and "1 game needs Update on Frame first." in message
+    assert target.calls == [(game["package"], {"quest_buttons": 1}), ("old", {"quest_buttons": 1})]
+
+
+def test_controller_section_reads_default_once_and_updates_preview(monkeypatch):
+    reads = []
+    def snapshot():
+        reads.append(True)
+        assert len(reads) == 1
+        return 1
+    monkeypatch.setattr(controllers, "quest_buttons_default", snapshot)
+    controls = list(walk(SettingsView(SimpleNamespace(frame_state="none")).controllers()))
+    choice = next(c for c in controls if isinstance(c, ft.Dropdown))
+    preview = next(c for c in controls if isinstance(c, ft.Image))
+    assert choice.value == "1" and preview.src.endswith("quest-buttons-1.svg")
+    choice.on_select(SimpleNamespace(control=SimpleNamespace(value="2")))
+    assert preview.src.endswith("quest-buttons-2.svg") and len(reads) == 1
+    assert library.setting("input.quest_buttons") == 2
 
 
 def test_generated_controller_assets_are_current():

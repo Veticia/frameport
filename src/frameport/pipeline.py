@@ -1275,19 +1275,15 @@ def _build_lock(package: str) -> threading.Lock:
 
 def _build_inputs(entry: dict, native_names: list[str] | None = None) -> dict:
     """Only the native assets carried by this APK and the local converter; no downloads or Java invocations."""
-    from .core.paths import artifacts_dir
     from .tools import toolchain
 
     build = entry.get("build") or {}
     previous = build.get("build_inputs") or {}
     recipe = entry.get("recipe") or {}
     native_names = native_names if native_names is not None else build.get("native_names") or []
-    native = previous.get("native") or {}
-    manifest = artifacts_dir() / "SHA256SUMS"
-    if manifest.is_file():
-        checksums = {line.split(maxsplit=1)[1].strip().removeprefix("./"): line.split()[0]
-                     for line in manifest.read_text().splitlines() if len(line.split()) == 2}
-        native = {name: checksums.get(name) for name in native_names}
+    native = builder.native_checksums(native_names)
+    if native is None:
+        native = previous.get("native") or {}
     jar = toolchain.overport_jar() if recipe.get("overport", True) and not recipe.get("as_is") else None
     converter = previous.get("overport")
     if jar and jar.is_file():
