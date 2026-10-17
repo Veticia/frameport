@@ -37,6 +37,7 @@ Generated from [catalog/games](../catalog/games) by `scripts/compat_list.py`.
 | COMPOUND | Quest | ✅ Works |  |
 | Cook-Out | Quest | ✅ Works |  |
 | Cosmodread | Quest | ✅ Works |  |
+| CrazyTaxiVR | Quest | ✅ Works |  |
 | Creed | Quest | ✅ Works |  |
 | Crisis Zone VR | Quest | ✅ Works |  |
 | cubism | Quest | ✅ Works |  |
