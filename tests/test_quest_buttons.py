@@ -323,6 +323,29 @@ def test_failed_touch_does_not_suggest_frame(harness):
     assert "frame_controller bindings" not in p.stderr
 
 
+def test_nonzero_touch_success_is_preserved(harness):
+    bindings = [(1, "/user/hand/right/input/a/click")]
+    p = run(harness, commands=suggest(bindings, result=1, frame_result=-2))
+    assert calls(p) == [(TOUCH, bindings), (FRAME, translate(bindings, 1))]
+    assert p.stdout.endswith("RESULT 1\n")
+    assert "input_diag: quest_buttons" not in p.stderr
+
+
+def test_touch_pro_success_ignores_frame_failure(harness):
+    bindings = [(1, "/user/hand/left/input/x/click")]
+    p = run(harness, commands=suggest(bindings, PRO, frame_result=-22), remap=True)
+    assert calls(p) == [(PRO, bindings), (TOUCH, bindings), (FRAME, translate(bindings, 1))]
+    assert p.stdout.endswith("RESULT 0\n")
+
+
+def test_all_dropped_bindings_are_counted(harness):
+    first = [(1, "/user/hand/right/input/a/click")]
+    dropped = [(1, "/user/hand/left/input/thumbrest/touch")]
+    p = run(harness, commands=suggest(first) + suggest(dropped))
+    assert calls(p) == [(TOUCH, first), (FRAME, translate(first, 1)), (TOUCH, dropped), (FRAME, [])]
+    assert "0 bindings, 1 dropped" in p.stderr
+
+
 @pytest.mark.parametrize("first", [False, True])
 def test_games_own_frame_suggestion_wins(harness, first):
     bindings = [(1, "/user/hand/right/input/a/click")]
