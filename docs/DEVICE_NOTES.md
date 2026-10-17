@@ -735,3 +735,21 @@ engine loads the shim; they aren't the renderer's. About six pipelines with the 
 (module 12944, ViewIndex) still fail in Turnip; a blank fragment shader alone doesn't help, blank vertex + fragment
 does. Settings `vk_no_fossilize` + `vk_pipeline_fallback` (catalog entry): headless RUNNING after 72 s at 72 fps.
 Headset check pending (some objects may be missing).
+
+## Quest controller mode (`quest_buttons`, 2026-10-17)
+
+Adapter setting `quest_buttons` (0 SteamVR default, 1 Mirror, 2 Quest pair; contract docs/input/QUEST_BUTTONS.md,
+user page docs/CONTROLLERS.md). FrameBridge enables `XR_VALVE_frame_controller_interaction` and, after a game's Touch
+suggestion succeeds, suggests `/interaction_profiles/valve/frame_controller_valve` bindings translated from the
+accepted Touch set (SteamVR uses a Frame binding before its own Touch remap: Touch B/Y on all three top buttons).
+
+Headless check on the device (I Am Cat, Unity + OVRPlugin, mode 2, `input_diag=1`): the runtime offers and enables the
+extension in a Lepton app, and accepts the generated Frame suggestion (`quest_buttons: frame_controller bindings
+(mode 2, 27 bindings, 7 dropped): 0`); the game's Touch (34 paths) and hand-interaction suggestions were accepted as
+before; 72 fps, no new errors. Translations as in the JSON: left `x/*` -> `dpad_down/*`, `y/*` -> `dpad_left/*`,
+`menu/click` -> `view/click`. Not provable headless (tracking needs the headset worn): that SteamVR then reads the
+buttons from the Frame binding; one launch in the headset settles it.
+
+Pitfall seen during the test: OVRPort runs from two sessions on the same data folder share
+`overport-workspace/dec/working.apk` and fail at once (`OVRPort failed (exit 1)`, `FileAlreadyExistsException` in
+OVRPort's own output, which the CLI doesn't print without a verbose reporter). Build one game at a time per data folder.
