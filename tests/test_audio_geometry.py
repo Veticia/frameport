@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 
-@pytest.mark.parametrize("fixture", ["audio_geometry_test.c", "audio_geometry_target_test.c"])
+@pytest.mark.parametrize("fixture", ["audio_geometry_test.c", "audio_geometry_target_test.c", "audio_detour_test.c"])
 def test_audio_geometry_native(tmp_path, fixture):
     cc = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
     if not cc or os.name == "nt":
@@ -30,8 +30,8 @@ def test_audio_geometry_update_outdates_batman_only(monkeypatch):
     recipe = {"patches": {"frame.adapter": {}}}
     packages = ("com.camouflaj.manta", "com.Armature.VR4", "com.crytek.climb2", "com.example.other")
     current = {p: recipe_fingerprint(recipe, p) for p in packages}
-    assert patch.revision_for(packages[0]) == 2
-    assert all(patch.revision_for(p) == 1 for p in packages[1:])
+    assert patch.revision_for(packages[0]) == 3
+    assert all(patch.revision_for(p) == 2 for p in packages[1:])
     monkeypatch.setattr(patch, "package_revisions", {})
     assert current[packages[0]] != recipe_fingerprint(recipe, packages[0])
     assert all(current[p] == recipe_fingerprint(recipe, p) for p in packages[1:])

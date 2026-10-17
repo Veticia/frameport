@@ -29,11 +29,9 @@ static int mx_geometry_find(struct dl_phdr_info *info,size_t ignored,void *unuse
     unsigned char *queue=base+0x2e61bb4,*worker=base+0x2e63a28;
     if(!mx_geometry_matches_entries(queue,worker))return 1;
     // Hook the completion boundary first so every queued copy has a consumer.
-    void *original=mx_audio_detour(worker,(void*)mx_geometry_worker,mx_geometry_worker_entry);
-    __atomic_store_n(&mx_geometry_worker_original,original,__ATOMIC_RELEASE);
+    void *original=mx_audio_detour(worker,(void*)mx_geometry_worker,mx_geometry_worker_entry,&mx_geometry_worker_original);
     if(!original)return 1;
-    original=mx_audio_detour(queue,(void*)mx_geometry_queue,mx_geometry_queue_entry);
-    __atomic_store_n(&mx_geometry_queue_original,original,__ATOMIC_RELEASE);
+    original=mx_audio_detour(queue,(void*)mx_geometry_queue,mx_geometry_queue_entry,&mx_geometry_queue_original);
     LOG("FrameBridge audio geometry: Batman async input lifetime %s",original?"installed":"not installed");
     return 1;
 }

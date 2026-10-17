@@ -11,26 +11,7 @@
 #include <time.h>
 #include <link.h>
 #include <string.h>
-static size_t mx_audio_page;
-static void *mx_audio_detour(unsigned char *address,void *replacement,const uint32_t expected[4]) {
-    if(memcmp(address,expected,16)) return NULL;
-    unsigned char *trampoline=mmap(NULL,mx_audio_page,PROT_READ|PROT_WRITE,MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
-    if(trampoline==MAP_FAILED) return NULL;
-    uint32_t branch[2]={0x58000050u,0xd61f0200u}; // ldr x16, +8; br x16
-    memcpy(trampoline,address,16);
-    memcpy(trampoline+16,branch,8);
-    uintptr_t continuation=(uintptr_t)address+16;
-    memcpy(trampoline+24,&continuation,8);
-    __builtin___clear_cache((char*)trampoline,(char*)trampoline+32);
-    if(mprotect(trampoline,mx_audio_page,PROT_READ|PROT_EXEC)) return NULL;
-    unsigned char *page=(unsigned char*)((uintptr_t)address&~(mx_audio_page-1));
-    if(mprotect(page,mx_audio_page,PROT_READ|PROT_WRITE|PROT_EXEC)) return NULL;
-    memcpy(address,branch,8);
-    memcpy(address+8,&replacement,8);
-    __builtin___clear_cache((char*)address,(char*)address+16);
-    mprotect(page,mx_audio_page,PROT_READ|PROT_EXEC);
-    return trampoline;
-}
+#include "audio_detour.h"
 #include "audio_metadata_queue.h"
 typedef struct {float previous,current;} MxAudioRamp;
 static uintptr_t mx_audio_base;
@@ -49,8 +30,8 @@ static void mx_audio_kill_experimental(void) {mx_audio_kill(1);}
 static void mx_audio_kill_regular(void) {mx_audio_kill(0);}
 static uint64_t mx_audio_consume(void *sink,void *main_mix,void *passthrough,const void *objects,MxAudioRamp ramp) {
     const unsigned char *previous=mx_audio_objects;mx_audio_objects=objects;
-    // An audio thread can enter just after its prologue was patched, before
-    // the installing thread publishes the completed trampoline.
+    // The installer publishes the completed trampoline before the entry branch.
+    // Keep the acquire load paired with that publication.
     uint64_t (*original)(void*,void*,void*,const void*,MxAudioRamp);
     while(!(original=__atomic_load_n(&mx_audio_consume_original,__ATOMIC_ACQUIRE)))sched_yield();
     uint64_t result=original(sink,main_mix,passthrough,objects,ramp);
@@ -82,12 +63,11 @@ static int mx_audio_find(struct dl_phdr_info *info,size_t size,void *unused) {
         __atomic_store_n(&mx_audio_checked,1,__ATOMIC_RELEASE);return 1;
     }
     __atomic_store_n(&mx_audio_base,info->dlpi_addr,__ATOMIC_RELEASE);
-    void *original=mx_audio_detour(base+0x2c8fac,(void*)mx_audio_consume,consume);
-    __atomic_store_n(&mx_audio_consume_original,original,__ATOMIC_RELEASE);
-    if(!__atomic_load_n(&mx_audio_consume_original,__ATOMIC_ACQUIRE)) {
+    void *original=mx_audio_detour(base+0x2c8fac,(void*)mx_audio_consume,consume,&mx_audio_consume_original);
+    if(!original) {
         __atomic_store_n(&mx_audio_base,0,__ATOMIC_RELEASE);return 1;
     }
-    if(!mx_audio_detour(base+0x2be2c0,(void*)mx_audio_kill_experimental,kill) || !mx_audio_detour(base+0x2be7b0,(void*)mx_audio_kill_regular,kill)) {
+    if(!mx_audio_detour(base+0x2be2c0,(void*)mx_audio_kill_experimental,kill,NULL) || !mx_audio_detour(base+0x2be7b0,(void*)mx_audio_kill_regular,kill,NULL)) {
         LOG("FrameBridge audio metadata: incomplete installation");return 1;
     }
     LOG("FrameBridge audio metadata: metadata reclamation follows current audio-frame references; Meta audio base=%p",base);

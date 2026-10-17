@@ -10,8 +10,8 @@
 #define LOG(...) ((void)0)
 static uintptr_t mx_audio_base;
 static unsigned detours,scans;
-static void *mx_audio_detour(unsigned char *address,void *replacement,const uint32_t expected[4]) {
-    assert(replacement && !memcmp(address,expected,16));detours++;return (void*)1;
+static void *mx_audio_detour(unsigned char *address,void *replacement,const uint32_t expected[4],void *slot) {
+    (void)slot;assert(replacement && !memcmp(address,expected,16));detours++;return (void*)1;
 }
 static int fake_iterate(int (*callback)(struct dl_phdr_info*,size_t,void*),void *data) {
     (void)callback;(void)data;scans++;return 0;

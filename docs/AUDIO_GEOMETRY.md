@@ -37,6 +37,27 @@ IL2CPP addresses are `0x2e61bb4` (queue) and `0x2e63a28` (worker); text file
 offsets in this build are 0x1000 lower. These offsets must not be reused for
 another game or build.
 
+Both geometry hooks and the metadata hooks use `audio_detour.h`. After the
+16-byte entry guard, only the first, naturally aligned instruction is replaced:
+a release atomic store publishes an AArch64 `B` to a nearby stub. The stub's
+absolute jump and the trampoline (one verified non-PC-relative instruction,
+then a direct branch to entry+4) are complete, instruction-cache flushed and RX
+before publication. The original-call pointer is published first. Remaining
+entry instructions are unchanged, so workers already past the entry can finish
+normally. Non-destructive mmap hints are checked against the signed imm26 range;
+if no nearby mapping fits, that hook is skipped without changing its entry.
+
+Every mprotect result is checked. Failures before entry publication free the
+mapping. If restoring RX after publication fails, the entry word is restored,
+its instruction cache is flushed, and restoring RX is attempted again. The
+mapping and original-call pointer must then remain valid until process exit:
+a worker may already have followed the published branch. Freeing them without
+quiescing those threads would introduce a use-after-unmap. A persistent kernel
+mprotect failure can leave the entry page RWX; installation logs once on failure.
+This exceptional rollback cannot provide immediate reclamation or guarantee RX
+when the kernel refuses it. No device validation of this publication change has
+been performed.
+
 This is separate from the existing [audio metadata retirement repair](AUDIO_METADATA.md).
 It does not change the decoder, acoustic processing, tracking, foveation,
 resolution, refresh rate, or other games' recipes. Temporary input dumps, native
@@ -54,6 +75,8 @@ normal path; no launcher script or additional option is needed.
 - Native regressions cover deferred and inline completion, source destruction
   before worker execution, concurrent loads, cleanup, allocation failure,
   argument preservation, and rejection of unknown build IDs/function entries.
+  Host C tests also cover branch-range endpoints, stub/trampoline encoding,
+  publication order, rejected mmap results and mprotect failure cleanup/rollback.
 - On the headset, the affected save loaded successfully with the repair. Logs
   showed private copies of 2,599,300, 159,020 and 628,088 bytes made before dispatch;
   each original parser completed and each copy was released. Another 180,120-byte

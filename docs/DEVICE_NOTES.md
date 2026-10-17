@@ -288,7 +288,7 @@ Steam placeholder set (no Steam art at all) → fixed in artwork/steam.py.
 
 ## PR #34: Meta XR Audio metadata (Batman)
 
-**PR #34 (merged 2026-10-04, Lucas-Mathieu):** `native/adapter/audio_metadata.h` patches Meta XR Audio Wwise (only build ID e1619e7f…, Batman: Arkham Shadow 1.4.1) so queued audio metadata isn't freed while the current audio frame references it (smoke-bomb crash). Verified headless: installs ("metadata reclamation follows …"), 72 fps; we added a once-per-second scan limit. Outside PRs: review source, rebuild `artifacts/` ourselves, merge locally (contributor's commit kept), push main.
+**PR #34 (merged 2026-10-04, Lucas-Mathieu):** `native/adapter/audio_metadata.h` patches Meta XR Audio Wwise (only build ID e1619e7f…, Batman: Arkham Shadow 1.4.1) so queued audio metadata isn't freed while the current audio frame references it (smoke-bomb crash). The shared detour now publishes one aligned AArch64 branch to a range-checked nearby stub, with a one-instruction trampoline; protection failures roll back (published mappings must remain alive for in-flight threads). See [AUDIO_GEOMETRY.md](AUDIO_GEOMETRY.md) for failure limits and host validation; this publication change has not been device-tested. Original repair verified headless: installs ("metadata reclamation follows …"), 72 fps; we added a once-per-second scan limit. Outside PRs: review source, rebuild `artifacts/` ourselves, merge locally (contributor's commit kept), push main.
 
 ## Heuristics eval (2026-10-04)
 
