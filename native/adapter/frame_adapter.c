@@ -179,6 +179,7 @@ static XrTime last_predicted_time;
 static void render_model_init(const char *package);
 
 #include "headset_model.c"
+#include "quest_buttons.c"
 
 static void read_settings(const char *path) {
     FILE *f = fopen(path, "r");
@@ -187,6 +188,7 @@ static void read_settings(const char *path) {
     float value;
     while (fgets(line, sizeof(line), f)) {
         headset_model_setting(line);
+        quest_buttons_setting(line);
         if (sscanf(line, "scale=%f", &value) == 1 && value >= 0.5f && value <= 2.0f) scale = value;
         if (sscanf(line, "foveation_fix=%f", &value) == 1) foveation_fix = value != 0;
         if (sscanf(line, "foveation_storage_fix=%f", &value) == 1) foveation_storage_fix = value != 0;
@@ -362,7 +364,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrCreateInstance(const XrInstanceCreateInfo *info
     }
 
     XrInstanceCreateInfo fixed = *info;
-    const char **names = calloc(info->enabledExtensionCount + 7, sizeof(*names));
+    const char **names = calloc(info->enabledExtensionCount + 8, sizeof(*names));
     if (!names) { free(available); return XR_ERROR_OUT_OF_MEMORY; }
     int requested_color_space = 0;
     uint32_t kept = 0;
@@ -398,6 +400,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrCreateInstance(const XrInstanceCreateInfo *info
         names[kept++] = "XR_KHR_android_create_instance";
         LOG("added %s", "XR_KHR_android_create_instance");
     }
+    quest_buttons_extensions(available, available_count, names, &kept);
     {   // no graphics API extension at all: Meta's runtime still accepts a GLES session, the Frame's doesn't
         // (Lambda1VR's TBXR enables only XR_EXT_local_floor). Add GLES, which every such app uses, if offered.
         int graphics = 0, gles_offered = 0;
@@ -472,6 +475,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrCreateInstance(const XrInstanceCreateInfo *info
     free(available);
     mx_audio_initialize(); mx_batman_geometry_initialize();
     XrResult result = fn(&fixed, instance);
+    if (XR_FAILED(result)) quest_buttons_enabled = 0;
     free(names);
     LOG("xrCreateInstance result=%d", result);
     emulate_color_space = fb_color_space && XR_SUCCEEDED(result) && requested_color_space;
@@ -2120,7 +2124,20 @@ XRAPI_ATTR XrResult XRAPI_CALL xrGetCurrentInteractionProfile(XrSession session,
         static int logged;
         if (logged++ < 40) LOG("layer_debug: interaction profile of %s: %s (result %d)", who, what, result);
     }
-    if (XR_SUCCEEDED(result) && state) current_profile_fix(user, state);
+    if (XR_SUCCEEDED(result) && state) {
+        // A Frame binding replaces SteamVR's Touch remap; Quest games still expect a Touch-shaped profile.
+        if (quest_buttons && quest_buttons_enabled && state->interactionProfile) {
+            PFN_xrPathToString str = (PFN_xrPathToString)lookup(active_instance, "xrPathToString");
+            PFN_xrStringToPath path = (PFN_xrStringToPath)lookup(active_instance, "xrStringToPath");
+            char name[XR_MAX_PATH_LENGTH];
+            uint32_t size = 0;
+            XrPath touch;
+            if (str && path && XR_SUCCEEDED(str(active_instance, state->interactionProfile, sizeof(name), &size, name)) &&
+                strstr(name, "/valve/") && XR_SUCCEEDED(path(active_instance, TOUCH_PROFILE, &touch)))
+                state->interactionProfile = touch;
+        }
+        current_profile_fix(user, state);
+    }
     return result;
 }
 
@@ -2328,7 +2345,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrGetInstanceProcAddr(XrInstance instance, const 
     }
     if (sync_guard || layer_debug || input_diag) HOOK_AS(xrSyncActions, hook_xrSyncActions)
     if (layer_debug) HOOK_AS(xrGetActionStateBoolean, hook_xrGetActionStateBoolean)
-    if (layer_debug || aim_correction_on() || profile_remap || input_diag || proximity_emul)
+    if (layer_debug || aim_correction_on() || profile_remap || input_diag || proximity_emul || quest_buttons)
         HOOK_AS(xrSuggestInteractionProfileBindings, hook_xrSuggestInteractionProfileBindings)
     if (action_dedup || proximity_emul || profile_remap || input_diag) HOOK_AS(xrCreateAction, hook_xrCreateAction)
     if (layer_debug || aim_correction_on()) {

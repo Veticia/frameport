@@ -419,6 +419,86 @@ static int add_binding(XrInstance instance, PFN_xrStringToPath to_path, XrAction
     return 1;
 }
 
+// Mirrors docs/input/quest_buttons.json; the host test derives its expected bindings from that contract.
+static const char *const FRAME_COMMON[] = {"squeeze/value", "trigger/value", "trigger/touch", "thumbstick",
+    "thumbstick/x", "thumbstick/y", "thumbstick/click", "thumbstick/touch", "grip/pose", "aim/pose"};
+static const char *const FRAME_DROPPED[] = {"thumbrest/touch", "system/click"};
+static const struct {
+    const char *hand, *touch;
+    const char *targets[2][2];  // Mirror, Quest pair
+} FRAME_BUTTONS[] = {
+    {"left", "x", {{"dpad_down", "dpad_right"}, {"dpad_down", NULL}}},
+    {"left", "y", {{"dpad_up", "dpad_left"}, {"dpad_left", NULL}}},
+    {"left", "menu", {{"view", NULL}, {"view", NULL}}},
+    {"right", "a", {{"a", "x"}, {"a", NULL}}},
+    {"right", "b", {{"b", "y"}, {"b", NULL}}},
+};
+
+static void suggest_frame(XrInstance instance, PFN_xrSuggestInteractionProfileBindings fn,
+                           PFN_xrPathToString to_string, const XrInteractionProfileSuggestedBinding *suggested) {
+    if (!quest_buttons || !quest_buttons_enabled || app_suggested_frame) return;
+    PFN_xrStringToPath to_path = (PFN_xrStringToPath)lookup(instance, "xrStringToPath");
+    XrPath frame;
+    uint32_t n = suggested->countSuggestedBindings, kept = 0, dropped = 0;
+    XrResult result = XR_ERROR_PATH_UNSUPPORTED;
+    XrActionSuggestedBinding *bindings = NULL;
+    if (!to_path || !to_string || XR_FAILED(to_path(instance, FRAME_PROFILE, &frame))) goto done;
+    // Every source contributes at most two bindings; check before multiplying the uint32_t count.
+    if (n > UINT32_MAX / 2 || !(bindings = calloc(n ? (size_t)n * 2 : 1, sizeof(*bindings)))) {
+        result = XR_ERROR_OUT_OF_MEMORY;
+        goto done;
+    }
+    for (uint32_t i = 0; i < n; ++i) {
+        const XrActionSuggestedBinding *source = &suggested->suggestedBindings[i];
+        char path[XR_MAX_PATH_LENGTH], target[XR_MAX_PATH_LENGTH];
+        uint32_t size = 0, before = kept;
+        if (XR_FAILED(to_string(instance, source->binding, sizeof(path), &size, path))) { ++dropped; continue; }
+        const char *hand = NULL, *relative = NULL;
+        if (!strncmp(path, "/user/hand/left/", 16)) { hand = "left"; relative = path + 16; }
+        else if (!strncmp(path, "/user/hand/right/", 17)) { hand = "right"; relative = path + 17; }
+        if (!hand) { ++dropped; continue; }
+        const char *targets[2] = {NULL, NULL};
+        char button_targets[2][64];
+        if (!strcmp(relative, "output/haptic")) targets[0] = relative;
+        else if (!strncmp(relative, "input/", 6)) {
+            const char *input = relative + 6;
+            if (IN(input, FRAME_COMMON)) targets[0] = relative;
+            else if (!IN(input, FRAME_DROPPED)) {
+                for (size_t b = 0; b < sizeof(FRAME_BUTTONS) / sizeof(*FRAME_BUTTONS); ++b) {
+                    const char *button = FRAME_BUTTONS[b].touch;
+                    size_t len = strlen(button);
+                    if (strcmp(hand, FRAME_BUTTONS[b].hand) || strncmp(input, button, len) || input[len] != '/') continue;
+                    const char *component = input + len + 1;
+                    if (strcmp(component, "click") && (strcmp(button, "menu") == 0 || strcmp(component, "touch"))) continue;
+                    for (int t = 0; t < 2; ++t) {
+                        const char *name = FRAME_BUTTONS[b].targets[quest_buttons - 1][t];
+                        if (!name) continue;
+                        snprintf(button_targets[t], sizeof(button_targets[t]), "input/%s/%s", name, component);
+                        targets[t] = button_targets[t];
+                    }
+                    break;
+                }
+            }
+        }
+        for (int t = 0; t < 2; ++t) {
+            if (!targets[t]) continue;
+            snprintf(target, sizeof(target), "/user/hand/%s/%s", hand, targets[t]);
+            XrPath p;
+            if (XR_FAILED(to_path(instance, target, &p))) continue;
+            bindings[kept++] = (XrActionSuggestedBinding){source->action, p};
+            input_diag_quest_binding(path, target);
+        }
+        if (kept == before) ++dropped;
+    }
+    XrInteractionProfileSuggestedBinding copy = {XR_TYPE_INTERACTION_PROFILE_SUGGESTED_BINDING, NULL,
+                                                frame, kept, bindings};
+    result = fn(instance, &copy);
+done:
+    LOG("quest_buttons: frame_controller bindings (mode %d, %u bindings, %u dropped): %d",
+        quest_buttons, kept, dropped, result);
+    free(bindings);
+}
+
 // Suggests Touch bindings with finger proximity bound to the touch inputs (proximity_emul), falling back to the
 // bindings as given when the runtime refuses them.
 static XrResult suggest_touch(XrInstance instance, PFN_xrSuggestInteractionProfileBindings fn,
@@ -484,6 +564,7 @@ static XrResult remap_to_touch(XrInstance instance, PFN_xrSuggestInteractionProf
     copy.countSuggestedBindings = kept;
     copy.suggestedBindings = b;
     XrResult r = kept ? suggest_touch(instance, fn, to_string, &copy) : XR_ERROR_PATH_UNSUPPORTED;
+    if (XR_SUCCEEDED(r)) suggest_frame(instance, fn, to_string, &copy);
     free(b);
     LOG("controller profile %s -> oculus/touch_controller (%u bindings, %u dropped): %d", profile + 22, kept,
         n - kept, r);
@@ -525,6 +606,10 @@ static XrResult suggest_bindings(XrInstance instance, PFN_xrSuggestInteractionPr
     XrResult r = known && !strcmp(profile, TOUCH_PROFILE) ? suggest_touch(instance, fn, to_string, suggested)
                                                          : fn(instance, suggested);
     input_diag_suggested(instance, suggested, r, to_string);  // the runtime's answer to the game's own suggestion
+    if (known && XR_SUCCEEDED(r)) {
+        if (!strcmp(profile, FRAME_PROFILE) && quest_buttons && quest_buttons_enabled) app_suggested_frame = 1;
+        else if (!strcmp(profile, TOUCH_PROFILE)) suggest_frame(instance, fn, to_string, suggested);
+    }
     if (!profile_remap || !known) return r;
     if (!strcmp(profile, TOUCH_PROFILE)) {
         if (XR_SUCCEEDED(r)) app_suggested_touch = 1;  // the app's own Touch bindings win over a remap
