@@ -197,6 +197,7 @@ Generated from [catalog/games](../catalog/games) by `scripts/compat_list.py`.
 | Time Stall | Quest | ⚠️ Works with issues | Both eyes distort during movement (unresolved). |
 | Vampire: The Masquerade - Justice | Quest | ⚠️ Works with issues | Game runs fine and playable, on loading there's a random sphere in the middle of the sceen. |
 | WiiCompiled VR | Quest | ⚠️ Works with issues | To add a game: in FramePort's Files tab, upload your .wcgame file to this game's storage, folder Android/data/org.wiicompiled.quest/files/WiiCompiledOpenXRVR… |
+| Breachers | Quest | ❌ Doesn't run | Online-only multiplayer that needs Meta's online services, which aren't available on the Frame. |
 | Deadly Delivery | Quest | ❌ Doesn't run | Quits after Meta's entitlement check fails: it needs Meta's online services. |
 | Espire 1: VR Operative (Quest Edition) | Quest | ❌ Doesn't run | Mesa GL driver crash during texture upload. |
 | GOLF+ | Quest | ❌ Doesn't run | Black screen. |
