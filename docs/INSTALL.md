@@ -133,6 +133,14 @@ installed game keeps its Steam entry, artwork and saves (Steam restarts once).
 - A game on a card only starts while the card is inserted.
 - Cards formatted as FAT, exFAT or NTFS can't hold games: format the card in SteamOS first.
 
+### Why do the controller buttons repeat or do the wrong thing?
+
+SteamVR maps Quest Touch onto the Frame's controller buttons by default: three top buttons repeat Touch Y/B.
+Choose **Game settings → Controllers → Controller buttons** to use Mirror or Quest pair for one game, or
+**Settings → Controllers** for the library default. **Apply to installed games now** sends the default to Quest
+games without an override. Changes take effect at the next launch.
+See [Controller buttons](CONTROLLERS.md) for the diagram, mappings and limits.
+
 ### Android apps and Windows programs
 
 - Android apps without VR are installed unchanged and shown as a window in the headset. If one shows nothing (or a

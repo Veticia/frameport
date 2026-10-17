@@ -124,6 +124,7 @@ What FramePort adds: [Architecture](docs/ARCHITECTURE.md).
 | [Compatibility](docs/COMPATIBILITY.md) | What runs and how well |
 | [Tested games](docs/GAMES.md) | Tested games and how well they run |
 | [FAQ](docs/FAQ.md) | Game folders and common questions |
+| [Controller buttons](docs/CONTROLLERS.md) | Quest Touch buttons on the Frame: SteamVR default, Mirror and Quest pair |
 | [Porting playbook](docs/PLAYBOOK.md) | Symptoms and fixes per game |
 | [Steam Frame runtime reference](docs/FRAME_RUNTIME.md) | Facts about the Frame's runtime |
 | [Architecture](docs/ARCHITECTURE.md) | How the code is organized |

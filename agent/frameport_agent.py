@@ -3597,7 +3597,7 @@ def set_gamepad_line(text, want):
 # BACK, which would close many apps): Steam's virtual pad reports Valve's ids, so Android would fall back to Generic.kl
 # (triggers on Z/RZ, right stick on RX/RY: games then mix up the right stick and the triggers). The D-pad keys
 # (BTN_DPAD_*, as AOSP's Generic.kl) cover a pad that sends its D-pad as buttons rather than the hat axes: the Frame's
-# controllers have no D-pad, so it only comes from a Steam Input layout (e.g. a stick set to D-pad, GitHub #162).
+# left controller has a D-pad; which inputs reach a 2D app still depends on its Steam Input layout (GitHub #162).
 GAMEPAD_KL = """# Steam Input virtual gamepad (Xbox 360 layout). Written by FramePort (device.steam_gamepad).
 key 304   BUTTON_A
 key 305   BUTTON_B
