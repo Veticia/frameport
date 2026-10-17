@@ -243,6 +243,19 @@ def test_fixes_reg_has_meta_library_and_root(fx):
     assert "Windows.Devices.WiFi.WiFiAdapter" in reg and "[HKEY_LOCAL_MACHINE\\Software\\Revive]" in reg
 
 
+def test_step_fixes_creates_quick_launch(fx, monkeypatch):
+    # Meta's app framework stops OVRServer right after start when this folder is missing
+    monkeypatch.setattr(fx, "HERE", str(ROOT / "artifacts" / "fexrift"))
+    monkeypatch.setattr(fx, "wine", lambda *a, **k: None)
+    monkeypatch.setattr(fx, "wineserver_kill", lambda: None)
+    Path(fx.PFX, "dosdevices").mkdir(parents=True)
+    Path(fx.PFX, "drive_c", "windows", "system32").mkdir(parents=True)
+    assert fx.step_fixes() == "ok"
+    ql = Path(fx.USER_DIR, "AppData", "Roaming", "Microsoft", "Internet Explorer", "Quick Launch")
+    assert (ql / "User Pinned").is_dir()
+    assert fx.step_fixes() == "ok"    # idempotent
+
+
 def test_status_without_setup(fx):
     st = fx.cmd_status({})
     assert st["proton"] is False and st["prefix"] is False and st["login"] is False and st["apps"] == []

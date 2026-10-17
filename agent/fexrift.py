@@ -365,6 +365,10 @@ def step_fixes():
     link = os.path.join(PFX, "dosdevices", "volume{00000000-0000-0000-0000-000000000043}")
     if not os.path.lexists(link):
         os.symlink("../drive_c", link)
+    # Meta's app framework needs the Quick Launch folder: without it OAF stops with "Error acquiring quick launch
+    # directory" and OVRServer leaves its event loop right after initialising (seen in a fresh prefix 2026-10-17)
+    os.makedirs(os.path.join(USER_DIR, "AppData", "Roaming", "Microsoft", "Internet Explorer", "Quick Launch",
+                             "User Pinned"), exist_ok=True)
     os.makedirs(os.path.join(META_DIR, "Software", "Software"), exist_ok=True)
     os.makedirs(os.path.join(META_DIR, "Software", "Manifests"), exist_ok=True)
     wineserver_kill()
