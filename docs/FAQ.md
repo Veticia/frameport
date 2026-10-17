@@ -94,7 +94,10 @@ Every game has three places; the answers below refer to them.
   It has **Reset to suggested recipe…** and **Report a problem…**, among others.
 
 The sidebar has two tabs for troubleshooting: **Monitor** (the running game's frame rate, CPU and graphics) and
-**Files** (each installed game's storage on the Frame, under **Game storage**).
+**Files** (each installed game's storage on the Frame, under **Game storage**). Quest games expose their Android
+storage; PC VR and Linux games expose their install folders, including installations on another drive.
+SD cards, USB drives and other Steam library drives appear under **Drives**, with free space when available.
+Read-only drives can be browsed and downloaded from, but cannot be changed.
 
 ## A game doesn't work right. Where do I start?
 

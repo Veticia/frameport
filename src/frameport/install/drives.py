@@ -17,7 +17,7 @@ INTERNAL = "internal"
 
 def list_drives(frame: Frame) -> list[dict]:
     """The agent's `drives`: [{id, path, install_dir, label, fstype, internal, removable, free_bytes, total_bytes,
-    usable, reason, games}]."""
+    usable, reason, read_only, games}]."""
     return frame.agent("drives")["drives"]
 
 

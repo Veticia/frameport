@@ -45,7 +45,7 @@ try:
 except ImportError:  # Windows: pc_revive loads this file for its VDF code only (GitHub #131)
     fcntl = None
 
-AGENT_VERSION = 96
+AGENT_VERSION = 97
 HOME = os.path.expanduser("~")
 STEAM = os.path.join(HOME, ".local/share/Steam")
 ANCHORS = os.path.join(HOME, "Applications/quest-frame")
@@ -1418,6 +1418,7 @@ def _drive(path, install_dir, m, internal=False, steam_library=False):
     return {"id": "internal" if internal else path, "path": path, "install_dir": install_dir,
             "label": "Internal storage" if internal else (os.path.basename(path.rstrip("/")) or path),
             "fstype": fstype, "device": m[0] if m else "", "internal": internal,
+            "read_only": bool(m and "ro" in m[3]),
             "removable": not internal and _inside(path, MEDIA_ROOT), "steam_library": steam_library,
             "free_bytes": free, "total_bytes": total, "usable": not reason, "reason": reason}
 

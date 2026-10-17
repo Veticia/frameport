@@ -74,6 +74,7 @@ def test_drives_lists_internal_and_removable_drives(monkeypatch, tmp_path):
     assert sd["usable"] and sd["removable"] and sd["fstype"] == "ext4"
     assert sd["path"] == str(sd_dir(tmp_path)) and sd["install_dir"] == str(sd_dir(tmp_path) / "FramePort")
     assert not drives["STICK"]["usable"] and "exfat" in drives["STICK"]["reason"]
+    assert drives["RO"]["read_only"] and not sd["read_only"]
     assert not drives["RO"]["usable"] and "read-only" in drives["RO"]["reason"]
 
 
@@ -595,3 +596,10 @@ def test_upgrade_gives_old_launchers_the_link(monkeypatch, tmp_path):
     assert path.read_text() == fresh
     assert a.upgrade_launchers() == []  # nothing left to do
     assert subprocess.run(["bash", "-n", str(path)]).returncode == 0
+
+
+def test_read_only_exfat_reports_mount_flag(monkeypatch, tmp_path):
+    a = load(monkeypatch, tmp_path)
+    d = a._drive(str(sd_dir(tmp_path)), "/unused", ("/dev/fake", str(sd_dir(tmp_path)), "exfat", ["ro"]))
+    assert d["read_only"] and not d["usable"]
+    assert "exfat" in d["reason"]
