@@ -129,6 +129,7 @@ static int controller_fix = 1;
 static int swapchain_fix = 1;
 static int cube_standin = 1;  // cube swapchains the runtime refuses: served by the adapter (cube_standin.c)
 static int rect_clamp = 1;
+static int fb_color_space;  // fb_color_space: offer XR_FB_color_space when the runtime lacks it (#336)
 static int action_dedup = 1;  // rename duplicate action names in a set (session_fixes.c; GitHub #323)
 static int pose_consistency = 0;  // repeat xrLocateViews queries for one display time get the same poses (GitHub #8)  // clamp submitted image rects to their swapchain (SteamVR rejects a 1 px overrun)
 static int pose_time_fix;   // poses asked for at CLOCK_MONOTONIC "now" or far in the past: at XrTime "now" (pose_time.c)
@@ -199,6 +200,7 @@ static void read_settings(const char *path) {
         if (sscanf(line, "swapchain_fix=%f", &value) == 1) swapchain_fix = value != 0;
         if (sscanf(line, "cube_standin=%f", &value) == 1) cube_standin = value != 0;
         if (sscanf(line, "rect_clamp=%f", &value) == 1) rect_clamp = value != 0;
+        if (sscanf(line, "fb_color_space=%f", &value) == 1) fb_color_space = value != 0;
         if (sscanf(line, "action_dedup=%f", &value) == 1) action_dedup = value != 0;
         if (sscanf(line, "pose_consistency=%f", &value) == 1) pose_consistency = value != 0;
         if (sscanf(line, "pose_debug=%f", &value) == 1) pose_debug = value != 0;
@@ -319,6 +321,7 @@ static PFN_xrVoidFunction lookup(XrInstance instance, const char *name) {
 
 #include "scene_emu.c"
 #include "render_model.c"
+#include "color_space.c"
 
 XRAPI_ATTR XrResult XRAPI_CALL xrCreateInstance(const XrInstanceCreateInfo *info, XrInstance *instance) {
     PFN_xrCreateInstance fn = (PFN_xrCreateInstance)lookup(XR_NULL_HANDLE, "xrCreateInstance");
@@ -341,7 +344,8 @@ XRAPI_ATTR XrResult XRAPI_CALL xrCreateInstance(const XrInstanceCreateInfo *info
         XR_NULL_HANDLE, "xrEnumerateInstanceExtensionProperties");
     uint32_t available_count = 0;
     XrExtensionProperties *available = NULL;
-    if (enum_ext && XR_SUCCEEDED(enum_ext(NULL, 0, &available_count, NULL)) && available_count) {
+    int extensions_known = enum_ext && XR_SUCCEEDED(enum_ext(NULL, 0, &available_count, NULL));
+    if (extensions_known && available_count) {
         available = calloc(available_count, sizeof(*available));
         if (available) {
             for (uint32_t i = 0; i < available_count; ++i) available[i].type = XR_TYPE_EXTENSION_PROPERTIES;
@@ -350,15 +354,18 @@ XRAPI_ATTR XrResult XRAPI_CALL xrCreateInstance(const XrInstanceCreateInfo *info
                 available = NULL;
             }
         }
+        if (!available) extensions_known = 0;
     }
 
     XrInstanceCreateInfo fixed = *info;
     const char **names = calloc(info->enabledExtensionCount + 7, sizeof(*names));
     if (!names) { free(available); return XR_ERROR_OUT_OF_MEMORY; }
+    int requested_color_space = 0;
     uint32_t kept = 0;
     for (uint32_t i = 0; i < info->enabledExtensionCount; ++i) {
         const char *ext = info->enabledExtensionNames[i];
         int supported = !available;  // if we could not enumerate, pass everything through
+        if (extensions_known && !strcmp(ext, XR_FB_COLOR_SPACE_EXTENSION_NAME)) supported = 0;
         for (uint32_t j = 0; available && j < available_count && !supported; ++j)
             supported = !strcmp(available[j].extensionName, ext);
         if (hide_fb_foveation_vulkan && fb_is_foveation_extension(ext)) {
@@ -370,7 +377,9 @@ XRAPI_ATTR XrResult XRAPI_CALL xrCreateInstance(const XrInstanceCreateInfo *info
             continue;
         }
         if (supported) names[kept++] = ext;
-        else if (scene_emul && is_scene_extension(ext)) {
+        else if (!strcmp(ext, XR_FB_COLOR_SPACE_EXTENSION_NAME)) {
+            requested_color_space = 1;
+        } else if (scene_emul && is_scene_extension(ext)) {
             if (!emulate_scene) LOG("emulating Meta scene/spatial-entity extensions from the guardian bounds");
             emulate_scene = 1;
         } else if (controller_models && render_models_available && !strcmp(ext, XR_FB_RENDER_MODEL_EXTENSION_NAME)) {
@@ -461,6 +470,14 @@ XRAPI_ATTR XrResult XRAPI_CALL xrCreateInstance(const XrInstanceCreateInfo *info
     XrResult result = fn(&fixed, instance);
     free(names);
     LOG("xrCreateInstance result=%d", result);
+    emulate_color_space = fb_color_space && XR_SUCCEEDED(result) && requested_color_space;
+    if (emulate_color_space) {
+        static int logged;
+        if (!logged) {
+            logged = 1;
+            LOG("color_space: emulating XR_FB_color_space; REC709 SDR compatibility, no colour conversion");
+        }
+    }
     if (XR_SUCCEEDED(result)) { active_instance = *instance; mx_audio_initialize(); }
     return result;
 }
@@ -908,6 +925,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrGetSystemProperties(XrInstance instance, XrSyst
     PFN_xrGetSystemProperties fn = (PFN_xrGetSystemProperties)lookup(instance, "xrGetSystemProperties");
     if (!fn) return XR_ERROR_FUNCTION_UNSUPPORTED;
     XrResult result = fn(instance, system, properties);
+    if (XR_SUCCEEDED(result)) color_space_properties(properties);
     if (XR_SUCCEEDED(result) && properties && properties->graphicsProperties.maxLayerCount)
         runtime_max_layers = properties->graphicsProperties.maxLayerCount;
     if (XR_SUCCEEDED(result) && properties && layer_debug)
@@ -2106,8 +2124,9 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEnumerateInstanceExtensionProperties(const char
     PFN_xrEnumerateInstanceExtensionProperties fn = (PFN_xrEnumerateInstanceExtensionProperties)lookup(
         XR_NULL_HANDLE, "xrEnumerateInstanceExtensionProperties");
     if (!fn) return XR_ERROR_INITIALIZATION_FAILED;
-    if (!count) return XR_ERROR_VALIDATION_FAILURE;
-    if ((!foveation_fix && !hide_fb_foveation && !hide_space_warp && !passthrough_emul && !scene_emul && !controller_models) || layer)
+    if (!count || (capacity && !properties)) return XR_ERROR_VALIDATION_FAILURE;
+    if ((!foveation_fix && !hide_fb_foveation && !hide_space_warp && !passthrough_emul && !scene_emul && !controller_models &&
+         !fb_color_space) || layer)
         return fn(layer, capacity, count, properties);
 
     uint32_t total = 0;
@@ -2119,8 +2138,10 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEnumerateInstanceExtensionProperties(const char
     result = fn(layer, total, &total, all);
     if (XR_FAILED(result)) { free(all); return result; }
 
+    int has_color_space = 0;
     uint32_t kept = 0;
     for (uint32_t i = 0; i < total; ++i) {
+        if (!strcmp(all[i].extensionName, XR_FB_COLOR_SPACE_EXTENSION_NAME)) has_color_space = 1;
         if (!strcmp(all[i].extensionName, "XR_FB_passthrough")) runtime_has_fb_passthrough = 1;
         if (!strcmp(all[i].extensionName, XR_FB_RENDER_MODEL_EXTENSION_NAME)) runtime_has_render_model = 1;
         if (hide_fb_foveation && fb_is_foveation_extension(all[i].extensionName)) continue;
@@ -2148,6 +2169,11 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEnumerateInstanceExtensionProperties(const char
     if (controller_models && render_models_available && !runtime_has_render_model) {
         XrExtensionProperties fake = {XR_TYPE_EXTENSION_PROPERTIES, NULL, XR_FB_RENDER_MODEL_EXTENSION_NAME,
                                       XR_FB_render_model_SPEC_VERSION};
+        if (properties && kept < capacity) properties[kept] = fake;
+        ++kept;
+    }
+    if (fb_color_space && !has_color_space) {
+        XrExtensionProperties fake = {XR_TYPE_EXTENSION_PROPERTIES, NULL, XR_FB_COLOR_SPACE_EXTENSION_NAME, 3};
         if (properties && kept < capacity) properties[kept] = fake;
         ++kept;
     }
@@ -2200,7 +2226,8 @@ __attribute__((visibility("default"))) PFN_xrVoidFunction framebridge_extension_
         NATIVE_PROC(xrCreateVulkanInstanceKHR)
 #undef NATIVE_PROC
     }
-    return name ? render_model_emulation(name) : NULL;
+    PFN_xrVoidFunction color = name ? color_space_emulation(name) : NULL;
+    return color ? color : (name ? render_model_emulation(name) : NULL);
 }
 
 XRAPI_ATTR XrResult XRAPI_CALL xrGetInstanceProcAddr(XrInstance instance, const char *name,
@@ -2224,6 +2251,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrGetInstanceProcAddr(XrInstance instance, const 
     PFN_xrVoidFunction emulated = passthrough_emulation(name);
     if (!emulated) emulated = scene_emulation(name);
     if (!emulated) emulated = render_model_emulation(name);
+    if (!emulated) emulated = color_space_emulation(name);
     if (!emulated && emulate_scene && !strcmp(name, "xrLocateSpacesKHR")) emulated = (PFN_xrVoidFunction)emu_locate_spaces_khr;
     if (emulated) { *function = emulated; return XR_SUCCESS; }
     if (hide_fb_foveation_vulkan && !strcmp(name, "xrUpdateSwapchainFB")) {

@@ -190,6 +190,11 @@ SETTINGS = [
      "on some Frames; SteamVR then rejects every frame (xrEndFrame -25, XR_ERROR_SWAPCHAIN_RECT_INVALID) and the game "
      "stops drawing (for example PowerWash Simulator stuck at \"Waiting\"). An empty rect (0x0, e.g. BattleTalent's "
      "first frames, GitHub #293) is rejected the same way and becomes the whole swapchain image."),
+    ("fb_color_space", "int", 0, "Colour space extension (XR_FB_color_space)",
+     "Offers Meta's colour-space extension when the Frame's runtime lacks it: the game is told the headset uses "
+     "Rec.709 and may choose any colour space (no conversion is done). For games that quit before their VR "
+     "session with \"Rec.709 color space unavailable\" (for example OutRun Quest VR, GitHub #336). Only reaches "
+     "games that use their own OpenXR loader; OVRPort's dispatcher can't forward the new functions."),
     ("action_dedup", "int", 1, "Unique controller action names",
      "Gives a controller action whose name already exists in its action set a free name (\"turn\" -> \"turn_2\"). "
      "The Frame's runtime accepts duplicate names but then can't load the game's input manifest and treats the game "
@@ -428,6 +433,9 @@ UI: dict[str, dict] = {
                 help="Logs graphics pipelines the Frame's driver refuses. No effect on the game.", control=("switch",)),
     "vk_validation": dict(group="troubleshooting", level="advanced", label="Vulkan error checks (log)",
                 help="Logs Vulkan mistakes the game makes. Needs a special test build.", control=("switch",)),
+    "fb_color_space": dict(group="troubleshooting", level="advanced", label="Colour space support",
+                help="For games that stop at start because the headset reports no colour space "
+                     "(for example OutRun Quest VR).", control=("switch",)),
     "rect_clamp": dict(group="troubleshooting", level="advanced", label="Keep pictures in bounds",
                 help="Stops games from hanging when their eye picture is a little too big or empty (for example "
                      "PowerWash Simulator). Leave it on.", control=("switch",)),
@@ -590,6 +598,7 @@ class AdapterSetting(Patch):
             "vk_query_slots": lambda a: a.engine == "Unreal" and ap.is_vulkan(a),
             "vk_validation": lambda a: a.engine == "Unreal",
             "vk_pipeline_log": lambda a: a.engine in ("Unreal", "Other") and "arm64-v8a" in a.abis,
+            "fb_color_space": lambda a: a.xr == "OpenXR",
             # wherever the Vulkan shim can be (vk_sanitize); Unreal's Vulkan builds are rarely detected as such
             "vk_shader_dump": lambda a: a.engine in ("Unreal", "Other") and "arm64-v8a" in a.abis,
             "zink_shader_fix": ap.is_gles,

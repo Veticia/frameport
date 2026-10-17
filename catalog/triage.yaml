@@ -301,6 +301,13 @@ signatures:
       piece (for example Transformers Beyond Reality). Rebuild with the reservation marked as not committed.
     suggest: [frame.unreal_noreserve]
     supersedes: [native-crash]
+  - id: color-space-missing
+    # GitHub #336: OutRun Quest VR requires XR_FB_color_space (Rec.709) and quits before xrCreateSession
+    pattern: 'Rec\.709 color space unavailable'
+    severity: fatal
+    diagnosis: The game needs Meta's colour-space extension, which the Frame's runtime doesn't offer, and quits before
+      it starts VR (for example OutRun Quest VR). FrameBridge can offer it.
+    suggest: [adapter.fb_color_space]
   - id: graphics-requirements-missing
     pattern: '(XR_ERROR_GRAPHICS_REQUIREMENTS_CALL_MISSING|Failed to create XR session: -50\b|xrCreateSession[^\n]*-50\b)'
     severity: fatal

@@ -84,6 +84,11 @@
   "title": "Draw fades over the picture",
   "group": "Game settings"
  },
+ "adapter.fb_color_space": {
+  "anchor": "adapter-fb_color_space",
+  "title": "Colour space support",
+  "group": "Game settings"
+ },
  "adapter.flip_dump": {
   "anchor": "adapter-flip_dump",
   "title": "Upside-down panel images (diagnostics)",

@@ -652,3 +652,7 @@ the entry's `link` record (+ `direct`); `pipeline.check_link_updates` (GUI start
 `link_bar` + game page callout → `link_dialog.update_from_link` (fetch again, one confirmation, `download_and_install`
 per game; add_from_link clears the offer and keeps a name the user gave). CLI `frameport link-updates [--install]`.
 
+
+## XR_FB_color_space (#336)
+
+OutRun Quest VR (`org.outrun.quest.vr`, its own Khronos loader, no OVRPlugin) logs "Rec.709 color space unavailable" right after xrCreateInstance and quits ~20 s later without a session: the Frame's runtime (and OVRPort's dispatcher) list no XR_FB_color_space. Adapter setting `fb_color_space` (off by default, `native/adapter/color_space.c`) offers the extension when the runtime lacks it, strips it from the runtime's create info, fills XrSystemColorSpacePropertiesFB with Rec.709 and answers xrEnumerateColorSpacesFB / xrSetColorSpaceFB (no conversion: the runtime has no API for it). The functions are reachable through FrameBridge's xrGetInstanceProcAddr and `framebridge_extension_proc` (xrshim); OVRPort's fixed dispatcher table can't forward them, hence off by default. Not yet tried on the device (the build was not downloaded: it ships Sega's game data). Log: `color_space: emulating XR_FB_color_space`.
