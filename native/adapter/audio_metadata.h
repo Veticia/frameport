@@ -60,8 +60,13 @@ static int mx_audio_find(struct dl_phdr_info *info,size_t size,void *unused) {
     const uint32_t kill[4]={0xa9bd7bfd,0xf9000bf5,0xa9024ff4,0x910003fd};
     unsigned char *base=(void*)info->dlpi_addr;
     if(memcmp(base+0x2c8fac,consume,16) || memcmp(base+0x2be2c0,kill,16) || memcmp(base+0x2be7b0,kill,16)) {
+        const uintptr_t offsets[3]={0x2c8fac,0x2be2c0,0x2be7b0};
+        for(unsigned i=0;i<3;i++)if(memcmp(base+offsets[i],i?kill:consume,16))
+            LOG("FrameBridge audio detour: target=%p failed: 16-byte guard mismatch; entry unchanged",base+offsets[i]);
         __atomic_store_n(&mx_audio_checked,1,__ATOMIC_RELEASE);return 1;
     }
+    // One installation attempt per verified library, including failure paths.
+    __atomic_store_n(&mx_audio_checked,1,__ATOMIC_RELEASE);
     __atomic_store_n(&mx_audio_base,info->dlpi_addr,__ATOMIC_RELEASE);
     void *original=mx_audio_detour(base+0x2c8fac,(void*)mx_audio_consume,consume,&mx_audio_consume_original);
     if(!original) {

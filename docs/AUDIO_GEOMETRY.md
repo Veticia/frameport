@@ -44,8 +44,14 @@ absolute jump and the trampoline (one verified non-PC-relative instruction,
 then a direct branch to entry+4) are complete, instruction-cache flushed and RX
 before publication. The original-call pointer is published first. Remaining
 entry instructions are unchanged, so workers already past the entry can finish
-normally. Non-destructive mmap hints are checked against the signed imm26 range;
-if no nearby mapping fits, that hook is skipped without changing its entry.
+normally. `/proc/self/maps` supplies free gaps, clipped to the ranges of both
+branches. Page-aligned candidates are tried outward from the target (lower
+address first on equal distances) with `MAP_FIXED_NOREPLACE`; EEXIST/EINVAL
+advance to the next candidate. Existing mappings are never replaced, and a
+kernel that ignores the flag and relocates a mapping has that result unmapped.
+If no candidate works, that hook is skipped without changing its entry. No ELF
+page-slack fallback is used: zero bytes alone cannot establish that padding is
+outside all section content, and the loaded program headers do not prove this.
 
 Every mprotect result is checked. Failures before entry publication free the
 mapping. If restoring RX after publication fails, the entry word is restored,
@@ -53,10 +59,15 @@ its instruction cache is flushed, and restoring RX is attempted again. The
 mapping and original-call pointer must then remain valid until process exit:
 a worker may already have followed the published branch. Freeing them without
 quiescing those threads would introduce a use-after-unmap. A persistent kernel
-mprotect failure can leave the entry page RWX; installation logs once on failure.
+mprotect failure can leave the entry page RWX. Each hook failure logs its target
+and failing operation once; metadata installation is attempted once per verified
+library. Allocation failure reports the closest eligible free page, last
+attempted address, actual mmap result, errno and attempt count. Null closest and
+zero attempts mean no eligible free gap. Protection failures identify stub RX,
+entry RWX, or entry RX, including the rollback RX errno (zero means it succeeded).
 This exceptional rollback cannot provide immediate reclamation or guarantee RX
-when the kernel refuses it. No device validation of this publication change has
-been performed.
+when the kernel refuses it. The previous hint-based publication build failed installation on the Steam
+Frame; this gap-search replacement has host validation only.
 
 This is separate from the existing [audio metadata retirement repair](AUDIO_METADATA.md).
 It does not change the decoder, acoustic processing, tracking, foveation,
@@ -76,7 +87,9 @@ normal path; no launcher script or additional option is needed.
   before worker execution, concurrent loads, cleanup, allocation failure,
   argument preservation, and rejection of unknown build IDs/function entries.
   Host C tests also cover branch-range endpoints, stub/trampoline encoding,
-  publication order, rejected mmap results and mprotect failure cleanup/rollback.
+  publication order, synthetic maps with in-range/out-of-range/absent gaps and
+  adjacent mappings, outward placement order, EEXIST/EINVAL fallback, rejected
+  relocated mmap results and mprotect failure cleanup/rollback.
 - On the headset, the affected save loaded successfully with the repair. Logs
   showed private copies of 2,599,300, 159,020 and 628,088 bytes made before dispatch;
   each original parser completed and each copy was released. Another 180,120-byte
