@@ -207,3 +207,4 @@ Generated from [catalog/games](../catalog/games) by `scripts/compat_list.py`.
 | GOLF+ | Quest | ❌ Doesn't run | Black screen. |
 | HITMAN 3 VR: Reloaded | Quest | ❌ Doesn't run | Vulkan driver crash (freedreno), even without Valve layers. |
 | Roblox | Quest | ❌ Doesn't run | Crashes on its first VR frame on the Frame. |
+| Thief Simulator | Quest | ❌ Doesn't run | Quits at start with the game's own "installed from unknown source" message. |
