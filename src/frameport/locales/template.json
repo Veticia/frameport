@@ -1924,7 +1924,7 @@
  "Use this PC's keyboard on the Frame.": "",
  "Use this program": "",
  "Use your own artwork…": "",
- "Used when installing or updating games that follow the global default. Each game's Game settings can override it. Changes take effect at the next launch.": "",
+ "Used when installing or updating games that follow the global default. Each game's Game settings can override it. Changes take effect at the next launch. Games installed before this feature need Update on Frame once for the mode to work.": "",
  "Uses its own Revive — experimental on the Frame": "",
  "Uses OVRPort, Revive (LibreVR), Valve's Lepton and Proton. Not affiliated with Valve or Meta.": "",
  "Uses the store title/icon (OVRPort image service) for the app label.": "",
@@ -2105,6 +2105,10 @@
   ""
  ],
  "{n} game is already in the library from another folder": [
+  "",
+  ""
+ ],
+ "{n} game needs Update on Frame first.": [
   "",
   ""
  ],

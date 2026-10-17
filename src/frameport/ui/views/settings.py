@@ -177,9 +177,11 @@ class SettingsView:
         from ..controllers import diagram, diagram_source
 
         app = self.app
-        preview = diagram(controllers.quest_buttons_default())
+        mode = controllers.quest_buttons_default()
+        preview = diagram(mode)
 
         def changed(e):
+            nonlocal mode
             mode = int(e.control.value)
             library.set_setting("input.quest_buttons", mode)
             preview.src = diagram_source(mode)
@@ -187,21 +189,25 @@ class SettingsView:
 
         def apply(e):
             def run(job):
-                applied = controllers.apply_default(app.target, job.reporter)
-                app.toast(tr_n("Applied to {n} game. Takes effect at the next launch.",
-                               "Applied to {n} games. Takes effect at the next launch.", len(applied)))
-                return applied
+                result = controllers.apply_default(app.target, job.reporter)
+                message = tr_n("Applied to {n} game. Takes effect at the next launch.",
+                               "Applied to {n} games. Takes effect at the next launch.", len(result["applied"]))
+                if result["needs_update"]:
+                    message += " " + tr_n("{n} game needs Update on Frame first.",
+                                          "{n} games need Update on Frame first.", len(result["needs_update"]))
+                return message  # the job completion toast shows this result too
             app.submit(tr("Apply controller buttons to installed games"), run, kind="tool-frame")
 
         choice = C.dropdown(label=tr("Default controller buttons"),
-                            value=str(controllers.quest_buttons_default()), width=T.px(300),
+                            value=str(mode), width=T.px(300),
                             options=[ft.DropdownOption(str(v), tr(label)) for v, label in controllers.CHOICES],
                             on_select=changed)
         return ft.Column([
             C.body(tr("Choose which Quest Touch buttons the Frame's face buttons send.")),
             choice, preview,
             C.meta(tr("Used when installing or updating games that follow the global default. "
-                      "Each game's Game settings can override it. Changes take effect at the next launch.")),
+                      "Each game's Game settings can override it. Changes take effect at the next launch. "
+                      "Games installed before this feature need Update on Frame once for the mode to work.")),
             C.link(tr("Controller mapping guide"), REPO_URL + "/blob/main/docs/CONTROLLERS.md"),
             *([C.secondary(tr("Apply to installed games now"), G.SYNC, apply)]
               if app.frame_state == "connected" else []),
