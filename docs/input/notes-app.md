@@ -220,3 +220,30 @@ its paired Frame. Close the game before rebuilding/installing.
 - A direct CLI `settings` write is intentionally temporary relative to the recipe/global preference. Use
   `recipe --set quest_buttons=N` or the dialog for a persistent per-game override.
 - Actual UI screenshots and the socket-dependent full-suite tests require a less restricted local environment.
+
+## Round 2
+
+- Global apply still writes every inherited Quest install, but separates games ready for the next launch from
+  games that need **Update on Frame first**. The job result supplies the completion toast, so both show the same
+  counts. The Settings explanation includes the one-time update requirement.
+- `_build_inputs_changed` also checks the converter and source APK, so it cannot decide adapter support alone.
+  Its manifest reader was extracted into `build.native_checksums` and is shared by `_build_inputs` and the
+  controller check. Only adapter entries are compared. Missing/different checksums or an unknown/different
+  installed APK are reported as needing an update; unrelated artifact changes do not affect this count. This is
+  deliberately conservative when an older adapter already supports the feature but differs from the bundled one.
+- The section reads its default once into a local snapshot, uses that for the dropdown and preview, and updates it
+  on selection. Regression tests check the single read and that the existing preview control changes in place.
+- The user guide now covers game-owned Frame bindings/profile preservation, bare binding paths and continued
+  proximity emulation. This supersedes the earlier question about games suggesting both Frame and Touch profiles.
+  The maintainer's triangle arrows and shared JSON were left unchanged.
+- Focused tests: **135 passed, 2 skipped** (`test_controller_preferences.py`, `test_patches.py`,
+  `test_game_update.py`). Patch-doc, translation-template and controller-diagram checks pass; the translation
+  template was regenerated. Targeted Ruff and whitespace checks pass.
+- Device follow-up: on an old/unknown install, choose Mirror and apply globally. Expect its setting to be pushed but
+  the result/toast to count it under **needs Update on Frame first**. Update that game once, apply again, then
+  relaunch: expect it in the next-launch count and the existing mode-1 binding logs described above. Keep a second
+  game with an explicit override and verify it is skipped throughout. Undo by choosing SteamVR default and applying
+  again; restore any per-game test overrides. No device or external network access was used in this round.
+- Final whole suite: **2029 passed, 116 skipped, 12 failed, 16 setup errors** (67.52 s). The remaining failures
+  and errors are the existing local-socket tests blocked by the sandbox, as in Round 1. Full log:
+  `/tmp/qb-app-round2-pytest.log`. No test skips or socket workarounds were added.

@@ -49,6 +49,7 @@ and configuration updates use this default for games without an override. With a
 are kept. Changing the default does not mark every game as needing an update.
 
 Changes take effect at the **next launch**. Close and relaunch a running game.
+Games installed before this feature need **Update on Frame** once for the mode to work.
 
 The CLI can change an installed game's runtime setting:
 
@@ -72,8 +73,12 @@ frameport recipe <pkg> --set quest_buttons=2
   corresponding input. System buttons keep their runtime role.
 - Mirror and Quest pair require the Frame runtime's `XR_VALVE_frame_controller_interaction` extension. If it is
   absent, FrameBridge logs that fact and leaves SteamVR's remap in place.
-- Games using their own Frame bindings without suggesting Touch bindings are unaffected. These modes translate
-  Touch suggestions; they do not invent actions for inputs the game never bound.
+- Games suggesting their own Frame Controller bindings keep those bindings and continue seeing the Frame
+  Controller profile, even if they also suggest Touch bindings. These modes do not replace the game's own mapping.
+- Touch suggestions using bare pose, trigger, squeeze or button paths are translated too; explicit components
+  such as `/pose`, `/value`, `/click` and `/touch` are also supported where the mapping provides them.
+- Finger proximity emulation (`proximity_emul`) continues to work with Mirror and Quest pair. Dropping the
+  unsupported thumbrest path does not disable proximity emulation from the other touch inputs.
 - The setting applies to Quest VR games, including 32-bit games through the bridge. It does not change PC VR or
   flat Android Steam Input layouts.
 
