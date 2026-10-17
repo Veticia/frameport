@@ -1,9 +1,9 @@
 package: ScaredBySquares.Game
 title: Scared By Squares
-status: unknown
+status: works
 notes: 'Showed black and dropped back to the home environment while the game kept running (sound only, GitHub 323).
-  Fixed in FramePort 1.2.1 and checked on the Frame without the headset (the game runs at 72 fps and SteamVR keeps it
-  as the running game); not yet confirmed in the headset. Rebuild and reinstall the game after updating FramePort.'
+  Fixed in FramePort 1.2.1 (confirmed in the headset by the reporter). Rebuild and reinstall the game after updating
+  FramePort.'
 details: 'The game (Unreal 4.27, OpenXR) creates two controller actions named "turn" (an action mapping and an axis
   mapping called Turn). The Frame''s runtime accepts the duplicate, then fails to load the input manifest it builds
   from the actions ("SetXrInputConfig failed. Failed to load manifest") and treats the game as closed. FrameBridge''s
@@ -14,6 +14,9 @@ xr: OpenXR
 frame:
 - frame.hw_video_decode
 - frame.unreal_skip_obb_check
-updated: '2026-10-16'
+verified:
+  date: '2026-10-17'
+  issue: 323
+updated: '2026-10-17'
 min_app: 1.2.1
 source_hint: Scared By Squares
