@@ -24,6 +24,7 @@ def settings_text(recipe_patches: dict) -> bytes:
 
 class FrameBridgeAdapter(Patch):
     id = "frame.adapter"
+    package_revisions = {"com.camouflaj.manta": 3}  # above revision 2: Batman builds before #389 are outdated
     a32 = True  # also for 32-bit games on the bridge
     title = "FrameBridge OpenXR adapter"
     description = (
