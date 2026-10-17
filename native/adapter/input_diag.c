@@ -85,6 +85,10 @@ static void input_diag_current_profile(XrPath user, XrPath profile) {
 }
 
 // ---------------------------------------------------------------- failing calls
+static void input_diag_quest_binding(const char *touch, const char *frame) {
+    if (input_diag) LOG("input_diag: quest_buttons %s -> %s", touch, frame);
+}
+
 // xrSyncActions and xrSuggestInteractionProfileBindings are reported from session_fixes.c's hooks,
 // xrApplyHapticFeedback from frame_adapter.c's (always hooked for haptic_scale).
 #define DIAG_CHECKED(name, params, args, detail)                                                                    \
