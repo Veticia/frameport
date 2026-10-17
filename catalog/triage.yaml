@@ -301,6 +301,16 @@ signatures:
       piece (for example Transformers Beyond Reality). Rebuild with the reservation marked as not committed.
     suggest: [frame.unreal_noreserve]
     supersedes: [native-crash]
+  - id: vulkan-pipeline-refused
+    # GitHub #349: with Lepton's Fossilize layer loaded every Transformers pipeline failed with -1; without it a few
+    # multiview vertex shaders still fail in Turnip. Unreal ends at the first one.
+    pattern: '(Shader compilation failures are Fatal|vk shim: vkCreateGraphicsPipelines failed: -\d+)'
+    severity: fatal
+    diagnosis: The Frame's graphics driver refused to build some of the game's shaders, and Unreal ends the game at the
+      first one (for example Transformers Beyond Reality). Try leaving out Steam's shader cache layer, and skipping the
+      shaders the driver still refuses (they then draw nothing).
+    suggest: [adapter.vk_no_fossilize, adapter.vk_pipeline_fallback]
+    supersedes: [native-crash, force-quit]
   - id: graphics-requirements-missing
     pattern: '(XR_ERROR_GRAPHICS_REQUIREMENTS_CALL_MISSING|Failed to create XR session: -50\b|xrCreateSession[^\n]*-50\b)'
     severity: fatal
