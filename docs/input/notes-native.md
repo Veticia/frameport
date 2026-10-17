@@ -1,6 +1,6 @@
 # Quest controller mode: native stream
 
-## Implementation
+## Original implementation
 
 - `native/adapter/quest_buttons.c` parses the numeric adapter setting. Only 0, 1 and 2 are accepted; malformed,
   fractional and out-of-range values select 0 and log `quest_buttons: invalid setting; using 0`.
@@ -21,7 +21,7 @@
 - Both shipped adapter architectures were rebuilt, with updated `artifacts/SHA256SUMS`. No agent, analysis, patch
   or setting revision was changed. Contract files and the VrApi bridge are unchanged.
 
-## Offline validation
+## Original offline validation
 
 Commands run with `UV_CACHE_DIR=/tmp/frameport-qb-native-uv` to keep uv cache writes inside the writable sandbox;
 `--offline --no-sync` uses the existing worktree environment without fetching dependencies.
@@ -157,3 +157,36 @@ For explicit current-profile verification in an OpenXR input sample, call `xrGet
 With modes 1/2 and `controller_fix=0`, expect `/interaction_profiles/oculus/touch_controller`, or the game's own
 Touch Pro/Plus profile when its binding was remapped. Existing `input_diag` profile lines intentionally show the raw
 runtime answer, so they cannot alone verify the profile returned to the game.
+
+## Round 2
+
+The review fixes supersede the original proximity exclusion, broad Valve-profile rewrite, empty-set submission,
+and failed-instance state handling described above:
+
+1. Added bare `grip`/`aim` to the JSON common mapping and `FRAME_COMMON`; no other contract fields changed.
+2. Current-profile rewriting with `controller_fix=0` requires the exact Frame profile and a successful generated
+   binding set still in effect. A successful game-owned Frame suggestion ends that ownership; failed suggestions
+   leave the last accepted set in effect. Existing `controller_fix=1` behavior is retained.
+3. Frame bindings are generated at the point a Touch set succeeds, including proximity-emulation touch bindings.
+   Direct Touch, Touch Pro/Plus remapping, and rejected-expansion fallback all use the effective accepted set.
+4. An all-dropped translation makes no Frame suggestion and logs
+   `quest_buttons: frame_controller bindings (mode N, 0 bindings, D dropped): not suggested`. An earlier accepted
+   generated set can remain stale; it is intentionally retained because an empty replacement is invalid.
+5. Extension decisions remain local until instance creation succeeds. Only successful creation publishes the active
+   instance and resets binding ownership/Touch-remap state; a failed second attempt preserves the live first state.
+6. One mutex serializes each complete suggestion transaction, including fallback/remapping, Frame generation, and
+   flags. Instance-state publication and current-profile reporting use the same mutex. Internal helpers call the
+   next layer directly and never reacquire it.
+
+Regression tests reproduced items 1–5 before the fixes (21 failed cases). Afterward, the requested host run passed
+97 tests, including timeout-bounded nested proximity fallback and Touch Pro remapping. Diagram regeneration made no
+changes; controller-diagram and patch-documentation checks pass. Both adapter architectures were rebuilt twice with
+identical hashes matching `SHA256SUMS`. The full suite finished with 2,015 passed, 140 skipped, 12 failed and 16 errors;
+all 28 failures/errors are the same sandbox-denied local socket creation described above.
+
+Device follow-up: repeat the install/log/physical checks above, adding `proximity_emul=2` to the mode-1/mode-2 settings
+command for a game exposing finger proximity. Expect translated proximity actions on face-button/thumbstick touch
+and trigger touch, and working finger animation. In an OpenXR sample with `controller_fix=0`, also query profiles
+before any generated set, after a successful generated set, and after the app's own successful Frame suggestion:
+expect Frame, Touch, Frame respectively. Another Valve profile must stay unchanged. Restore the recorded original
+`proximity_emul` setting along with the other settings. No device operations were performed in this worktree.
