@@ -98,15 +98,14 @@ int main(int argc, char **argv) {
     input_diag_current_profile(left, touch);  // once
     input_diag_current_profile(right, XR_NULL_PATH);
 
-    PFN_xrCreateAction create = (PFN_xrCreateAction)input_diag_hook("xrCreateAction");
-    CHECK(create && input_diag_hook("xrStringToPath") && !input_diag_hook("xrEndFrame"));
+    // xrCreateAction is hooked by session_fixes.c (#323), which reports each created action here
+    CHECK(!input_diag_hook("xrCreateAction") && input_diag_hook("xrStringToPath") && !input_diag_hook("xrEndFrame"));
     XrActionCreateInfo info = {XR_TYPE_ACTION_CREATE_INFO};
-    XrAction action;
     snprintf(info.actionName, sizeof(info.actionName), "trigger pull");
-    CHECK(create(XR_NULL_HANDLE, &info, &action) == XR_ERROR_NAME_INVALID);
-    CHECK(create(XR_NULL_HANDLE, &info, &action) == XR_ERROR_NAME_INVALID);  // once
+    diag_log_action(&info, XR_ERROR_NAME_INVALID);
+    diag_log_action(&info, XR_ERROR_NAME_INVALID);  // the failure is reported once
     snprintf(info.actionName, sizeof(info.actionName), "trigger_pull");
-    CHECK(create(XR_NULL_HANDLE, &info, &action) == XR_SUCCESS);  // success: nothing
+    diag_log_action(&info, XR_SUCCESS);
 
     input_diag_lookup(active_instance, "xrCreateBodyTrackerFB", XR_ERROR_FUNCTION_UNSUPPORTED, NULL);
     input_diag_lookup(active_instance, "xrCreateBodyTrackerFB", XR_ERROR_FUNCTION_UNSUPPORTED, NULL);  // once
@@ -124,7 +123,10 @@ EXPECTED = [
     "input_diag: bindings: /interaction_profiles/oculus/touch_controller accepted (2 paths)",
     "input_diag: bindings: /user/hand/left uses /interaction_profiles/oculus/touch_controller",
     "input_diag: bindings: /user/hand/right uses none",
+    'input_diag: action "trigger pull" ("") type 0, 0 subaction path(s) -> -45',
     "input_diag: unsupported: xrCreateAction -> XR_ERROR_NAME_INVALID (trigger pull)",
+    'input_diag: action "trigger pull" ("") type 0, 0 subaction path(s) -> -45',
+    'input_diag: action "trigger_pull" ("") type 0, 0 subaction path(s) -> 0',
     "input_diag: unsupported: function xrCreateBodyTrackerFB not provided by the runtime "
     "(XR_ERROR_FUNCTION_UNSUPPORTED)",
 ]
