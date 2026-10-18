@@ -56,7 +56,9 @@ IL2CPP_METADATA = "assets/bin/Data/Managed/Metadata/global-metadata.dat"
 #     GitHub #349) (2026-10)
 # 23: separate_process (MAIN activities in another process than the main one, which Lepton doesn't watch:
 #     frame.main_process, GitHub #178) (2026-10)
-ANALYSIS_VERSION = 23
+# 24: meta_depth_occlusion (Unity games with Meta's depth-occlusion keywords: frame.meta_depth_occlusion, PR #246)
+#     (2026-10)
+ANALYSIS_VERSION = 24
 
 
 # Android versions by API level (for messages); the Frame's Lepton container runs Android 11 (API 30)
