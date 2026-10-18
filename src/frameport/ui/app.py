@@ -2402,13 +2402,19 @@ class FramePortApp:
         new = [p for p in found if p not in before]
         if set(found) != before:
             self.refresh_view()
+        from .views.link_dialog import update_from_link
+
+        # the toast's own button: without one it said an update exists but offered no way to get it
+        update = lambda pkgs: (lambda e: update_from_link(self, pkgs))  # noqa: E731
         if new:
             self.toast(tr_n("An update is available for {name}", "Updates are available for {n} games",
-                            len(new), name=self._title(new[0])))
+                            len(new), name=self._title(new[0])), action=tr("Update"), on_action=update(new))
         elif force:  # Settings → Check now
-            self.toast(tr("Games from install links are up to date") if not found else
-                       tr_n("{n} update is waiting in the Library", "{n} updates are waiting in the Library",
-                            len(found)))
+            if not found:
+                self.toast(tr("Games from install links are up to date"))
+            else:
+                self.toast(tr_n("{n} update is waiting in the Library", "{n} updates are waiting in the Library",
+                                len(found)), action=tr("Update"), on_action=update(found))
         if force and self.route[0] == "settings":
             self.render()  # the "last checked" line
         return found

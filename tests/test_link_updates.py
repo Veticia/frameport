@@ -142,3 +142,23 @@ def test_local_server_round_trip(tmp_path):
         assert deeplink.check_update({**link, "version": "2.0"}) is None
     finally:
         httpd.shutdown()
+
+
+def test_update_toast_has_an_update_button(monkeypatch):
+    """The toast that announces a newer version starts the update itself (it used to offer no way to get it)."""
+    from frameport.ui import app as app_mod
+    from frameport.ui.views import link_dialog
+
+    toasts, started = [], []
+    a = app_mod.FramePortApp.__new__(app_mod.FramePortApp)
+    a.route = ("library",)
+    monkeypatch.setattr(a, "refresh_view", lambda: None, raising=False)
+    monkeypatch.setattr(a, "_title", lambda pkg: pkg, raising=False)
+    monkeypatch.setattr(a, "toast", lambda msg, **k: toasts.append(k), raising=False)
+    monkeypatch.setattr(library, "games", lambda: [])
+    monkeypatch.setattr(pipeline, "check_link_updates", lambda force=False: ["linux.tool"])
+    monkeypatch.setattr(link_dialog, "update_from_link", lambda app, pkgs: started.append(pkgs))
+    a._check_link_updates()
+    assert toasts and toasts[0]["action"]
+    toasts[0]["on_action"](None)
+    assert started == [["linux.tool"]]
