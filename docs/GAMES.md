@@ -185,6 +185,7 @@ Generated from [catalog/games](../catalog/games) by `scripts/compat_list.py`.
 | ExploreVR | Quest | ⚠️ Works with issues | The 3D world warps and shifts with head movement (wrong perspective). |
 | FGO VR | Quest | ⚠️ Works with issues | Audio stuttering and popping sounds |
 | Fisherman | Quest | ⚠️ Works with issues | Loading screens have corruption, but everything works otherwise. |
+| HardBullet | Quest | ⚠️ Works with issues | Loading screens (a cube overlay) are missing or corrupted up to FramePort 1.2.1; cube_quads (next release) shows them as six panels, not confirmed in the hea… |
 | Homeworld: Vast Reaches | Quest | ⚠️ Works with issues | The game starts but after selecting to start a new game it seems to crash. |
 | Lawn Mowing Simulator VR | Quest | ⚠️ Works with issues | Left eye textures flicker only when mowing in specific areas. |
 | MacacoVR | Quest | ⚠️ Works with issues | 2d loading screens are glitchy, otherwise main gameplay is fine |
