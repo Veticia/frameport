@@ -1065,3 +1065,14 @@ def test_hide_fb_foveation_setting():
     assert "hide_fb_foveation" in XRSHIM_SETTINGS
     assert needs_xrshim(recipe)
     assert UI["hide_fb_foveation"]["level"] == "advanced"
+
+
+def test_swapchain_pool_is_opt_in_and_gles_only():
+    patch = base.get("adapter.swapchain_pool")
+    assert patch.default == 0 and patch.revision == 1
+    assert "swapchain_pool" not in adapter_settings({})
+    assert adapter_settings({"adapter.swapchain_pool": {"value": "1"}})["swapchain_pool"] == 1
+    gles = _analysis(graphics="GLES or unknown (no Vulkan declaration)")
+    assert patch.applies(gles) and patch.detect(gles) is None
+    assert not patch.applies(_analysis(graphics="Vulkan"))
+    assert "Vulkan" in patch.description

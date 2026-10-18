@@ -6,6 +6,11 @@
 # with diagnostics. Launch tests and real play sessions (agent session_log, `frameport session`) are both matched.
 # Sources: every failure we hit porting 34 games to the Steam Frame (see docs/PLAYBOOK.md).
 signatures:
+  - id: swapchain-limit-reached
+    pattern: 'FrameBridge:\s+xrCreateSwapchain [^\r\n]*\bresult=-10\b'
+    severity: error
+    diagnosis: The Frame runtime reached its swapchain count limit (about 15 live swapchains per session), not necessarily a memory limit. Extra menus or video panels may close or stay gray. Updated FramePort builds provide Share panel images (swapchain limit) for GLES apps; Vulkan apps are unaffected.
+    suggest: []
   - id: quest2-headset-identity
     pattern: 'venderId[^\r\n]*systemName Oculus Quest2'
     severity: info

@@ -89,6 +89,9 @@ SETTINGS = [
      "Monkey's intro video), which the Frame's runtime refuses, get an Android Surface from FrameBridge: each video "
      "frame is copied into an ordinary swapchain the panel shows. Without it these panels are missing and a game "
      "waiting for its video stays black. 0 = leave them to the runtime."),
+    ("swapchain_pool", "int", 0, "Share panel images (swapchain limit)",
+     "Share GLES panel images in runtime atlases to avoid the Frame's swapchain count limit (about 15 per session). "
+     "Useful when opening extra menus closes them or leaves panels gray. Vulkan apps are unaffected."),
     ("equirect_emul", "int", 0, "Show 360° layers",
      "360° (equirect) layers, for example a video player's virtual theater or 360° videos (for example 4XVR), which "
      "the Frame's runtime lacks, are drawn by a background thread into a layer behind the game's own picture: the "
@@ -418,6 +421,10 @@ UI: dict[str, dict] = {
                         help="0 = the size of your play area.", control=("slider", 0.0, 10.0, 0.5, "{:.1f} m")),
     "scene_depth": dict(group="room", level="advanced", label="Room depth", depends="scene_emul",
                         help="0 = the size of your play area.", control=("slider", 0.0, 10.0, 0.5, "{:.1f} m")),
+    "swapchain_pool": dict(group="troubleshooting", level="advanced",
+                           label="Share panel images (swapchain limit)",
+                           help="Keeps extra menus and panels working when the Frame reaches its image count limit. "
+                                "GLES apps only; Vulkan apps are unaffected.", control=("switch",)),
     "equirect_emul": dict(group="video360", level="common", label="Show 360° backgrounds and videos",
                           help="Video players' virtual theaters and 360° videos would otherwise stay black.",
                           control=("switch",)),
@@ -655,8 +662,8 @@ class AdapterSetting(Patch):
             "proximity_emul": lambda a: "libOVRPlugin.so" in a.libs,
             "vk_spec_fixes": lambda a: a.engine == "Unreal" and ap.is_vulkan(a),
             "controller_models": ap.may_use_render_models,
-            **{k: ap.is_gles for k in ("equirect_emul", "equirect_face", "equirect_res", "equirect_flip",
-                                       "equirect_fps", "equirect_stereo")},
+            **{k: ap.is_gles for k in ("swapchain_pool", "equirect_emul", "equirect_face", "equirect_res",
+                                       "equirect_flip", "equirect_fps", "equirect_stereo")},
         }
         rule = rules.get(self.key)
         return bool(rule(a)) if rule else True

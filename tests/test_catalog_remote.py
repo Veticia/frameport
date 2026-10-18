@@ -94,3 +94,19 @@ def test_library_load_with_a_cold_catalog_does_not_recurse(monkeypatch):
     monkeypatch.setattr(library, "load", counting)
     library.load()
     assert catalog.remote_enabled() is False and len(loads) <= 2
+
+
+def test_swapchain_pool_catalog_is_gated_for_older_apps(monkeypatch):
+    from pathlib import Path
+
+    import yaml
+
+    from frameport.patches import base
+
+    path = Path(__file__).resolve().parents[1] / "catalog/games/cn.vr4p.oculus4xvrplayerov.yaml"
+    entry = yaml.safe_load(path.read_text())
+    assert entry["adapter"]["swapchain_pool"] == 1
+    assert catalog.unusable_reason(entry) is None
+    # Older installed apps see this catalog from main, but cannot register the new adapter key.
+    monkeypatch.delitem(base.REGISTRY, "adapter.swapchain_pool")
+    assert "adapter.swapchain_pool" in catalog.unusable_reason(entry)

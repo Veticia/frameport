@@ -324,6 +324,11 @@
   "title": "Retry refused picture formats",
   "group": "Game settings"
  },
+ "adapter.swapchain_pool": {
+  "anchor": "adapter-swapchain_pool",
+  "title": "Share panel images (swapchain limit)",
+  "group": "Game settings"
+ },
  "adapter.sync_guard": {
   "anchor": "adapter-sync_guard",
   "title": "Steady controller input after focus",
