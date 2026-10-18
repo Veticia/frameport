@@ -13,6 +13,44 @@ static int meta_filter_matches(const XrSpaceDiscoveryInfoMETA *info, const scene
     }
     return 1;
 }
+// Diagnostics: MRUK takes the room whose floor outline contains the head as the "current room"; outside it, a game
+// can ask for a room scan again and again (Pinball FX). Logs the head against the floor outline (3 times per session).
+static void log_head_in_room(void) {
+    static int logged;
+    static XrSpace view = XR_NULL_HANDLE;
+    const scene_entity *f = &entities[ENT_FLOOR];
+    if (logged >= 3 || !scene_session || !scene_stage || !last_predicted_time || entity_count <= ENT_FLOOR ||
+        !f->has_bounds) return;
+    if (!view) {
+        PFN_xrCreateReferenceSpace create = (PFN_xrCreateReferenceSpace)lookup(active_instance, "xrCreateReferenceSpace");
+        XrReferenceSpaceCreateInfo ci = {XR_TYPE_REFERENCE_SPACE_CREATE_INFO, NULL, XR_REFERENCE_SPACE_TYPE_VIEW,
+                                         {{0, 0, 0, 1}, {0, 0, 0}}};
+        if (!create || XR_FAILED(create(scene_session, &ci, &view))) return;
+    }
+    XrPosef head;
+    XrSpaceLocationFlags flags = 0;
+    if (!stage_pose(view, last_predicted_time, &head, &flags)) return;
+    XrVector3f p = pose_mul(pose_inv(f->pose_in_stage), head).position;  // floor plane: x, y; its normal: z
+    XrVector2f rect[4], *v = f->boundary;
+    uint32_t n = f->boundary_count;
+    if (!n) {
+        const XrRect2Df b = f->bounds;
+        rect[0] = (XrVector2f){b.offset.x, b.offset.y};
+        rect[1] = (XrVector2f){b.offset.x + b.extent.width, b.offset.y};
+        rect[2] = (XrVector2f){b.offset.x + b.extent.width, b.offset.y + b.extent.height};
+        rect[3] = (XrVector2f){b.offset.x, b.offset.y + b.extent.height};
+        v = rect;
+        n = 4;
+    }
+    int inside = 0;
+    for (uint32_t a = 0, b = n - 1; a < n; b = a++)
+        if ((v[a].y > p.y) != (v[b].y > p.y) && p.x < (v[b].x - v[a].x) * (p.y - v[a].y) / (v[b].y - v[a].y) + v[a].x)
+            inside = !inside;
+    LOG("scene: head in STAGE %.2f,%.2f,%.2f (flags 0x%llx), floor-local %.2f,%.2f: %s the floor outline (%u points)",
+        head.position.x, head.position.y, head.position.z, (unsigned long long)flags, p.x, p.y,
+        inside ? "inside" : "OUTSIDE", n);
+    ++logged;
+}
 static XRAPI_ATTR XrResult XRAPI_CALL emu_discover_spaces(XrSession session, const XrSpaceDiscoveryInfoMETA *info,
                                                          XrAsyncRequestIdFB *request) {
     if (!info || !request || (info->filterCount && !info->filters)) return XR_ERROR_VALIDATION_FAILURE;
@@ -32,6 +70,7 @@ static XRAPI_ATTR XrResult XRAPI_CALL emu_discover_spaces(XrSession session, con
     XrEventDataSpaceDiscoveryCompleteMETA done = {XR_TYPE_EVENT_DATA_SPACE_DISCOVERY_COMPLETE_META, NULL, *request, XR_SUCCESS};
     push_event(&avail, sizeof(avail)); push_event(&done, sizeof(done));
     LOG("scene: discovery request=%llu results=%u", (unsigned long long)*request, q->count);
+    log_head_in_room();
     pthread_mutex_unlock(&scene_lock);
     return XR_SUCCESS;
 }

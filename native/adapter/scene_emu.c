@@ -282,6 +282,7 @@ static int fb_filter_matches(const XrSpaceFilterInfoBaseHeaderFB *f, const scene
     }
     return 1;
 }
+static void log_head_in_room(void);  // scene_meta.c
 static XRAPI_ATTR XrResult XRAPI_CALL emu_query_spaces_filtered(XrSession session, const XrSpaceQueryInfoBaseHeaderFB *info,
                                                                 XrAsyncRequestIdFB *request) {
     if (!info || !request || info->type != XR_TYPE_SPACE_QUERY_INFO_FB) return XR_ERROR_VALIDATION_FAILURE;
@@ -302,6 +303,7 @@ static XRAPI_ATTR XrResult XRAPI_CALL emu_query_spaces_filtered(XrSession sessio
     XrEventDataSpaceQueryCompleteFB done = {XR_TYPE_EVENT_DATA_SPACE_QUERY_COMPLETE_FB, NULL, *request, XR_SUCCESS};
     push_event(&avail, sizeof(avail)); push_event(&done, sizeof(done));
     LOG("scene: query request=%llu results=%u", (unsigned long long)*request, q->count);
+    log_head_in_room();
     pthread_mutex_unlock(&scene_lock);
     return XR_SUCCESS;
 }
