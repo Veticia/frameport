@@ -11,9 +11,11 @@ game runs. No Flet here: the GUI and the CLI share it.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import tarfile
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,6 +47,7 @@ class Backup:
     bytes: int = 0   # the save files' size (uncompressed)
     version: str = ""
     title: str = ""
+    automatic: bool = False
     skipped: int = 0  # large files left out
 
     @property
@@ -52,8 +55,39 @@ class Backup:
         return sidecar_of(self.path)
 
 
-def root_dir() -> Path:
+def default_root() -> Path:
     return user_data_dir() / "save-backups"
+
+
+def root_dir() -> Path:
+    folder = library.setting("saves.folder", "")
+    return Path(folder).expanduser() if folder else default_root()
+
+
+def writable_folder(folder: Path) -> Path:
+    """Probe actual creation, including on network/cloud mounts; don't change settings on failure."""
+    folder = Path(folder).expanduser().absolute()
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryFile(dir=folder) as probe:
+            probe.write(b"FramePort save backup folder\n")
+            probe.flush()
+    except OSError as exc:
+        raise SavesError(f"Cannot write save backups to {folder}: {exc}") from exc
+    return folder
+
+
+def set_folder(folder: str | None) -> Path:
+    dest = writable_folder(Path(folder) if folder else default_root())
+    roots = [str(p) for p in backup_roots()]
+    library.set_setting("saves.previous_folders", roots)
+    library.set_setting("saves.folder", str(dest) if folder else "")
+    return dest
+
+
+def backup_roots() -> list[Path]:
+    return list(dict.fromkeys([root_dir(), default_root(),
+                               *(Path(p) for p in library.setting("saves.previous_folders", []))]))
 
 
 def backups_dir(pkg: str) -> Path:
@@ -96,7 +130,8 @@ def _sidecar_data(manifest: dict, archive: Path) -> dict:
             "version": manifest.get("version") or "", "title": manifest.get("title") or "",
             "files": len(files), "bytes": sum(int(f.get("size") or 0) for f in files),
             "skipped": [s for s in manifest.get("skipped") or [] if s.get("reason") in ("size", "unreadable")],
-            "archive": archive.name, "agent": manifest.get("agent")}
+            "archive": archive.name, "agent": manifest.get("agent"),
+            "automatic": bool(manifest.get("automatic"))}
 
 
 def _from_sidecar(archive: Path, data: dict) -> Backup:
@@ -104,14 +139,15 @@ def _from_sidecar(archive: Path, data: dict) -> Backup:
                   created=float(data.get("created") or archive.stat().st_mtime), size=archive.stat().st_size,
                   files=int(data.get("files") or 0), bytes=int(data.get("bytes") or 0),
                   version=str(data.get("version") or ""), title=str(data.get("title") or ""),
-                  skipped=len(data.get("skipped") or []))
+                  skipped=len(data.get("skipped") or []), automatic=bool(data.get("automatic")))
 
 
 def list_backups(pkg: str) -> list[Backup]:
     """This game's backups on this PC, newest first (a missing/broken sidecar is rebuilt from the archive)."""
-    d = backups_dir(pkg)
+    backups_dir(pkg)  # validate before using the package as a path
     out = []
-    for archive in sorted(d.glob("*.tar.gz")) if d.is_dir() else []:
+    archives = [p for root in backup_roots() for p in (root / pkg).glob("*.tar.gz")]
+    for archive in sorted(archives):
         if not _NAME.match(archive.name):
             continue
         try:
@@ -119,9 +155,12 @@ def list_backups(pkg: str) -> list[Backup]:
         except (OSError, ValueError):
             try:
                 data = _sidecar_data(read_manifest(archive), archive)
-                sidecar_of(archive).write_text(json.dumps(data, indent=1), encoding="utf-8")
             except (OSError, ValueError):
                 continue
+            try:
+                sidecar_of(archive).write_text(json.dumps(data, indent=1), encoding="utf-8")
+            except OSError:
+                pass  # backups in an old read-only folder remain usable
         try:
             out.append(_from_sidecar(archive, data))
         except OSError:
@@ -131,17 +170,17 @@ def list_backups(pkg: str) -> list[Backup]:
 
 def has_backups(pkg: str) -> bool:
     try:
-        d = backups_dir(pkg)
+        backups_dir(pkg)
     except ValueError:
         return False
-    return d.is_dir() and any(_NAME.match(p.name) for p in d.glob("*.tar.gz"))
+    return any(_NAME.match(p.name) for root in backup_roots() for p in (root / pkg).glob("*.tar.gz"))
 
 
 def prune(pkg: str, keep: int | None = None, protect: Path | None = None) -> list[Path]:
     """Delete all but the newest `keep` backups of a game (never `protect`). Returns the deleted archives."""
     keep = keep_count() if keep is None else max(1, keep)
     gone = []
-    for b in list_backups(pkg)[keep:]:
+    for b in [b for b in list_backups(pkg) if b.path.parent == backups_dir(pkg)][keep:]:
         if protect is not None and b.path == protect:
             continue
         for p in (b.path, b.sidecar):
@@ -190,21 +229,31 @@ def _new_name(d: Path) -> Path:
     return path
 
 
-def backup(frame, pkg: str, reporter: Reporter | None = None, keep: int | None = None) -> Backup:
+def backup(frame, pkg: str, reporter: Reporter | None = None, keep: int | None = None,
+           snapshot: str | None = None) -> Backup:
     """Back up the game's saves from the Frame into a new archive on this PC, then keep the newest `keep`."""
     rep = reporter or Reporter()
     rep.stage("saves", "Backing up saves")
+    d = writable_folder(backups_dir(pkg))
     try:
-        expected = int(info(frame, pkg).get("bytes") or 0)
+        expected = 0 if snapshot else int(info(frame, pkg).get("bytes") or 0)
     except Exception:  # noqa: BLE001 - only for the progress bar
         expected = 0
-    d = backups_dir(pkg)
-    d.mkdir(parents=True, exist_ok=True)
-    dest = _new_name(d)
-    part = dest.with_name(dest.name + ".part")
-    stdin, stdout, stderr = _exec(frame, "_backup_saves", {"package": pkg})
+    # Automatic imports can overlap a manual job; reserve the name before opening SSH.
+    while True:
+        dest = _new_name(d)
+        part = dest.with_name(dest.name + ".part")
+        try:
+            part.touch(exist_ok=False)
+            break
+        except FileExistsError:
+            continue
+    stdout = None
     received = 0
+    digest = hashlib.sha256()
     try:
+        stdin, stdout, stderr = _exec(frame, "_fetch_save_snapshot" if snapshot else "_backup_saves",
+                                      {"package": pkg, "snapshot": snapshot})
         stdin.channel.shutdown_write()
         with open(part, "wb") as f:
             while True:
@@ -213,6 +262,7 @@ def backup(frame, pkg: str, reporter: Reporter | None = None, keep: int | None =
                 if not chunk:
                     break
                 f.write(chunk)
+                digest.update(chunk)
                 received += len(chunk)
                 if expected:  # compressed: an estimate, never "done" before the end
                     rep.progress(min(0.95, received / expected), f"{received / 2**20:.1f} MiB")
@@ -220,21 +270,26 @@ def backup(frame, pkg: str, reporter: Reporter | None = None, keep: int | None =
         reply = _last_json(stderr.read().decode("utf-8", "replace")) or {}
         if code or not reply.get("ok"):
             raise SavesError(reply.get("error") or f"the Frame couldn't back up the saves (exit {code})")
+        if snapshot and digest.hexdigest() != snapshot.split("-", 1)[1][:-7]:
+            raise SavesError("the Frame sent a damaged save snapshot (hash mismatch)")
         manifest = read_manifest(part)
         if manifest.get("package") != pkg:
             raise SavesError(f"the Frame sent saves of {manifest.get('package')}, not {pkg}")
         part.replace(dest)
     except BaseException:
         try:
-            stdout.channel.close()
+            if stdout is not None:
+                stdout.channel.close()
         except Exception:  # noqa: BLE001
             pass
         part.unlink(missing_ok=True)
         raise
     data = _sidecar_data(manifest, dest)
+    if snapshot:
+        data.update(automatic=True, snapshot=snapshot)
     sidecar_of(dest).write_text(json.dumps(data, indent=1), encoding="utf-8")
     result = _from_sidecar(dest, data)
-    prune(pkg, keep, protect=dest)
+    prune(pkg, keep, protect=None if snapshot else dest)
     rep.progress(1.0, "")
     rep.log(f"saved {result.files} file(s), {result.bytes / 2**20:.1f} MiB of saves, to {dest}"
             + (f"; {result.skipped} large file(s) left out" if result.skipped else ""))
@@ -299,3 +354,28 @@ def undo_restore(frame, pkg: str) -> dict:
         raise SavesError(reply.get("error") or "the Frame couldn't put the saves back")
     return reply["result"]
 
+
+
+def sync_snapshots(frame, reporter: Reporter | None = None) -> int:
+    """Import each remote snapshot once, including after local retention has pruned its archive."""
+    frame.agent("save_snapshot_settings", enabled=bool(library.setting("saves.auto", False)))
+    state_path = user_data_dir() / "save-snapshots-synced.json"
+    try:
+        seen = set(json.loads(state_path.read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        seen = set()
+    count = 0
+    for item in frame.agent("save_snapshots").get("snapshots", []):
+        pkg, name = item["package"], item["snapshot"]
+        # Content digest identity is stable across reconnects and different Frames.
+        identity = pkg + ":" + item["sha256"]
+        if identity in seen:
+            continue
+        backup(frame, pkg, reporter, snapshot=name)
+        seen.add(identity)
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = state_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(sorted(seen)), encoding="utf-8")
+        tmp.replace(state_path)
+        count += 1
+    return count

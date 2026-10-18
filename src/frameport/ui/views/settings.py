@@ -253,9 +253,40 @@ class SettingsView:
                           options=[ft.DropdownOption(str(n), str(n))
                                    for n in sorted({*saves.KEEP_CHOICES, saves.keep_count()})],
                           on_select=changed)
-        return ft.Row([keep, C.help_icon("save_backups"),
-                       C.ghost(tr("Open save backups"), ft.Icons.FOLDER_OPEN_ROUNDED, open_root)],
-                      spacing=T.S2, wrap=True, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+        folder_label = C.meta(str(saves.root_dir()), selectable=True)
+
+        def choose_folder(folder):
+            def work():
+                try:
+                    dest = saves.set_folder(folder)
+                    folder_label.value = str(dest)
+                    C.update(folder_label)
+                except saves.SavesError as exc:
+                    self.app.toast(str(exc), error=True)
+            self.app.run_bg(work)
+
+        async def pick_folder(e):
+            folder = await ft.FilePicker().get_directory_path(dialog_title=tr("Choose save backup folder"))
+            if folder:
+                choose_folder(folder)
+
+        def auto_changed(e):
+            library.set_setting("saves.auto", bool(e.control.value))
+            self.app._sync_save_snapshots()
+
+        return ft.Column([
+            ft.Row([keep, C.help_icon("save_backups"),
+                    C.ghost(tr("Open save backups"), ft.Icons.FOLDER_OPEN_ROUNDED, open_root)],
+                   spacing=T.S2, wrap=True),
+            folder_label,
+            ft.Row([C.secondary(tr("Choose backup folder…"), ft.Icons.FOLDER_OPEN_ROUNDED, pick_folder),
+                    C.ghost(tr("Use the default"), ft.Icons.RESTORE_ROUNDED, lambda e: choose_folder(None))],
+                   spacing=T.S2, wrap=True),
+            C.meta(tr("Existing backups stay in their original folder and remain available.")),
+            C.switch(tr("Back up saves when a game closes"), value=bool(library.setting("saves.auto", False)),
+                     on_change=auto_changed),
+            C.meta(tr("Keeps three snapshots per game on the Frame and copies new ones here when connected.")),
+        ], spacing=T.S2)
 
     def ssh_keys(self) -> ft.Control:
         """Settings → Installing: private key files FramePort logs in with besides its own (frame.connection

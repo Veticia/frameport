@@ -202,3 +202,95 @@ def test_bad_package_names_never_make_paths():
     with pytest.raises(ValueError):
         saves.backups_dir("../../etc")
     assert saves.has_backups("../x") is False
+
+
+def test_folder_choice_preserves_old_backups_and_prunes_only_destination(tmp_path):
+    old = _fake_backup(PKG)
+    cloud = tmp_path / "cloud"
+    assert saves.set_folder(str(cloud)) == cloud
+    assert saves.root_dir() == cloud
+    assert saves.list_backups(PKG)[0].path == old
+    for i in range(3):
+        _fake_backup(PKG, created=time.time() + i, name=f"20261017-12000{i}.tar.gz")
+    assert len(saves.prune(PKG, keep=1)) == 2
+    assert old.exists()
+    custom = saves.list_backups(PKG)[0].path
+    saves.set_folder(None)
+    assert saves.root_dir() == saves.default_root()
+    assert {b.path for b in saves.list_backups(PKG)} == {old, custom}
+
+
+def test_unwritable_folder_refuses_setting_and_backup(tmp_path, monkeypatch):
+    def refused(*args, **kwargs):
+        raise PermissionError("read-only cloud folder")
+
+    monkeypatch.setattr(saves.tempfile, "TemporaryFile", refused)
+    original = saves.root_dir()
+    with pytest.raises(saves.SavesError, match="Cannot write save backups.*read-only"):
+        saves.set_folder(str(tmp_path / "cloud"))
+    assert saves.root_dir() == original
+    with pytest.raises(saves.SavesError, match="Cannot write save backups"):
+        saves.backup(object(), PKG)  # refusal before contacting the Frame
+
+
+def test_pc_imports_snapshots_once_and_prunes_as_normal_backups(frame):
+    fr, anchor, internal, external, tmp = frame
+    library.set_setting("saves.auto", True)
+    library.set_setting("saves.keep", 2)
+    for n in range(4):
+        (internal / "files/slot.sav").write_text(f"level {n}")
+        p = subprocess.run([sys.executable, str(AGENT), "_saves_ns", "snapshot",
+                            json.dumps({"package": PKG})], env=fr.env, capture_output=True, text=True)
+        assert p.returncode == 0, p.stderr
+    assert len(fr.agent("save_snapshots")["snapshots"]) == 3
+    assert saves.sync_snapshots(fr) == 3
+    found = saves.list_backups(PKG)
+    assert len(found) == 2 and all(b.automatic for b in found)
+    assert all(saves.read_manifest(b.path)["automatic"] for b in found)
+    assert saves.sync_snapshots(fr) == 0  # including the snapshot PC retention already pruned
+    saves.delete(found[0])
+    assert saves.sync_snapshots(fr) == 0
+    assert fr.agent("save_snapshot_settings", enabled=False) == {"enabled": False}
+
+
+@pytest.mark.skipif(os.name == "nt", reason="SteamOS launcher uses bash and flock")
+def test_launcher_snapshot_uses_inherited_lock_and_default_is_off(frame):
+    import fcntl
+    import shlex
+
+    fr, anchor, internal, external, tmp = frame
+    cmd = (f'exec 9>{shlex.quote(str(anchor / ".launch.lock"))}; flock -n 9; '
+           f'timeout -k 5 90 {shlex.quote(sys.executable)} {shlex.quote(str(AGENT))} _snapshot_close {PKG}')
+    p = subprocess.run(["bash", "-c", cmd], env=fr.env, capture_output=True, text=True)
+    assert p.returncode == 0, p.stderr
+    assert fr.agent("save_snapshots")["snapshots"] == []
+    fr.agent("save_snapshot_settings", enabled=True)
+    with open(anchor / ".launch.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        blocked = subprocess.run(["bash", "-c", cmd], env=fr.env, capture_output=True, text=True)
+        assert blocked.returncode != 0
+        assert fr.agent("save_snapshots")["snapshots"] == []
+    p = subprocess.run(["bash", "-c", cmd], env=fr.env, capture_output=True, text=True)
+    assert p.returncode == 0, p.stderr
+    assert len(fr.agent("save_snapshots")["snapshots"]) == 1
+    assert saves.sync_snapshots(fr) == 1
+
+
+def test_snapshot_hash_failure_retries_and_old_import_obeys_retention(frame):
+    fr, anchor, internal, external, tmp = frame
+    p = subprocess.run([sys.executable, str(AGENT), "_saves_ns", "snapshot", json.dumps({"package": PKG})],
+                       env=fr.env, capture_output=True, text=True)
+    assert p.returncode == 0, p.stderr
+    item = fr.agent("save_snapshots")["snapshots"][0]
+    remote = fr.home / ".local/share/frameport/save-snapshots" / PKG / item["snapshot"]
+    good = remote.read_bytes()
+    remote.write_bytes(b"damaged")
+    with pytest.raises(saves.SavesError, match="hash mismatch"):
+        saves.sync_snapshots(fr)
+    assert not saves.list_backups(PKG) and not list(saves.backups_dir(PKG).glob("*.part"))
+    remote.write_bytes(good)
+    newer = _fake_backup(PKG, created=time.time() + 1000)
+    library.set_setting("saves.keep", 1)
+    assert saves.sync_snapshots(fr) == 1
+    assert [b.path for b in saves.list_backups(PKG)] == [newer]
+    assert saves.sync_snapshots(fr) == 0

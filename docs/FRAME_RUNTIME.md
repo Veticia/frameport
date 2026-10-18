@@ -66,7 +66,7 @@
   `launch.sh` at the new folder and only then deletes the old copy; on the same filesystem it renames instead.
   Moving a game whose Lepton data holds absolute paths, or a PC VR prefix, is not yet verified on the device.
 
-## Save backups (Quest games, agent v95, discussion #352)
+## Save backups (Quest games, agent v101, discussion #352)
 - A Lepton game's saves are two folders of `<base>/lepton-data`: `internal/<pkg>` (= `/data/data/<pkg>`:
   `shared_prefs/`, `files/`, `databases/`; Unreal's `files/UE4Game|UnrealGame/.../Saved` often lives here) and
   `external/Android/data/<pkg>` (= `/sdcard/Android/data/<pkg>`: Unity's `files/`, Unreal's external `Saved`). On the
@@ -91,6 +91,23 @@
   files owned by mapped ids are readable and keep their ids, take the game's launch lock (`<base>/.launch.lock`, a
   Play meanwhile is ignored as a double launch) and refuse while its container runs. `saves_info` sizes a backup and
   reports the rollback copy, `saves_rollback_delete` removes it.
+- PC destination: `saves.folder` (empty = `<data>/save-backups`); Settings → Data has an awaited folder picker,
+  a default reset and a write probe. Old destinations (`saves.previous_folders`) stay listed; switching never moves
+  or deletes files. `saves.keep` defaults to 10 and prunes only the selected destination.
+- `saves.auto` defaults off. Connection and 30 s poll hooks sync its value using `save_snapshot_settings` (flag
+  `~/.local/share/frameport/save-snapshots/enabled`). Updated and newly written Quest launchers call `_snapshot_close`
+  after stopping the container, inside the EXIT trap, with the launch lock still held on fd 9. The worker verifies
+  that fd against `<base>/.launch.lock` and passes it through `podman unshare`; another launch cannot run meanwhile.
+  `timeout -k 5 90` bounds the whole worker. PC VR/Linux launchers have no snapshot step.
+- Snapshots use the same archive builder, exclusions and 64 MiB/file, 4 GiB/total limits as manual backups.
+  File paths/sizes/content hashes form a fingerprint; unchanged saves skip compression. Complete snapshots are
+  atomically published under `~/.local/share/frameport/save-snapshots/<pkg>/<ns>-<sha256>.tar.gz`, with fingerprint
+  sidecars. The newest three per game are retained; interrupted `.part` files are overwritten on the next attempt.
+- `save_snapshots` lists immutable snapshots oldest first per game; `_fetch_save_snapshot '<json>'` streams one
+  (archive stdout, result JSON stderr). PC `install/saves.sync_snapshots` runs in the background, verifies the archive
+  hash and package, imports it as a normal backup marked `automatic`, and applies `saves.keep`. A local
+  `<data>/save-snapshots-synced.json` digest ledger prevents reimporting snapshots after pruning or deleting backups.
+  Failures leave snapshots on the Frame for the next poll. This path does no disk/SSH work in rendering.
 
 ## OpenXR runtime (as seen by games through overport's loader)
 - Instance extensions present include KHR_android_create_instance (must be enabled; the adapter adds it),

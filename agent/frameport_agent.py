@@ -46,7 +46,7 @@ try:
 except ImportError:  # Windows: pc_revive loads this file for its VDF code only (GitHub #131)
     fcntl = None
 
-AGENT_VERSION = 100
+AGENT_VERSION = 101
 HOME = os.path.expanduser("~")
 STEAM = os.path.join(HOME, ".local/share/Steam")
 ANCHORS = os.path.join(HOME, "Applications/quest-frame")
@@ -3308,6 +3308,7 @@ stop() {{
     [[ -n "$child" ]] && kill -TERM -- "-$child" 2>/dev/null || true
     podman kill "lepton-steamlaunch-$SteamAppId" >/dev/null 2>&1 || true
     {plays_end}
+    {save_snapshot}
 }}
 trap stop EXIT
 trap 'exit 130' INT
@@ -3440,6 +3441,11 @@ def plays_lines(anchor):
             f'echo "end $(date +%s)" >>{q} 2>/dev/null || true')
 
 
+def snapshot_line(pkg):
+    return (f"timeout -k 5 90 python3 {shlex.quote(os.path.abspath(__file__))} _snapshot_close "
+            f"{shlex.quote(pkg)} >>\"$app_dir/save-snapshot.log\" 2>&1 || true")
+
+
 def upgrade_launchers():
     """Give launchers written by older agents the parent watchdog, the dashboard closer and the play-session log (in
     place: a new file, so a running launcher keeps reading the old one). Returns the packages changed."""
@@ -3498,6 +3504,10 @@ def upgrade_launchers():
             pkg = os.path.basename(os.path.dirname(path))
             new = set_config_sync_line(new, pkg, wants_config_sync(os.path.dirname(path)))
             new = set_refresh_rate_line(new, pkg)
+        if "export LEPTON_ENV_FRAMEBRIDGE_CONFIG=" in new and "_snapshot_close" not in new:
+            # The end log follows podman kill in stop(), while the launcher still owns fd 9.
+            end = plays_lines(os.path.dirname(path))[1]
+            new = new.replace(end, end + "\n    " + snapshot_line(os.path.basename(os.path.dirname(path))), 1)
         if new == text:
             continue
         tmp = path + ".tmp"
@@ -3883,7 +3893,8 @@ def write_launcher(anchor, base, pkg, title, appid, lepton, env, hw_video=False,
                             cloud_dirs=cloud_dirs_line(pkg),
                             video_codec=wrapper_lines(hw_video, gamepad),
                             plays_start=plays_lines(anchor)[0],
-                            plays_end=plays_lines(anchor)[1], restart=restart_block(pkg, lepton))
+                            plays_end=plays_lines(anchor)[1], save_snapshot=snapshot_line(pkg),
+                            restart=restart_block(pkg, lepton))
     text = set_config_sync_line(text, pkg, config_sync)
     text = set_refresh_rate_line(text, pkg)
     path = os.path.join(anchor, "launch.sh")
@@ -8434,7 +8445,8 @@ def _dep_version(dep):
     return str((dep or {}).get("version") or (dep or {}).get("source_version") or "")
 
 
-def write_saves_tar(out, pkg, roots, dep=None, max_file=SAVES_MAX_FILE, max_total=SAVES_MAX_TOTAL):
+def write_saves_tar(out, pkg, roots, dep=None, max_file=SAVES_MAX_FILE, max_total=SAVES_MAX_TOTAL,
+                    automatic=False):
     """Stream the game's saves as tar.gz to `out` (a binary file object). Returns the manifest (also the archive's
     last member, frameport-saves.json)."""
     import gzip
@@ -8448,7 +8460,8 @@ def write_saves_tar(out, pkg, roots, dep=None, max_file=SAVES_MAX_FILE, max_tota
                          f"save backup takes (that's game content, not saves)")
     manifest = {"format": SAVES_FORMAT, "package": pkg, "title": (dep or {}).get("title") or pkg,
                 "version": _dep_version(dep), "created": time.time(), "agent": AGENT_VERSION,
-                "roots": sorted(roots), "max_file": max_file, "files": [], "dirs": [], "skipped": found["skipped"]}
+                "automatic": automatic, "roots": sorted(roots), "max_file": max_file,
+                "files": [], "dirs": [], "skipped": found["skipped"]}
     gz = gzip.GzipFile(fileobj=out, mode="wb", compresslevel=6)
     with tarfile.open(fileobj=gz, mode="w|", format=tarfile.PAX_FORMAT) as tar:
         for arc, _p, s in found["dirs"]:
@@ -8872,6 +8885,9 @@ def saves_ns_main(op, raw):
         return saves_backup_session(args, sys.stdout.buffer, sys.stderr)
     if op == "restore":
         return saves_restore_session(args, sys.stdin.buffer, sys.stdout)
+    if op == "snapshot":
+        print(json.dumps(create_save_snapshot(args["package"])))
+        return 0
     if op == "info":
         try:
             _pkg, _dep, roots = saves_context(args)
@@ -8883,10 +8899,135 @@ def saves_ns_main(op, raw):
     return 2
 
 
+SNAPSHOT_ROOT = os.path.expanduser("~/.local/share/frameport/save-snapshots")
+SNAPSHOT_NAME = re.compile(r"^[0-9]+-[a-f0-9]{64}\.tar\.gz$")
+
+
+def cmd_save_snapshot_settings(args):
+    """Global opt-in, read at every game exit, including when the PC is disconnected."""
+    os.makedirs(SNAPSHOT_ROOT, exist_ok=True)
+    flag = os.path.join(SNAPSHOT_ROOT, "enabled")
+    if args.get("enabled") and not os.path.isfile(flag):
+        with open(flag + ".tmp", "w") as f:
+            f.write("1\n")
+        os.replace(flag + ".tmp", flag)
+    elif not args.get("enabled") and os.path.exists(flag):
+        os.remove(flag)
+    return {"enabled": os.path.isfile(flag)}
+
+
+def snapshot_files(pkg):
+    folder = os.path.join(SNAPSHOT_ROOT, check_pkg(pkg))
+    return sorted((p for p in glob.glob(os.path.join(folder, "*.tar.gz"))
+                   if SNAPSHOT_NAME.fullmatch(os.path.basename(p)) and not os.path.islink(p)), reverse=True)
+
+
+def cmd_save_snapshots(args):
+    out = []
+    for folder in sorted(glob.glob(os.path.join(SNAPSHOT_ROOT, "*"))):
+        pkg = os.path.basename(folder)
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+", pkg) or os.path.islink(folder):
+            continue
+        for path in reversed(snapshot_files(pkg)):  # oldest first: PC retention keeps the newest
+            name = os.path.basename(path)
+            out.append({"package": pkg, "snapshot": name, "sha256": name.split("-", 1)[1][:-7]})
+    return {"snapshots": out}
+
+
+def create_save_snapshot(pkg):
+    """Called in the user namespace with the launch lock held; publish complete archives only."""
+    pkg, dep, roots = saves_context({"package": pkg})
+    if saves_running(dep):
+        raise AgentError("the game is running")
+    folder = os.path.join(SNAPSHOT_ROOT, pkg)
+    os.makedirs(folder, exist_ok=True)
+    found = collect_saves(roots)
+    if sum(st.st_size for _arc, _path, st in found["files"]) > SAVES_MAX_TOTAL:
+        raise AgentError("saves exceed the snapshot size limit")
+    entries = []
+    for arc, path, st in found["files"]:
+        digest = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                digest.update(chunk)
+        entries.append((arc, st.st_size, digest.hexdigest()))
+    fingerprint = hashlib.sha256(json.dumps(entries).encode()).hexdigest()
+    previous = snapshot_files(pkg)
+    if previous:
+        try:
+            with open(previous[0] + ".json") as f:
+                if json.load(f).get("fingerprint") == fingerprint:
+                    return {"created": False, "reason": "unchanged"}
+        except (OSError, ValueError):
+            pass  # damaged metadata must not prevent a new backup
+    part = os.path.join(folder, "snapshot.part")
+    try:
+        with open(part, "wb") as f:
+            write_saves_tar(f, pkg, roots, dep, automatic=True)
+        digest = hashlib.sha256()
+        with open(part, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                digest.update(chunk)
+        name = f"{time.time_ns()}-{digest.hexdigest()}.tar.gz"
+        dest = os.path.join(folder, name)
+        with open(dest + ".json", "w") as f:
+            json.dump({"fingerprint": fingerprint}, f)
+        os.replace(part, dest)
+        for old in snapshot_files(pkg)[3:]:
+            os.remove(old)
+            if os.path.exists(old + ".json"):
+                os.remove(old + ".json")
+        return {"created": True, "snapshot": name}
+    finally:
+        if os.path.exists(part):
+            os.remove(part)
+
+
+def snapshot_close(pkg):
+    if not os.path.isfile(os.path.join(SNAPSHOT_ROOT, "enabled")):
+        return 0
+    _pkg, dep, _roots = saves_context({"package": pkg})
+    # Never trust an environment variable claiming the game is stopped: verify the inherited lock itself.
+    lock = os.stat(os.path.join(dep["base"], ".launch.lock"))
+    inherited = os.fstat(9)
+    if (lock.st_dev, lock.st_ino) != (inherited.st_dev, inherited.st_ino) or fcntl is None:
+        raise AgentError("snapshot needs the launcher's lock")
+    fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    owner = as_owner()
+    if owner:
+        return subprocess.run(owner + [sys.executable or "python3", os.path.abspath(__file__),
+                                       "_saves_ns", "snapshot", json.dumps({"package": pkg})],
+                              pass_fds=(9,)).returncode
+    print(json.dumps(create_save_snapshot(pkg)))
+    return 0
+
+
+def fetch_save_snapshot(args, out, err):
+    try:
+        pkg, name = check_pkg(args.get("package")), args.get("snapshot") or ""
+        if not SNAPSHOT_NAME.fullmatch(name):
+            raise AgentError("invalid save snapshot")
+        path = os.path.join(SNAPSHOT_ROOT, pkg, name)
+        if path not in snapshot_files(pkg) or os.path.islink(os.path.dirname(path)):
+            raise AgentError("save snapshot no longer available")
+        with open(path, "rb") as f:
+            shutil.copyfileobj(f, out, 1 << 16)
+        out.flush()
+        err.write(json.dumps({"ok": True}) + "\n")
+        return 0
+    except (OSError, AgentError) as exc:
+        err.write(json.dumps({"ok": False, "error": str(exc)}) + "\n")
+        return 1
+
+
 COMMANDS = {n[4:]: f for n, f in globals().items() if n.startswith("cmd_")}
 
 
 def main():
+    if len(sys.argv) >= 3 and sys.argv[1] == "_snapshot_close":
+        return snapshot_close(sys.argv[2])
+    if len(sys.argv) >= 3 and sys.argv[1] == "_fetch_save_snapshot":
+        return fetch_save_snapshot(json.loads(sys.argv[2]), sys.stdout.buffer, sys.stderr)
     if len(sys.argv) >= 2 and sys.argv[1] == "_keyboard":
         return keyboard_session(sys.stdin, sys.stdout)
     if len(sys.argv) >= 2 and sys.argv[1] == "_vr_overlay_watch":

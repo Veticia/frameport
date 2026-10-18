@@ -321,3 +321,58 @@ def test_namespace_handoff_runs_the_agent_in_podman_unshare(game, monkeypatch):
     assert seen["cmd"][:2] == ["podman", "unshare"] and seen["cmd"][3:5] == [str(AGENT), "_saves_ns"]
     assert seen["cmd"][5] == "backup" and json.loads(seen["cmd"][6]) == {"package": PKG}
     assert seen["ns"] == "1"
+
+
+def test_snapshots_create_and_skip_unchanged(game, monkeypatch):
+    a, anchor, internal, external = game
+    a.cmd_save_snapshot_settings({"enabled": True})
+    assert a.create_save_snapshot(PKG)["created"]
+    first = a.snapshot_files(PKG)
+    monkeypatch.setattr(a, "write_saves_tar", lambda *args, **kwargs: pytest.fail("unchanged saves compressed"))
+    assert a.create_save_snapshot(PKG) == {"created": False, "reason": "unchanged"}
+    assert a.snapshot_files(PKG) == first
+
+
+def test_snapshot_pruning_and_size_limit(game, monkeypatch):
+    a, anchor, internal, external = game
+    for i in range(5):
+        write(external / "files/SaveData.es3", f"save {i}")
+        assert a.create_save_snapshot(PKG)["created"]
+    paths = a.snapshot_files(PKG)
+    assert len(paths) == 3
+    assert len(list(Path(a.SNAPSHOT_ROOT).rglob("*.tar.gz.json"))) == 3
+    manifest = manifest_of(Path(paths[0]).read_bytes())
+    assert manifest["automatic"] and manifest["package"] == PKG
+    monkeypatch.setattr(a, "SAVES_MAX_TOTAL", 1)
+    with pytest.raises(a.AgentError, match="size limit"):
+        a.create_save_snapshot(PKG)
+    assert a.snapshot_files(PKG) == paths
+    monkeypatch.setattr(a, "container_running", lambda _: True)
+    with pytest.raises(a.AgentError, match="running"):
+        a.create_save_snapshot(PKG)
+
+
+def test_snapshot_requires_launch_lock_and_fetch_rejects_paths(game):
+    a, anchor, internal, external = game
+    a.cmd_save_snapshot_settings({"enabled": True})
+    with pytest.raises((OSError, a.AgentError)):
+        a.snapshot_close(PKG)
+    out, err = io.BytesIO(), io.StringIO()
+    assert a.fetch_save_snapshot({"package": PKG, "snapshot": "../../bad"}, out, err) == 1
+    assert not out.getvalue() and "invalid" in err.getvalue()
+
+
+def test_snapshot_launcher_template_and_upgrade(game):
+    a, anchor, internal, external = game
+    a.write_launcher(str(anchor), str(anchor), PKG, "Example", 123, "/usr/bin/lepton", {})
+    path = anchor / "launch.sh"
+    text = path.read_text()
+    assert text.count("_snapshot_close") == 1
+    assert "timeout -k 5 90" in text
+    assert text.index("podman kill") < text.index("_snapshot_close")
+    path.write_text("\n".join(line for line in text.splitlines() if "_snapshot_close" not in line) + "\n")
+    assert PKG in a.upgrade_launchers()
+    upgraded = path.read_text()
+    assert upgraded.count("_snapshot_close") == 1
+    a.upgrade_launchers()
+    assert path.read_text() == upgraded

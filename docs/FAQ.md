@@ -202,12 +202,23 @@ Saves stay on the Frame when you update or reinstall a game.
 
 ## Can I back up a game's saves?
 
-Yes. Steam doesn't sync Quest games' saves, so FramePort copies them to your PC: the game's menu (**…** on its page) →
-**Saves** → **Back up saves**, or **Back up all saves** on the Steam Frame page (Installed games). Close the game
+Yes. Steam doesn't sync Quest games' saves, so FramePort copies them to your PC: **Back up saves** next to Play on
+the installed game's page, or **Back up all saves** on the Steam Frame page (Installed games). Close the game
 first. A backup holds the game's own storage (`/data/data/<package>` and `/sdcard/Android/data/<package>`), without
 caches, shader caches and large downloaded content (videos, OBBs, files over 64 MB); the job says when something was
 left out. FramePort keeps the 10 newest backups per game (Settings → Data). They're in FramePort's data folder under
 `save-backups/<package>/` (**Open backups folder** in the game's menu).
+
+In **Settings → Data**, **Choose backup folder…** selects a different folder, including a local Drive or Nextcloud
+sync folder. FramePort checks that it can write there. **Use the default** resets the location. Existing backups stay
+where they are and remain listed for restoring; retention only removes old backups in the currently selected folder.
+FramePort writes local files; your cloud client handles uploading them.
+
+**Back up saves when a game closes** (Settings → Data, off by default) keeps the newest three changed snapshots per
+game on the Frame, even while FramePort is closed. Connect once after changing this setting to apply it to the Frame.
+New snapshots are copied to your backup folder when FramePort connects or polls the connection, marked **automatic**,
+and count toward the same backup limit. Unchanged saves are skipped. A snapshot captures what the game wrote to disk;
+it cannot recover progress a forcibly closed game never saved.
 
 **Restore saves…** puts one back: it replaces the game's saves on the Frame. The Frame keeps a copy of the saves it
 had, so **Undo last restore** in the same window takes you back. When you uninstall a game and tick *Also delete its

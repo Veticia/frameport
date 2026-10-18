@@ -30,6 +30,8 @@ def when(t: float) -> str:
 def backup_line(b: saves.Backup) -> str:
     """"12 files · 3.4 MB of saves · version 1.2" (+ large files left out)."""
     parts = [tr_n("{n} file", "{n} files", b.files), tr("{size} of saves").format(size=fmt_size(b.bytes))]
+    if b.automatic:
+        parts.append(tr("automatic"))
     if b.version:
         parts.append(tr("version {version}").format(version=b.version))
     if b.skipped:

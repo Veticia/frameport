@@ -251,7 +251,11 @@ Rick and Morty runs on the Frame via its catalog recipe (OpenVR, no Revive),
     restore = untrusted input (staged + checked first), rollback copy `<base>/saves-before-restore.tar.gz` (undo =
     `rollback: true`). PC `install/saves.py` (`<data>/save-backups/<pkg>/<ts>.tar.gz` + `.json`, keep `saves.keep`
     = 10), GUI `ui/views/saves_dialog.py` (game menu section "Saves", Frame page "Back up all saves", uninstall's
-    "back up before deleting"), CLI `frameport saves backup|list|restore|undo`.
+    "back up before deleting"), CLI `frameport saves backup|list|restore|undo`. Agent v101: PC folder `saves.folder`
+    (Settings → Data; old folders stay listed in `saves.previous_folders`), automatic snapshots `saves.auto` (default
+    off; flag `~/.local/share/frameport/save-snapshots/enabled`, Quest launchers run `_snapshot_close` in the EXIT
+    trap under the launch lock, newest 3 per game on the Frame; `install/saves.sync_snapshots` imports them as
+    "automatic" once, ledger `<data>/save-snapshots-synced.json`). Device-checked 2026-10-17 with BlazeRush.
   - `patches/` — **the unit of modularity**. `base.py` (Patch interface, registry), `overport.py` (overport CLI patch ids,
     discovered dynamically via `overport patches`), `frame/*.py` (one module per Frame fix), `settings.py` (FrameBridge
     adapter keys + device files as patches). Add a patch = add a module that calls `register(...)`.

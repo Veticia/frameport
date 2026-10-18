@@ -864,7 +864,8 @@ def saves_list(package: str = typer.Argument(..., help="the game (package or par
     found = saves.list_backups(pkg)
     if as_json:
         typer.echo(json.dumps([{"path": str(b.path), "created": b.created, "size": b.size, "files": b.files,
-                                "bytes": b.bytes, "version": b.version, "skipped": b.skipped} for b in found],
+                                "bytes": b.bytes, "version": b.version, "skipped": b.skipped,
+                                "automatic": b.automatic} for b in found],
                               indent=1))
         return
     if not found:
@@ -873,7 +874,8 @@ def saves_list(package: str = typer.Argument(..., help="the game (package or par
     for i, b in enumerate(found, 1):
         when = time.strftime("%Y-%m-%d %H:%M", time.localtime(b.created))
         typer.echo(f"{i:3}  {when}  {b.files:5} file(s)  {b.bytes / 2**20:8.1f} MiB"
-                   + (f"  v{b.version}" if b.version else "") + f"  {b.path.name}")
+                   + (f"  v{b.version}" if b.version else "")
+                   + ("  automatic" if b.automatic else "") + f"  {b.path.name}")
 
 
 @saves_app.command("restore")

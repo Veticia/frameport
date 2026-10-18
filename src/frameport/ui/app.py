@@ -2600,6 +2600,28 @@ class FramePortApp:
                       "it.").format(title=game.get("title") or pkg), error=True,
                    action=tr("Report a problem…"), on_action=lambda e: self.report_problem_dialog(pkg))
 
+    def _sync_save_snapshots(self) -> None:
+        """Connection/poll hook: disk and SSH work stay off rendering paths."""
+        if getattr(self, "_save_snapshots_busy", False) or self.target is None:
+            return
+        target = self.target
+        self._save_snapshots_busy = True
+
+        def work():
+            from ..install import saves
+
+            try:
+                saves.sync_snapshots(target.frame)
+                self._save_snapshots_error = None
+            except Exception as exc:  # noqa: BLE001 - retry on the next connection poll
+                applog.log.exception("syncing automatic save backups failed")
+                if isinstance(exc, saves.SavesError) and str(exc) != getattr(self, "_save_snapshots_error", None):
+                    self._save_snapshots_error = str(exc)
+                    self.toast(tr("Couldn't sync save backups: {error}").format(error=str(exc)), error=True)
+            finally:
+                self._save_snapshots_busy = False
+        self.run_bg(work)
+
     def _check_sessions(self, info: dict | None) -> None:
         """A FramePort game's play session ended since FramePort last looked (agent v70 `last_play`): fetch and triage
         its log on a background thread (pipeline.triage_session); the game page shows the result ("Last session")."""
@@ -2753,6 +2775,7 @@ class FramePortApp:
             return False
         self.frame_info, self.frame_state = info, "connected"
         self._check_frame_restart(info)
+        self._sync_save_snapshots()
         self._awake_at = 0.0  # the lock went away with the old connection's Frame session: take it again
         self.jobs.resume()
         self.toast(tr("Your Frame is back — continuing"))
@@ -2828,6 +2851,7 @@ class FramePortApp:
                 t.label = target.label
                 save_target(target)
                 old, self.target, self.frame_info, self.frame_state = self.target, t, info, "connected"
+                self._sync_save_snapshots()
                 self._check_frame_restart(info)
                 self._remember_drives(t)
                 if old is not None and old is not t and not self.jobs.current():
@@ -2893,6 +2917,7 @@ class FramePortApp:
                 changed = info.get("installed") != (self.frame_info or {}).get("installed") or \
                     self.frame_state != "connected"
                 self.frame_info, self.frame_state = info, "connected"
+                self._sync_save_snapshots()
                 self._check_frame_restart(info)
                 self._check_sessions(info)
                 if with_drives:

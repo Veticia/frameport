@@ -1596,7 +1596,7 @@ def test_second_launch_while_starting_is_ignored(monkeypatch, tmp_path):
     text = a.LAUNCH_SH.format(title="T", pkg="com.x.y", app_dir=f"app_dir={base}", appid=1, lepton_q=str(lepton),
                               extra_env="", cloud_dirs="true",
                               watchdog=a.WATCHDOG, dashboard="true", logcat="true", single=a.SINGLE_LINE,
-                              plays_start="true", plays_end="true", video_codec="",
+                              plays_start="true", plays_end="true", save_snapshot="true", video_codec="",
                               restart=a.restart_block("com.x.y", str(lepton)))
     launcher = tmp_path / "launch.sh"
     launcher.write_text(text)
@@ -2087,7 +2087,8 @@ def test_launcher_starts_lepton_again_once_when_the_game_restarts_itself(monkeyp
                               appid=2821789967, lepton_q=str(lepton), extra_env="", cloud_dirs="true",
                               watchdog=a.WATCHDOG, dashboard="true",
                               logcat="true", single=a.SINGLE_LINE, plays_start="true", plays_end="true",
-                              video_codec="", restart=a.restart_block("com.Armature.SportsScramble", str(lepton)))
+                              save_snapshot="true", video_codec="",
+                              restart=a.restart_block("com.Armature.SportsScramble", str(lepton)))
     text = text.replace("python3 " + os.path.abspath(a.__file__) + " _dashboard_worker", "true")
     launcher = tmp_path / "launch.sh"
     launcher.write_text(text)

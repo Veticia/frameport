@@ -169,6 +169,10 @@ class GameView:
             buttons.append(C.secondary(tr("Add videos"), ft.Icons.VIDEO_LIBRARY_OUTLINED,
                                        lambda e: app.go("files", pkg), False,
                                        tr("Upload videos into this player's storage on the Frame.")))
+        if g.get("kind") not in ("rift", "linux") and app.frame_state == "connected" and \
+                C.install_state(g, app.frame_info) in ("installed", "outdated"):
+            buttons.append(C.secondary(tr("Back up saves"), ft.Icons.SAVE_OUTLINED,
+                                       lambda e: app.backup_saves(pkg)))
         more = C.menu_button(C.menu_items(app.game_actions(pkg, quick=False)), icon=ft.Icons.MORE_HORIZ_ROUNDED,
                              icon_color=T.TEXT_2, tooltip=tr("More actions"))
         # the same menu, opened from code (Library right-click → "More actions…", app.open_game_menu): a
