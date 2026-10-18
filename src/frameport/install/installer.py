@@ -196,7 +196,23 @@ def install(frame: Frame, plan: InstallPlan, reporter: Reporter) -> dict:
     reporter.log(f"installed at {result['base']} (Steam shortcut id {result['appid']})")
     log_controller_models(result.get("controller_models"), reporter)
     log_config_sync(result.get("config_sync"), reporter)
+    sync_room_scanner(frame, ctx.adapter_settings, reporter)
     return result
+
+
+def sync_room_scanner(frame: Frame, settings: dict, reporter: Reporter) -> None:
+    """A game that can ask for a room scan (scene_emul + scene_scan_request) needs the scanner and its headset prompts
+    on the Frame: until now they only got there when a scan was started from this PC. Synced by digest (no upload
+    when current); a failure only costs the in-game scan, never the install."""
+    if not settings.get("scene_emul") or not settings.get("scene_scan_request", 1):
+        return
+    from . import rooms
+
+    try:
+        rooms.ensure_scanner(frame)
+        rooms.ensure_prompts(frame)
+    except Exception as exc:  # noqa: BLE001 - the game still installs and plays with its saved room
+        reporter.log(f"room scanner not synced ({exc}); in-game room scans use the copy already on the Frame")
 
 
 def log_config_sync(report: dict | None, reporter: Reporter) -> None:
