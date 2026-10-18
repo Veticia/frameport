@@ -210,7 +210,7 @@ def preview_reader(error_at=None):
 
     calls, matrices = [], []
     U, E = ct.c_uint64, ct.c_int
-    signatures = {1: (ct.c_char_p, ct.c_char_p, ct.POINTER(U)), 3: (U,), 22: (U, ct.c_float),
+    signatures = {1: (ct.c_char_p, ct.c_char_p, ct.POINTER(U)), 3: (U,), 20: (U, ct.c_uint32), 22: (U, ct.c_float),
                   33: (U, E, ct.POINTER(M34)), 62: (U, ct.c_void_p, ct.c_uint32, ct.c_uint32, ct.c_uint32),
                   43: (U,)}
     callbacks = []
@@ -244,14 +244,16 @@ def test_preview_render_positions_colors_and_transparency(monkeypatch, tmp_path)
     def pixel(x, z):
         col, row = int((x / 6 + .5) * 256), int((z / 6 + .5) * 256)
         return tuple(rgba[(row * 256 + col) * 4:(row * 256 + col) * 4 + 4])
-    assert pixel(.05, .05) == (155, 155, 155, 110)
-    assert pixel(1.05, .05) == (245, 140, 45, 150)
-    assert pixel(-.95, -.95) == (55, 155, 240, 150)
+    # one colour; only the opacity tells floor / furniture / wall apart
+    assert pixel(.05, .05) == (58, 168, 255, 40)
+    assert pixel(1.05, .05) == (58, 168, 255, 80)
+    assert pixel(-.95, -.95) == (58, 168, 255, 150)
+    assert pixel(.25, .05) == (0, 0, 0, 0)  # filled squares of the cell's own size, no blotches into neighbours
     assert pixel(2, 2) == (0, 0, 0, 0)
     # Current floor shift reclassifies retained raw points.
     shifted = a._render_scan_preview({(0, 0, 0): 1}, rot_y(0, (0, 2, 0)), (0, 0, 0))
     i = (130 * 256 + 130) * 4
-    assert tuple(shifted[i:i + 4]) == (55, 155, 240, 150)
+    assert tuple(shifted[i:i + 4]) == (58, 168, 255, 150)
 
 
 def test_preview_accumulation_throttle_and_overlay_order(monkeypatch, tmp_path):
@@ -261,7 +263,7 @@ def test_preview_accumulation_throttle_and_overlay_order(monkeypatch, tmp_path):
     preview = a._ScanPreview(rv, logs.append)
     verts = struct.pack('<3f', 0, 0, 1)
     preview.feed(verts, rot_y(0), now=0)
-    assert calls == [1, 22, 33, 62, 43]
+    assert calls == [1, 20, 22, 33, 62, 43]  # sort order below the prompts
     assert matrices[0] == pytest.approx([1, 0, 0, 0, 0, 0, 1, .015, 0, -1, 0, 0])
     preview.feed(verts, rot_y(0), now=1)
     assert calls.count(62) == 1  # existing cells increment counts, no redraw

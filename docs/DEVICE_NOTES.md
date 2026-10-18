@@ -748,10 +748,13 @@ Live floor coverage (agent v104) is enabled by default for manual and game-reque
 payload accepts `preview: false`, and `frameport frame room scan --no-preview` disables it. A world-locked,
 upward-facing 6 m square at floor height follows the current raw-to-STAGE calibration and stays centred on the
 scan's first recorded camera position. Every 16th depth vertex contributes to raw-space 10 cm voxels; at most once
-per second, newly occupied cells redraw a 256×256 RGBA map: grey floor (<0.3 m), orange raised surfaces
-(0.3–1.5 m), blue tall surfaces (>1.5 m), unseen transparent. The partly transparent dots show coverage, not a
-validated room boundary. IVROverlay_028 slots 1/3/22/33/43/62 (OpenVR 2.15.6 header) create/destroy/set width/set
-absolute STAGE transform/show/upload raw pixels. Each upload is 256 KiB (at most 256 KiB/s); timing for the first
+per second, newly occupied cells redraw a 256×256 RGBA map in one colour (FramePort's secondary blue), each cell a
+filled 10 cm square, only the opacity telling floor (<0.3 m, faint), raised surfaces (0.3–1.5 m) and tall surfaces
+(>1.5 m, strongest, the room's outline) apart; unseen transparent. Overlays have no depth (they draw over hands and
+passthrough), so the map stays faint; three colours in 3x3 blotches clashed in the owner's first run. It shows
+coverage, not a validated room boundary. IVROverlay_028 slots 1/3/20/22/33/43/62 (OpenVR 2.15.6 header)
+create/destroy/sort order (1, below the scan prompts' 10)/set width/set absolute STAGE transform/show/upload raw
+pixels. Each upload is 256 KiB (at most 256 KiB/s); timing for the first
 20 uploads and every tenth thereafter, plus failures, goes to `rooms/scans/scan-*.fprs.log` and the built room’s `scan.log`. Overlay errors or an
 upload taking over 50 ms disable the preview while capture continues; headset appearance and upload cost still
 need device validation.

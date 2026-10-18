@@ -4925,27 +4925,30 @@ def _scan_point(m, p):
 
 
 def _render_scan_preview(cells, raw_to_standing, center, size=256, width=6.0):
-    """Raw 10 cm voxel keys -> top-down RGBA. Image top is standing -Z; tallest class wins overlaps."""
+    """Raw 10 cm voxel keys -> top-down RGBA. Image top is standing -Z; tallest class wins overlaps.
+    One colour (FramePort's secondary blue), only the opacity says floor / furniture / wall, and every cell is one
+    filled square: overlays draw over hands and the passthrough (no depth), so the map stays faint and calm (owner,
+    2026-10-18: three colours in 3x3 blotches clashed)."""
     pixels = bytearray(size * size * 4)
     classes = bytearray(size * size)
-    colors = (bytes((155, 155, 155, 110)), bytes((245, 140, 45, 150)), bytes((55, 155, 240, 150)))
+    colors = (bytes((58, 168, 255, 40)), bytes((58, 168, 255, 80)), bytes((58, 168, 255, 150)))
+    scale = size / width
     for key in cells:
         x, y, z = _scan_point(raw_to_standing, tuple((v + 0.5) * 0.1 for v in key))
         if y < -0.3:
             continue
-        col = int(math.floor(((x - center[0]) / width + 0.5) * size))
-        row = int(math.floor(((z - center[2]) / width + 0.5) * size))
-        if not (0 <= col < size and 0 <= row < size):
-            continue
         kind = 0 if y < 0.3 else 1 if y <= 1.5 else 2
-        for dy in (-1, 0, 1):
-            for dx in (-1, 0, 1):
-                xx, yy = col + dx, row + dy
-                if 0 <= xx < size and 0 <= yy < size:
-                    i = yy * size + xx
-                    if classes[i] <= kind + 1:
-                        pixels[i * 4:i * 4 + 4] = colors[kind]
-                        classes[i] = kind + 1
+        # the cell's 10 cm footprint around its centre, in pixels
+        c0 = int(math.floor((x - 0.05 - center[0]) * scale + size / 2))
+        c1 = int(math.ceil((x + 0.05 - center[0]) * scale + size / 2))
+        r0 = int(math.floor((z - 0.05 - center[2]) * scale + size / 2))
+        r1 = int(math.ceil((z + 0.05 - center[2]) * scale + size / 2))
+        for row in range(max(r0, 0), min(r1, size)):
+            for col in range(max(c0, 0), min(c1, size)):
+                i = row * size + col
+                if classes[i] <= kind:
+                    pixels[i * 4:i * 4 + 4] = colors[kind]
+                    classes[i] = kind + 1
     return bytes(pixels)
 
 
@@ -4954,7 +4957,7 @@ class _ScanPreview:
 
     Slots verified against openvr-2.15.6.h. Keep voxels in raw space because Valve moves STAGE during capture.
     """
-    SLOTS = {"Create": 1, "Destroy": 3, "Width": 22, "Absolute": 33, "Raw": 62, "Show": 43}
+    SLOTS = {"Create": 1, "Destroy": 3, "SortOrder": 20, "Width": 22, "Absolute": 33, "Raw": 62, "Show": 43}
 
     def __init__(self, rv, log=None):
         self.rv, self.log = rv, log or (lambda message: print(message, file=sys.stderr, flush=True))
@@ -4970,13 +4973,14 @@ class _ScanPreview:
             fn = ct.cast(table, ct.POINTER(ct.c_void_p))
             U, E = ct.c_uint64, ct.c_int
             signatures = {"Create": (ct.c_char_p, ct.c_char_p, ct.POINTER(U)), "Destroy": (U,),
-                          "Width": (U, ct.c_float), "Absolute": (U, E, ct.POINTER(rv.M34)),
-                          "Raw": (U, ct.c_void_p, ct.c_uint32, ct.c_uint32, ct.c_uint32), "Show": (U,)}
+                          "SortOrder": (U, ct.c_uint32), "Width": (U, ct.c_float),
+                          "Absolute": (U, E, ct.POINTER(rv.M34)), "Raw": (U, ct.c_void_p, ct.c_uint32, ct.c_uint32, ct.c_uint32), "Show": (U,)}
             self.functions = {name: ct.CFUNCTYPE(E, *args)(fn[self.SLOTS[name]])
                               for name, args in signatures.items()}
             h = U(0)
             self._call("Create", b"frameport.roomscan.preview", b"FramePort floor coverage", ct.byref(h))
             self.handle = h
+            self._call("SortOrder", h, 1)  # always below the scan prompts (_ScanPrompt: 10)
             self._call("Width", h, 6.0)
         except Exception as exc:
             self._disable(exc)
