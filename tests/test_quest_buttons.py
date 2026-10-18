@@ -38,7 +38,7 @@ static float aim_pitch, aim_yaw, aim_forward, refresh_rate, focus_hold_ms;
 static XrTime last_predicted_time;
 static XrDuration last_display_period;
 static void emul_on_begin_session(const XrSessionBeginInfo *info) { (void)info; }
-static int hide_fb_foveation_vulkan, hide_fb_foveation, hide_space_warp, scene_emul, emulate_scene;
+static int hide_fb_foveation_vulkan, hide_fb_foveation, hide_space_warp, scene_emul, emulate_scene, scene_app_mesh;
 static int controller_models, render_models_available, emulate_render_model, passthrough_emul, emulate_passthrough;
 static int foveation_eye_enabled, foveation_eye, foveation_fix, surface_emul, runtime_has_image_layout;
 static int no_equirect, no_equirect2, no_cylinder, no_cube, fb_color_space, emulate_color_space;
