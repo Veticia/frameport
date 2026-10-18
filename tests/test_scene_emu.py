@@ -233,3 +233,24 @@ def test_real_shim_bypasses_a_dispatcher_that_refuses_scene_calls(harness, tmp_p
     assert result.returncode == 0, result.stdout + result.stderr
     for name in names:
         assert f"extension shim: {name} -> FrameBridge" in result.stderr
+
+
+@pytest.mark.parametrize("mode", ["fallback", "ok", "failed", "timeout", "invalid"])
+def test_scan_request_handshake(harness, tmp_path, mode):
+    _, external = harness
+    process = f"org.frameport.scan_{mode}"
+    folder = external / process / "files"
+    folder.mkdir(parents=True)
+    if mode != "fallback":
+        room(tmp_path)
+    if mode == "ok":
+        (tmp_path / "room.txt").rename(tmp_path / "replacement.txt")
+        (tmp_path / "room.txt").write_text("frameport-room 1\noutline 4 0 0 3 0 3 3 0 3\n")
+    log = run(harness, tmp_path, f"scan-{mode}", process=process)
+    assert "scene: scan requested from FramePort" in log
+    if mode == "fallback":
+        assert "scene: no scanner answered, using the stored room" in log
+    else:
+        assert log.count("scene: scan started by FramePort") == 1
+        assert ("scene: scanned room loaded" if mode == "ok" else "scene: scan failed") in log
+    assert not list(folder.glob("framebridge-scan-*"))

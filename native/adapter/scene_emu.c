@@ -211,8 +211,14 @@ static uint64_t scene_now_ns(void) {
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
+static int scan_waiting;
+static uint64_t scan_started_at, scan_poll_at;
+static int scan_acked;
+static void poll_scan(uint64_t now);
 static int pop_event(XrEventDataBuffer *out) {  // caller holds scene_lock
-    if (pending_capture_at && scene_now_ns() >= pending_capture_at) {
+    uint64_t now = scene_now_ns();
+    if (scan_waiting) poll_scan(now);
+    if (!scan_waiting && pending_capture_at && now >= pending_capture_at) {
         memset(out, 0, sizeof(*out));
         memcpy(out, &pending_capture, sizeof(pending_capture));
         pending_capture_at = 0;
@@ -288,6 +294,7 @@ static int uuid_matches(uint32_t n, const XrUuidEXT *uuids, const scene_entity *
     return 0;
 }
 #include "scene_anchors.c"
+#include "scene_scan.c"
 
 static int fb_filter_matches(const XrSpaceFilterInfoBaseHeaderFB *f, const scene_entity *e) {
     if (!f) return 1;
@@ -570,14 +577,18 @@ static XRAPI_ATTR XrResult XRAPI_CALL emu_request_scene_capture(XrSession sessio
     if (!event_free() || pending_capture_at) { pthread_mutex_unlock(&scene_lock); return XR_ERROR_LIMIT_REACHED; }
     *request = next_request++;
     XrEventDataSceneCaptureCompleteFB e = {XR_TYPE_EVENT_DATA_SCENE_CAPTURE_COMPLETE_FB, NULL, *request, XR_SUCCESS};
-    if (scene_capture_delay_ms > 0) {
+    if (scene_scan_request && start_scan(*request)) {
+        pending_capture = e;
+        pending_capture_at = scan_started_at + (uint64_t)scene_capture_delay_ms * 1000000ull;
+    } else if (scene_capture_delay_ms > 0) {
         pending_capture = e;
         pending_capture_at = scene_now_ns() + (uint64_t)scene_capture_delay_ms * 1000000ull;
     } else {
         push_event(&e, sizeof(e));
     }
-    LOG("scene: capture requested -> %s (complete in %d ms)", room_from_file ? "scanned room" : "guardian box",
-        scene_capture_delay_ms);
+    if (scan_waiting) LOG("scene: capture requested -> waiting for FramePort");
+    else LOG("scene: capture requested -> %s (complete in %d ms)", room_from_file ? "scanned room" : "guardian box",
+             scene_capture_delay_ms);
     pthread_mutex_unlock(&scene_lock);
     return XR_SUCCESS;
 }
@@ -777,6 +788,9 @@ static void scene_on_create_session(XrSession session) {
     XrReferenceSpaceCreateInfo ci = {XR_TYPE_REFERENCE_SPACE_CREATE_INFO, NULL, XR_REFERENCE_SPACE_TYPE_STAGE,
                                      {{0, 0, 0, 1}, {0, 0, 0}}};
     pthread_mutex_lock(&scene_lock);
+    if (scan_waiting) clean_scan_files();
+    scan_waiting = 0;
+    pending_capture_at = 0;
     reset_room();
     scene_generation = (scene_generation + 1) & 255;
     event_head = event_tail = 0;
