@@ -54,7 +54,9 @@ IL2CPP_METADATA = "assets/bin/Data/Managed/Metadata/global-metadata.dat"
 #     USB MIDI driver polls the missing USB service: frame.usb_midi_watcher, GitHub #297) (2026-10)
 # 22: unreal_binned3 (Unreal built with FMallocBinned3 reserves tens of GiB at load: frame.unreal_noreserve,
 #     GitHub #349) (2026-10)
-ANALYSIS_VERSION = 22
+# 23: separate_process (MAIN activities in another process than the main one, which Lepton doesn't watch:
+#     frame.main_process, GitHub #178) (2026-10)
+ANALYSIS_VERSION = 23
 
 
 # Android versions by API level (for messages); the Frame's Lepton container runs Android 11 (API 30)
@@ -462,6 +464,8 @@ def analyze(path: Path, deep: bool = True, data_bytes: int | None = None) -> Ana
             "unity_oculus_check": b"\0com.oculus.systemactivities\0" in lib_bytes.get("libunity.so", b""),
             # a 2D launcher activity that starts a separate VR activity (frame.start_activity)
             "vr_activity": axml.vr_activity(manifest),
+            # a MAIN activity in its own process: Lepton watches only the main one (frame.main_process)
+            "separate_process": axml.separate_process_activities(manifest),
             "unity_version": unity_version(ggm, lib_bytes.get("libunity.so")) if engine == "Unity" else None,
             # the minimum Android version the APK declares (read from the original: OVRPort lowers it to 29)
             "min_sdk": axml.min_sdk(manifest),

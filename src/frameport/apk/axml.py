@@ -376,6 +376,53 @@ def vr_activity(manifest: bytes) -> str | None:
     return vr if vr and vr != launcher else None
 
 
+def _package(x: Axml) -> str | None:
+    return next((x.attr_str(el, "package") for el in x.elements() if el.name == "manifest"), None)
+
+
+def separate_process_activities(manifest: bytes) -> list[str]:
+    """Activities with a MAIN intent-filter that run in another process than the app's main one (android:process
+    ":name" or another package's name). Lepton only watches the main process: started directly, such an activity
+    leaves none, and Lepton closes the app about a minute later ("Target app ... did not start", GitHub #178)."""
+    x = Axml(manifest)
+    package = _package(x)
+    process = {}
+    for el in x.elements():
+        if el.name == "activity":
+            process[x.attr_str(el, "name") or ""] = x.attr_str(el, "process")
+    names = x.strings()
+    out = []
+    for el, name, items in component_filters(manifest):
+        proc = process.get(name) if el == "activity" else None
+        if proc and proc != package and any(k == "action" and i < len(names) and names[i] == MAIN
+                                            for k, _, i in items):
+            out.append(name)
+    return out
+
+
+def set_main_process(manifest: bytes, activities: list[str]) -> bytes | None:
+    """Run `activities` in the app's main process: their android:process becomes the package name (only those
+    elements' attribute values change). None when there is nothing to change."""
+    x = Axml(manifest)
+    package = _package(x)
+    if not package:
+        return None
+    hits = [(x.attr_str(el, "name"), el) for el in x.elements() if el.name == "activity"]
+    if not any(n in activities and x.attr_str(el, "process") not in (None, package) for n, el in hits):
+        return None
+    index = x.index(package)
+    if index is None:
+        index = x.append_string(package)
+    names = x.strings()
+    for el in x.elements():  # again: append_string moved the elements
+        if el.name != "activity" or x.attr_str(el, "name") not in activities:
+            continue
+        for a in el.attrs:
+            if a.name < len(names) and names[a.name] == "process":
+                _set_string_attr(x, a.offset, index)
+    return x.bytes()
+
+
 def set_start_activity(manifest: bytes, activity: str) -> bytes | None:
     """Make `activity` the one Lepton starts: its MAIN intent-filter gets category LAUNCHER (in place of its VR or
     DEFAULT category), every other component's LAUNCHER category becomes INFO. Only those attribute values change
