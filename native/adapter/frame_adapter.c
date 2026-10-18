@@ -1816,6 +1816,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEndFrame(XrSession session, const XrFrameEndInf
     XrCompositionLayerQuad quads[64];
     XrCompositionLayerQuad fade_out;  // fade_quad: at most one fade layer per frame
     int faded = 0;
+    const XrCompositionLayerBaseHeader *own_fade = NULL;  // fade_quad's black quad (FrameBridge's own)
     cube_outputs_begin();
     uint32_t count = 0, dropped = 0, swapped = 0, passthrough = 0;
     const XrCompositionLayerBaseHeader *surface_projections[SURF_MAX];
@@ -2121,42 +2122,30 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEndFrame(XrSession session, const XrFrameEndInf
         // the app's own layer: fade_quad=2 removed it from the copy submitted)
         int level = fade_quad && !faded && count < 64 ? fade_level(info->layers[i]) : 0;
         const XrCompositionLayerBaseHeader *fade_l = level ? fade_layer(session, level, count, &fade_out) : NULL;
-        if (fade_l) { kept[count++] = fade_l; faded = 1; ++swapped; }
+        if (fade_l) { kept[count++] = fade_l; own_fade = fade_l; faded = 1; ++swapped; }
     }
-    uint32_t max_layers = runtime_max_layers ? runtime_max_layers : 16;
+    // The runtime refuses frames with more layers than maxLayerCount (XR_ERROR_LAYER_LIMIT_EXCEEDED: Punch Fit sends
+    // 21+). Keep every projection layer and FrameBridge's own fade quad, then the app's other layers in submission
+    // order until the limit (from PR #246; the earliest app layers were what Punch Fit needed).
+    uint32_t max_layers = runtime_max_layers ? runtime_max_layers : 16, trimmed_layers = 0;
     if (count > max_layers) {
+        const XrCompositionLayerBaseHeader *trimmed[64];
+        uint32_t tcount = 0, reserved = 0, res_kept = 0, other_kept = 0;
+        for (uint32_t i = 0; i < count; ++i)
+            if (kept[i]->type == XR_TYPE_COMPOSITION_LAYER_PROJECTION || kept[i] == own_fade) ++reserved;
+        if (reserved > max_layers) reserved = max_layers;
+        uint32_t budget = max_layers - reserved;
+        for (uint32_t i = 0; i < count; ++i) {
+            int keep_always = kept[i]->type == XR_TYPE_COMPOSITION_LAYER_PROJECTION || kept[i] == own_fade;
+            uint32_t *n = keep_always ? &res_kept : &other_kept;
+            if (*n < (keep_always ? reserved : budget)) { trimmed[tcount++] = kept[i]; ++*n; }
+            else ++trimmed_layers;
+        }
         static int layer_limit_logged;
         if (layer_limit_logged++ < 5)
-            LOG("xrEndFrame: layerCount %u exceeds runtime limit %u, trimming excess layers", count, max_layers);
-        const XrCompositionLayerBaseHeader *trimmed[64];
-        uint32_t tcount = 0;
-        uint32_t proj_count = 0;
-        for (uint32_t i = 0; i < count; ++i)
-            if (kept[i] && kept[i]->type == XR_TYPE_COMPOSITION_LAYER_PROJECTION) ++proj_count;
-        uint32_t proj_budget = proj_count < max_layers ? proj_count : max_layers;
-        uint32_t non_proj_budget = max_layers - proj_budget;
-        uint32_t proj_kept = 0, non_proj_kept = 0;
-        for (uint32_t i = 0; i < count; ++i) {
-            if (!kept[i]) continue;
-            if (kept[i]->type == XR_TYPE_COMPOSITION_LAYER_PROJECTION) {
-                if (proj_kept < proj_budget) {
-                    trimmed[tcount++] = kept[i];
-                    ++proj_kept;
-                } else {
-                    ++dropped;
-                }
-            } else {
-                if (non_proj_kept < non_proj_budget) {
-                    trimmed[tcount++] = kept[i];
-                    ++non_proj_kept;
-                } else {
-                    ++dropped;
-                }
-            }
-        }
-        if (layer_limit_logged++ < 5)
-            LOG("xrEndFrame: layerCount %u exceeds runtime limit %u, trimmed to %u (proj %u/%u, non-proj %u/%u)",
-                count, max_layers, tcount, proj_kept, proj_count, non_proj_kept, count - proj_count);
+            LOG("xrEndFrame: %u layers exceed the runtime limit %u: left out %u of the app's other layers "
+                "(kept %u projection/fade layers and %u others)", count, max_layers, trimmed_layers, res_kept,
+                other_kept);
         for (uint32_t i = 0; i < tcount; ++i) kept[i] = trimmed[i];
         count = tcount;
     }
