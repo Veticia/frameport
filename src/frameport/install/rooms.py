@@ -25,11 +25,11 @@ def from_boundary(frame, height: float = 2.5) -> dict:
     return frame.agent("room_from_boundary", height=height)
 
 
-def capture(frame, seconds: float = 90, wait: float = 180) -> dict:
+def capture(frame, seconds: float = 90, wait: float = 180, preview: bool = True) -> dict:
     """Start a scan in the headset (the agent records the passthrough mesh, then builds the room)."""
     ensure_scanner(frame)
     ensure_prompts(frame)
-    result = frame.agent("room_capture", seconds=seconds, wait=wait)
+    result = frame.agent("room_capture", seconds=seconds, wait=wait, preview=preview)
     if result.get("error"):
         raise RuntimeError(result["error"])
     return result
@@ -43,10 +43,10 @@ SCAN_DONE = ("done", "failed", "none")
 
 
 def scan(frame, seconds: float = 90, wait: float = 180, progress=None, poll: float = 2.0,
-         sleep=time.sleep) -> dict:
+         sleep=time.sleep, preview: bool = True) -> dict:
     """capture() and wait for the result. progress(status) gets every status the agent reports (state waiting ->
     recording -> building -> done|failed; directions seen, looked_up). Returns the final status; raises on failure."""
-    capture(frame, seconds, wait)
+    capture(frame, seconds, wait, preview=preview)
     deadline = time.monotonic() + wait + seconds + 600  # + building time
     while True:
         st = capture_status(frame)

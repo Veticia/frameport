@@ -181,7 +181,7 @@ def test_scan_polls_until_done(monkeypatch):
     seen = []
     st = rooms.scan(frame, seconds=30, wait=60, progress=seen.append, sleep=lambda s: None)
     assert st["state"] == "done" and [s["state"] for s in seen] == ["waiting", "recording", "done"]
-    assert frame.calls[0] == ("room_capture", {"seconds": 30, "wait": 60})
+    assert frame.calls[0] == ("room_capture", {"seconds": 30, "wait": 60, "preview": True})
 
     frame = ScanFrame([{"state": "failed", "error": "No passthrough view arrived"}])
     with pytest.raises(RuntimeError, match="No passthrough"):
@@ -199,3 +199,115 @@ def test_ensure_prompts_uploads_only_changed(monkeypatch, tmp_path):
     frame.sums = hashlib.sha256(b"a.png").hexdigest() + "  a.png\n" + "0" * 64 + "  b.png\n"
     rooms.ensure_prompts(frame)
     assert [p[0] for p in frame.puts] == ["b.png"]
+
+
+def preview_reader(error_at=None):
+    """Real ctypes function pointers exercise the ABI and slot indexing without OpenVR."""
+    import ctypes as ct
+
+    class M34(ct.Structure):
+        _fields_ = [("m", ct.c_float * 12)]
+
+    calls, matrices = [], []
+    U, E = ct.c_uint64, ct.c_int
+    signatures = {1: (ct.c_char_p, ct.c_char_p, ct.POINTER(U)), 3: (U,), 22: (U, ct.c_float),
+                  33: (U, E, ct.POINTER(M34)), 62: (U, ct.c_void_p, ct.c_uint32, ct.c_uint32, ct.c_uint32),
+                  43: (U,)}
+    callbacks = []
+    table = (ct.c_void_p * 64)()
+    for slot, args in signatures.items():
+        def callback(*values, slot=slot):
+            calls.append(slot)
+            if slot == 1:
+                values[2][0] = 99
+            if slot == 33:
+                assert values[1] == 1
+                matrices.append(list(values[2].contents.m))
+            if slot == 62:
+                assert values[2:] == (256, 256, 4)
+            return 7 if slot == error_at else 0
+        fn = ct.CFUNCTYPE(E, *args)(callback)
+        callbacks.append(fn)
+        table[slot] = ct.cast(fn, ct.c_void_p).value
+    rv = SimpleNamespace(ct=ct, M34=M34, raw_to_standing=lambda: rot_y(0),
+                         vr=SimpleNamespace(VR_GetGenericInterface=lambda *args: ct.addressof(table)),
+                         keepalive=(table, callbacks))
+    return rv, calls, matrices
+
+
+def test_preview_render_positions_colors_and_transparency(monkeypatch, tmp_path):
+    a = load_agent(monkeypatch, tmp_path)
+    # 0.1 m raw voxels, centres at x=.05/1.05/- .95, heights .05/.75/2.05.
+    cells = {(0, 0, 0): 1, (10, 7, 0): 1, (-10, 20, -10): 1}
+    rgba = a._render_scan_preview(cells, rot_y(0), (0, 0, 0))
+    assert len(rgba) == 256 * 256 * 4
+    def pixel(x, z):
+        col, row = int((x / 6 + .5) * 256), int((z / 6 + .5) * 256)
+        return tuple(rgba[(row * 256 + col) * 4:(row * 256 + col) * 4 + 4])
+    assert pixel(.05, .05) == (155, 155, 155, 110)
+    assert pixel(1.05, .05) == (245, 140, 45, 150)
+    assert pixel(-.95, -.95) == (55, 155, 240, 150)
+    assert pixel(2, 2) == (0, 0, 0, 0)
+    # Current floor shift reclassifies retained raw points.
+    shifted = a._render_scan_preview({(0, 0, 0): 1}, rot_y(0, (0, 2, 0)), (0, 0, 0))
+    i = (130 * 256 + 130) * 4
+    assert tuple(shifted[i:i + 4]) == (55, 155, 240, 150)
+
+
+def test_preview_accumulation_throttle_and_overlay_order(monkeypatch, tmp_path):
+    a = load_agent(monkeypatch, tmp_path)
+    rv, calls, matrices = preview_reader()
+    logs = []
+    preview = a._ScanPreview(rv, logs.append)
+    verts = struct.pack('<3f', 0, 0, 1)
+    preview.feed(verts, rot_y(0), now=0)
+    assert calls == [1, 22, 33, 62, 43]
+    assert matrices[0] == pytest.approx([1, 0, 0, 0, 0, 0, 1, .015, 0, -1, 0, 0])
+    preview.feed(verts, rot_y(0), now=1)
+    assert calls.count(62) == 1  # existing cells increment counts, no redraw
+    assert sum(preview.cells.values()) == 2
+    preview.feed(verts, rot_y(0, (1, 0, 0)), now=.5)
+    assert calls.count(62) == 1 and preview.dirty
+    rv.raw_to_standing = lambda: rot_y(0, (2, 0.5, 3))
+    preview.feed(verts, rot_y(0), now=1)
+    assert calls.count(62) == 2
+    assert (matrices[-1][3], matrices[-1][11]) == (2, 3)
+    preview.close()
+    preview.close()
+    assert calls[-1] == 3 and calls.count(3) == 1
+    assert len(logs) == 2 and 'SetOverlayRaw' in logs[0]
+
+
+@pytest.mark.parametrize('slot', [1, 22, 33, 62, 43, 3])
+def test_preview_overlay_errors_disable_without_raising(monkeypatch, tmp_path, slot):
+    a = load_agent(monkeypatch, tmp_path)
+    rv, calls, _ = preview_reader(error_at=slot)
+    logs = []
+    preview = a._ScanPreview(rv, logs.append)
+    preview.feed(struct.pack('<3f', 0, 0, 1), rot_y(0), now=0)
+    preview.close()
+    assert preview.disabled
+    n = len(calls)
+    preview.feed(struct.pack('<3f', 1, 0, 1), rot_y(0), now=2)
+    assert len(calls) == n
+    assert sum('disabled' in line for line in logs) == 1
+    if slot != 1:
+        assert calls.count(3) == 1
+
+
+def test_preview_subsample_and_invalid_depths(monkeypatch, tmp_path):
+    a = load_agent(monkeypatch, tmp_path)
+    rv, _, _ = preview_reader()
+    preview = a._ScanPreview(rv)
+    points = [(float('nan'), 0, 1)] + [(1, 1, 1)] * 15 + [(0, 0, 5)] + [(1, 1, 1)] * 15 + [(0, 0, 1)]
+    preview.feed(b''.join(struct.pack('<3f', *p) for p in points), rot_y(0), now=0)
+    assert preview.cells == {(0, 0, 10): 1}
+    preview.close()
+
+
+def test_capture_preview_switch_reaches_agent(monkeypatch):
+    monkeypatch.setattr(rooms, 'ensure_scanner', lambda frame: None)
+    monkeypatch.setattr(rooms, 'ensure_prompts', lambda frame: None)
+    frame = ScanFrame([{'state': 'done'}])
+    rooms.scan(frame, preview=False)
+    assert frame.calls[0][1]['preview'] is False
