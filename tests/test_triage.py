@@ -647,3 +647,14 @@ def test_missing_quest_foveation_image_is_diagnostic():
     assert "adapter.hide_fb_foveation" not in result.suggestions()
     result = triage(message + "\nFrameBridge: hide_fb_foveation: filtering dispatcher extensions", "EXITED")
     assert "quest-foveation-image-missing" not in {f.id for f in result.findings}
+
+
+def test_swapchain_count_limit_signature():
+    line = ("10-18 12:00:00 I FrameBridge: xrCreateSwapchain 256x128 format=35907 samples=1 array=1 "
+            "faces=1 usage=0x1 flags=0x0 result=-10 handle=0x0")
+    findings = triage(line, "RUNNING").findings
+    finding = next(f for f in findings if f.id == "swapchain-limit-reached")
+    assert finding.suggest == [] and "count limit" in finding.diagnosis
+    for other in (line.replace("result=-10", "result=0"), line.replace("result=-10", "result=-100"),
+                  line.replace("FrameBridge:", "Other:"), "FrameBridge: xrEndFrame result=-10"):
+        assert "swapchain-limit-reached" not in {f.id for f in triage(other, "RUNNING").findings}

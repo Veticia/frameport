@@ -4,6 +4,14 @@ FrameBridge includes automatic metadata retirement for the verified Meta XR Audi
 Wwise build; see [AUDIO_METADATA.md](../docs/AUDIO_METADATA.md) for its lifetime
 invariant and regression coverage. It uses the existing adapter installation.
 
+`adapter/swapchain_pool.c` implements default-off GLES `swapchain_pool` (#387): at eight live app runtime
+swapchains, eligible single-layer colour images use private GL textures packed into up to two lazy 4096² sRGB
+runtime atlases. EndFrame copies each referenced source once and rewrites the final quads (including cylinder
+strips), cylinders and stereo projection views after existing layer fixes. OpenXR image ownership, GL bindings,
+scissor state, source fences, rectangle reuse and session cleanup are covered by `tests/test_swapchain_pool.py`
+(`FRAMEPORT_NATIVE_TESTS=1`, host compiler + cached OpenXR and GLES/EGL headers). Vulkan is unaffected. Host-tested;
+4XVR submenu interaction, visual correctness and copy cost still need a headset check.
+
 Sources of the prebuilt binaries in `../artifacts/` (committed, with `SHA256SUMS`). End users never compile anything;
 developers rebuild with `python native/build.py` (downloads NDK r27c, OpenXR headers at pinned commits, d8 into
 `native/.cache/`, git-ignored). The adapter, GL shim and platform compat rebuild byte-identically; the VrApi bridge

@@ -2,7 +2,7 @@
 
 # Patches
 
-Every patch and game setting FramePort knows: 187 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
+Every patch and game setting FramePort knows: 188 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
 
 Each entry says what the patch does, whether it changes the APK or only the install, when FramePort suggests it, its options, the catalog games whose recipe names it and the launch-test signatures that suggest it. Patches that are on by default are on for every game, so the catalog rarely names them.
 
@@ -12,7 +12,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 
 - [Patches from OVRPort](#group-overport) (25)
 - [Steam Frame patches](#group-frame) (62)
-- [Game settings](#group-adapter) (77)
+- [Game settings](#group-adapter) (78)
 - [Files and settings on the Frame](#group-device) (10)
 - [PC VR (Proton and Revive)](#group-pcvr) (13)
 
@@ -172,6 +172,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Native video surfaces (Batman renderer)](#adapter-surface_native) | `adapter.surface_native` | Game settings | 1 |
 | [Swap eyes](#adapter-swap_eyes) | `adapter.swap_eyes` | Game settings |  |
 | [Retry refused picture formats](#adapter-swapchain_fix) | `adapter.swapchain_fix` | Game settings |  |
+| [Share panel images (swapchain limit)](#adapter-swapchain_pool) | `adapter.swapchain_pool` | Game settings | 1 |
 | [Steady controller input after focus](#adapter-sync_guard) | `adapter.sync_guard` | Game settings | 3 |
 | [Hide Vulkan foveation](#adapter-vk_hide_fdm) | `adapter.vk_hide_fdm` | Game settings | 1 |
 | [Without Steam's shader cache layer](#adapter-vk_no_fossilize) | `adapter.vk_no_fossilize` | Game settings | 1 |
@@ -2298,6 +2299,21 @@ Lets OpenGL ES games start when the Frame refuses their picture format. Leave it
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
 
 > Retry rejected GLES formats/MSAA with sRGB, samples=1.
+
+### <a id="adapter-swapchain_pool"></a>Share panel images (swapchain limit)
+
+Keeps extra menus and panels working when the Frame reaches its image count limit. GLES apps only; Vulkan apps are unaffected.
+
+- `adapter.swapchain_pool`
+- **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
+- **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
+- **Options:**
+  - Value: int, default `0`.
+  - Game settings → Troubleshooting → "Share panel images (swapchain limit)" (advanced).
+- **Catalog games (1):** 4XVR Video Player.
+- **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
+
+> Share GLES panel images in runtime atlases to avoid the Frame's swapchain count limit (about 15 per session). Useful when opening extra menus closes them or leaves panels gray. Vulkan apps are unaffected.
 
 ### <a id="adapter-sync_guard"></a>Steady controller input after focus
 

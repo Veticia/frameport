@@ -132,6 +132,7 @@ static int cube_quads = 1;
 static int cube_standin = 1;  // cube swapchains the runtime refuses: served by the adapter (cube_standin.c)
 static int rect_clamp = 1;
 static int fixed_resolution;
+static int swapchain_pool = 0;
 static int fb_color_space;  // fb_color_space: offer XR_FB_color_space when the runtime lacks it (#336)
 static int action_dedup = 1;  // rename duplicate action names in a set (session_fixes.c; GitHub #323)
 static int pose_consistency = 0;  // repeat xrLocateViews queries for one display time get the same poses (GitHub #8)  // clamp submitted image rects to their swapchain (SteamVR rejects a 1 px overrun)
@@ -210,6 +211,7 @@ static void read_settings(const char *path) {
         if (sscanf(line, "cube_standin=%f", &value) == 1) cube_standin = value != 0;
         if (sscanf(line, "fixed_resolution=%f", &value) == 1) fixed_resolution = value != 0;
         if (sscanf(line, "rect_clamp=%f", &value) == 1) rect_clamp = value != 0;
+        if (sscanf(line, "swapchain_pool=%f", &value) == 1) swapchain_pool = value != 0;
         if (sscanf(line, "fb_color_space=%f", &value) == 1) fb_color_space = value != 0;
         if (sscanf(line, "action_dedup=%f", &value) == 1) action_dedup = value != 0;
         if (sscanf(line, "pose_consistency=%f", &value) == 1) pose_consistency = value != 0;
@@ -557,7 +559,7 @@ static int64_t pick_format(XrSession session, int64_t wanted) {
     return chosen;
 }
 
-// Swapchains the runtime actually created; layers referencing anything else are dropped.
+// Known app swapchains, including pooled images rewritten into runtime atlases before submission.
 static pthread_mutex_t swapchains_lock = PTHREAD_MUTEX_INITIALIZER;
 static XrSwapchain *swapchains;
 static size_t swapchain_count, swapchain_capacity;
@@ -645,6 +647,10 @@ static int clamp_rect(XrRect2Di *r, uint32_t w, uint32_t h) {
 }
 
 static void forget_swapchain(XrSwapchain handle) {
+    pthread_mutex_lock(&sizes_lock);
+    for (int i = 0; i < MAX_SIZES; ++i)
+        if (sizes[i].handle == handle) memset(&sizes[i], 0, sizeof sizes[i]);
+    pthread_mutex_unlock(&sizes_lock);
     pthread_mutex_lock(&swapchains_lock);
     for (size_t i = 0; i < swapchain_count; ++i)
         if (swapchains[i] == handle) { swapchains[i] = swapchains[--swapchain_count]; break; }
@@ -669,6 +675,16 @@ static void standin_destroy(XrSwapchain handle);
 static void cube_outputs_destroy(void);
 static void cube_session_destroy(XrSession session);
 static XrResult standin_enumerate(XrSwapchain handle, uint32_t capacity, uint32_t *count, XrSwapchainImageBaseHeader *images);
+
+static int pool_find(XrSwapchain h);
+static int pool_should_create(XrSession session);
+static void pool_note_runtime(XrSession session, XrSwapchain handle);
+static void pool_forget_runtime(XrSwapchain handle);
+static int pool_create(XrSession session, const XrSwapchainCreateInfo *ci, XrSwapchain *out, int limited);
+static void pool_destroy(int i);
+static void pool_cleanup(XrSession session);
+static XrResult pool_cycle(int i, int op, uint32_t *index);
+static XrResult pool_enumerate(int i, uint32_t cap, uint32_t *count, XrSwapchainImageBaseHeader *images);
 
 static int known_swapchain(XrSwapchain handle) {
     int found = 0;
@@ -757,6 +773,8 @@ XRAPI_ATTR XrResult XRAPI_CALL xrCreateSwapchain(XrSession session, const XrSwap
         snap_on_create(*swapchain, &fixed);
         return XR_SUCCESS;
     }
+    // Start before the session's ~15-slot cap; leave headroom for 360/video outputs and a second atlas.
+    if (pool_should_create(session) && pool_create(session, &fixed, swapchain, 0)) return XR_SUCCESS;
     clear_gl_errors("xrCreateSwapchain");
     XrResult result = fn(session, &fixed, swapchain);
     LOG("xrCreateSwapchain %ux%u format=%lld samples=%u array=%u faces=%u usage=0x%llx flags=0x%llx result=%d handle=%p",
@@ -764,6 +782,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrCreateSwapchain(XrSession session, const XrSwap
         (unsigned long long)fixed.usageFlags, (unsigned long long)fixed.createFlags, result,
         (void *)(uintptr_t)(XR_SUCCEEDED(result) && swapchain ? *swapchain : 0));
     if (XR_SUCCEEDED(result)) {
+        pool_note_runtime(session, *swapchain);
         remember_swapchain(*swapchain);
         note_swapchain_size(*swapchain, fixed.width, fixed.height);
         flip_on_create_swapchain(*swapchain, &fixed);
@@ -771,6 +790,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrCreateSwapchain(XrSession session, const XrSwap
         snap_on_create(*swapchain, &fixed);
         return result;
     }
+    if (result == XR_ERROR_LIMIT_REACHED && pool_create(session, &fixed, swapchain, 1)) return XR_SUCCESS;
     if (!swapchain_fix) return standin_after_failure(session, &fixed, swapchain, result);
 
     // Frame's runtime rejects some GLES formats (GL_RGBA8) and MSAA swapchains (overport #71).
@@ -788,12 +808,14 @@ XRAPI_ATTR XrResult XRAPI_CALL xrCreateSwapchain(XrSession session, const XrSwap
         }
     }
     if (XR_SUCCEEDED(result)) {
+        pool_note_runtime(session, *swapchain);
         remember_swapchain(*swapchain);
         note_swapchain_size(*swapchain, fixed.width, fixed.height);
         flip_on_create_swapchain(*swapchain, &fixed);
         emul_on_create_swapchain(*swapchain, &fixed);
         snap_on_create(*swapchain, &fixed);
     }
+    if (result == XR_ERROR_LIMIT_REACHED && pool_create(session, &fixed, swapchain, 1)) return XR_SUCCESS;
     return standin_after_failure(session, &fixed, swapchain, result);
 }
 
@@ -804,6 +826,9 @@ XRAPI_ATTR XrResult XRAPI_CALL xrDestroySwapchain(XrSwapchain swapchain) {
         static int logged;
         if (logged++ < 200) LOG("layer_debug: xrDestroySwapchain %p", (void *)swapchain);
     }
+    pool_forget_runtime(swapchain);
+    int pooled = pool_find(swapchain);
+    if (pooled >= 0) { pool_destroy(pooled); return XR_SUCCESS; }
     if (is_standin(swapchain)) { standin_destroy(swapchain); return XR_SUCCESS; }
     surf_scene_destroy(swapchain);
     forget_swapchain(swapchain);
@@ -860,7 +885,7 @@ static int cylinder_strips(const XrCompositionLayerCylinderKHR *c, XrComposition
 }
 
 // A layer is usable if every swapchain it references was created successfully.
-// Swapchains the runtime can show: created by it (adapter-served 360 pictures only feed the adapter's own drawing).
+// Runtime images and pooled images (rewritten after layer fixes). Adapter-served 360 pictures only feed its drawing.
 static int runtime_swapchain(XrSwapchain handle) {
     return known_swapchain(handle) && !(equirect_emul && emul_is_virtual(handle));
 }
@@ -1084,6 +1109,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrDestroySpace(XrSpace space) {
 #include "input_diag.c"
 #include "session_fixes.c"
 #include "layer_emul_gl.c"
+#include "swapchain_pool.c"
 #include "cube_standin.c"
 #include "snapshot_gl.c"
 #include "surface_swapchain.c"
@@ -1270,6 +1296,10 @@ XRAPI_ATTR XrResult XRAPI_CALL xrCreateSession(XrInstance instance, const XrSess
         scene_on_create_session(*session);
         session_fixes_on_create_session(*session);
         emul_on_create_session(*session, info);
+        if (swapchain_pool) {
+            for (const XrBaseInStructure *p = info->next; p; p = p->next)
+                if (p->type == XR_TYPE_GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR) pool_session = *session;
+        }
         fade_on_create_session(*session, info);
     }
     return result;
@@ -1338,6 +1368,12 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEnumerateSwapchainImages(XrSwapchain swapchain,
         XrSwapchainImageBaseHeader *images) {
     PFN_xrEnumerateSwapchainImages fn = (PFN_xrEnumerateSwapchainImages)lookup(active_instance, "xrEnumerateSwapchainImages");
     if (!fn) return XR_ERROR_FUNCTION_UNSUPPORTED;
+    int pooled = pool_find(swapchain);
+    if (pooled >= 0) {
+        XrResult r = pool_enumerate(pooled, capacity, count, images);
+        if (XR_SUCCEEDED(r) && capacity && images) emul_on_enumerate(swapchain, 1, images);
+        return r;
+    }
     if (is_standin(swapchain)) return standin_enumerate(swapchain, capacity, count, images);
     XrResult result = equirect_emul && emul_is_virtual(swapchain) ? emul_virtual_enumerate(swapchain, capacity, count, images)
                                                                   : hide_fb_foveation_vulkan ? fb_hide_foveation_images(fn, swapchain, capacity, count, images)
@@ -1354,6 +1390,8 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEnumerateSwapchainImages(XrSwapchain swapchain,
 XRAPI_ATTR XrResult XRAPI_CALL xrWaitSwapchainImage(XrSwapchain swapchain, const XrSwapchainImageWaitInfo *info) {
     PFN_xrWaitSwapchainImage fn = (PFN_xrWaitSwapchainImage)lookup(active_instance, "xrWaitSwapchainImage");
     if (!fn) return XR_ERROR_FUNCTION_UNSUPPORTED;
+    int pooled = pool_find(swapchain);
+    if (pooled >= 0) return pool_cycle(pooled, 1, NULL);
     if (is_standin(swapchain)) return XR_SUCCESS;
     XrResult result = fn(swapchain, info);
     __atomic_add_fetch(&sc_waits, 1, __ATOMIC_RELAXED);
@@ -1364,6 +1402,8 @@ XRAPI_ATTR XrResult XRAPI_CALL xrWaitSwapchainImage(XrSwapchain swapchain, const
 XRAPI_ATTR XrResult XRAPI_CALL xrReleaseSwapchainImage(XrSwapchain swapchain, const XrSwapchainImageReleaseInfo *info) {
     PFN_xrReleaseSwapchainImage fn = (PFN_xrReleaseSwapchainImage)lookup(active_instance, "xrReleaseSwapchainImage");
     if (!fn) return XR_ERROR_FUNCTION_UNSUPPORTED;
+    int pooled = pool_find(swapchain);
+    if (pooled >= 0) return pool_cycle(pooled, 2, NULL);
     if (is_standin(swapchain)) return XR_SUCCESS;
     __atomic_add_fetch(&sc_releases, 1, __ATOMIC_RELAXED);
     return fn(swapchain, info);
@@ -1373,6 +1413,12 @@ XRAPI_ATTR XrResult XRAPI_CALL xrAcquireSwapchainImage(XrSwapchain swapchain, co
         uint32_t *index) {
     PFN_xrAcquireSwapchainImage fn = (PFN_xrAcquireSwapchainImage)lookup(active_instance, "xrAcquireSwapchainImage");
     if (!fn) return XR_ERROR_FUNCTION_UNSUPPORTED;
+    int pooled = pool_find(swapchain);
+    if (pooled >= 0) {
+        XrResult r = pool_cycle(pooled, 0, index);
+        if (XR_SUCCEEDED(r)) emul_on_acquire(swapchain, *index);
+        return r;
+    }
     if (is_standin(swapchain)) {  // adapter-served cube stand-in: one image
         if (!index) return XR_ERROR_VALIDATION_FAILURE;
         *index = 0;
@@ -1401,7 +1447,8 @@ static XRAPI_ATTR XrResult XRAPI_CALL surf_composite_release(XrSwapchain handle,
     tracked_swapchain *t=find_tracked(handle,0);
     if(t && t->acquired_count && t->waited_count)surf_scene_capture(t,t->acquired[0]);
     pthread_mutex_unlock(&flip_lock);
-    XrResult result=equirect_emul?hook_xrReleaseSwapchainImage(handle,info):
+    XrResult result=pool_find(handle)>=0 && !equirect_emul ? xrReleaseSwapchainImage(handle,info) :
+        equirect_emul?hook_xrReleaseSwapchainImage(handle,info):
         ((PFN_xrReleaseSwapchainImage)lookup(active_instance,"xrReleaseSwapchainImage"))(handle,info);
     if(XR_SUCCEEDED(result)) {
         surf_scene_release_commit(handle);
@@ -1415,7 +1462,8 @@ static XRAPI_ATTR XrResult XRAPI_CALL surf_composite_release(XrSwapchain handle,
     return result;
 }
 static XRAPI_ATTR XrResult XRAPI_CALL surf_composite_wait(XrSwapchain handle,const XrSwapchainImageWaitInfo *info) {
-    XrResult result=equirect_emul?hook_xrWaitSwapchainImage(handle,info):
+    XrResult result=pool_find(handle)>=0 && !equirect_emul ? xrWaitSwapchainImage(handle,info) :
+        equirect_emul?hook_xrWaitSwapchainImage(handle,info):
         ((PFN_xrWaitSwapchainImage)lookup(active_instance,"xrWaitSwapchainImage"))(handle,info);
     if(result==XR_SUCCESS) {
         pthread_mutex_lock(&flip_lock);tracked_swapchain *t=find_tracked(handle,0);
@@ -1729,7 +1777,8 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEndFrame(XrSession session, const XrFrameEndInf
             frames = 0; drift_sum = drift_max = 0;
         }
     }
-    if ((!cube_standin && !layer_fix && !swap_eyes && !emulate_passthrough && !flip_quads && !flip_emul && !strip_depth && !fade_quad) || !info || !info->layerCount ||
+    if (swapchain_pool && info && info->layerCount > 64) return XR_ERROR_LAYER_LIMIT_EXCEEDED;
+    if ((!swapchain_pool && !cube_standin && !layer_fix && !swap_eyes && !emulate_passthrough && !flip_quads && !flip_emul && !strip_depth && !fade_quad) || !info || !info->layerCount ||
         info->layerCount > 64)
         return fn(session, info);
     if (layer_debug) {  // the submitted layer list (order, flags, eyes, chained structs) whenever its shape changes
@@ -2083,6 +2132,11 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEndFrame(XrSession session, const XrFrameEndInf
         const XrCompositionLayerBaseHeader *fade_l = level ? fade_layer(session, level, count, &fade_out) : NULL;
         if (fade_l) { kept[count++] = fade_l; faded = 1; ++swapped; }
     }
+    PoolFrame pool_frame;
+    if (swapchain_pool && session == pool_session) {
+        count = pool_rewrite_layers(kept, count, &pool_frame);
+        ++swapped;
+    }
     XrFrameEndInfo fixed = *info;
     fixed.layers = kept;
     fixed.layerCount = count;
@@ -2391,6 +2445,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrGetInstanceProcAddr(XrInstance instance, const 
         HOOK_AS(xrReleaseSwapchainImage, surf_composite_release)
         HOOK_AS(xrWaitSwapchainImage, surf_composite_wait)
     }
+    if (swapchain_pool) { HOOK_AS(xrDestroySession, hook_xrDestroySession) }
     if (cube_standin) {
         HOOK_AS(xrEndSession, cube_end_session)
         HOOK_AS(xrDestroySession, hook_xrDestroySession)
@@ -2409,7 +2464,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrGetInstanceProcAddr(XrInstance instance, const 
     if (instance != XR_NULL_HANDLE) HOOK_AS(xrGetDisplayRefreshRateFB, hook_get_refresh_rate)
     if (surface_emul) HOOK_AS(xrCreateSwapchainAndroidSurfaceKHR, hook_xrCreateSwapchainAndroidSurfaceKHR)
     if (eye_debug || release_wait) HOOK_AS(xrReleaseSwapchainImage, eye_hook_xrReleaseSwapchainImage)
-    if (layer_debug || cube_standin) {  // counters + cube stand-ins; every other wait/release hook above takes precedence
+    if (swapchain_pool || layer_debug || cube_standin) {  // pooled images, counters + cube stand-ins; every other wait/release hook above takes precedence
         HOOK(xrWaitSwapchainImage)
         HOOK(xrReleaseSwapchainImage)
     }

@@ -19,6 +19,11 @@ signatures:
     severity: warning
     diagnosis: A Khronos loader loaded the system runtime without FrameBridge. A statically linked loader may bypass the bundled loader chain; analyze again, enable the embedded OpenXR loader patch when detected, then rebuild and reinstall to write its per-game manifest.
     suggest: [frame.static_openxr_loader]
+  - id: swapchain-limit-reached
+    pattern: 'FrameBridge:\s+xrCreateSwapchain [^\r\n]*\bresult=-10\b'
+    severity: error
+    diagnosis: The Frame runtime reached its swapchain count limit (about 15 live swapchains per session), not necessarily a memory limit. Extra menus or video panels may close or stay gray. Updated FramePort builds provide Share panel images (swapchain limit) for GLES apps; Vulkan apps are unaffected.
+    suggest: []
   - id: quest2-headset-identity
     pattern: 'venderId[^\r\n]*systemName Oculus Quest2'
     severity: info

@@ -304,6 +304,7 @@ static void emul_on_destroy_swapchain(XrSwapchain handle) {
 static XRAPI_ATTR XrResult XRAPI_CALL hook_xrReleaseSwapchainImage(XrSwapchain swapchain, const XrSwapchainImageReleaseInfo *info) {
     PFN_xrReleaseSwapchainImage fn = (PFN_xrReleaseSwapchainImage)lookup(active_instance, "xrReleaseSwapchainImage");
     if (!fn) return XR_ERROR_FUNCTION_UNSUPPORTED;
+    int pooled = pool_find(swapchain);
     if (is_standin(swapchain)) return XR_SUCCESS;
     pthread_mutex_lock(&emul_lock);
     emul_source *s = emul_active() ? emul_find_source(swapchain, 0) : NULL;
@@ -314,7 +315,8 @@ static XRAPI_ATTR XrResult XRAPI_CALL hook_xrReleaseSwapchainImage(XrSwapchain s
         if (fence) p_glFlush();
     }
     pthread_mutex_unlock(&emul_lock);
-    XrResult result = emul_is_virtual(swapchain) ? XR_SUCCESS : fn(swapchain, info);
+    XrResult result = pooled >= 0 ? pool_cycle(pooled, 2, NULL) :
+                      emul_is_virtual(swapchain) ? XR_SUCCESS : fn(swapchain, info);
     pthread_mutex_lock(&emul_lock);
     s = emul_active() ? emul_find_source(swapchain, 0) : NULL;
     if (s && XR_SUCCEEDED(result) && s->acquired_count) {
@@ -336,8 +338,10 @@ static XRAPI_ATTR XrResult XRAPI_CALL hook_xrReleaseSwapchainImage(XrSwapchain s
 static XRAPI_ATTR XrResult XRAPI_CALL hook_xrWaitSwapchainImage(XrSwapchain swapchain, const XrSwapchainImageWaitInfo *info) {
     PFN_xrWaitSwapchainImage fn = (PFN_xrWaitSwapchainImage)lookup(active_instance, "xrWaitSwapchainImage");
     if (!fn) return XR_ERROR_FUNCTION_UNSUPPORTED;
+    int pooled = pool_find(swapchain);
     if (is_standin(swapchain)) return XR_SUCCESS;
-    XrResult result = emul_is_virtual(swapchain) ? XR_SUCCESS : fn(swapchain, info);
+    XrResult result = pooled >= 0 ? pool_cycle(pooled, 1, NULL) :
+                      emul_is_virtual(swapchain) ? XR_SUCCESS : fn(swapchain, info);
     pthread_mutex_lock(&emul_lock);
     emul_source *s = emul_active() ? emul_find_source(swapchain, 0) : NULL;
     if (s && s->reading >= 0 && s->reading == s->last_acquired) {
@@ -1005,6 +1009,7 @@ static void emul_on_destroy_session(XrSession session) {
 static XRAPI_ATTR XrResult XRAPI_CALL hook_xrDestroySession(XrSession session) {
     cube_session_destroy(session);
     emul_on_destroy_session(session);
+    pool_cleanup(session);
     PFN_xrDestroySession fn = (PFN_xrDestroySession)lookup(active_instance, "xrDestroySession");
     return fn ? fn(session) : XR_ERROR_FUNCTION_UNSUPPORTED;
 }

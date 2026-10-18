@@ -146,9 +146,21 @@ pose (images drawn only after head turns, or ahead from xrWaitFrame and sometime
 lists its own `/sdcard/4XPlayer`, not Movies: agent v25 `link_media` hard-links sent files into an app's own top-level
 folder (`app_media_dirs`), `frameport frame send --app <pkg>`, GUI game page "Add videos" (players) / "Add videos &
 files…". A 4XVR webm stereo swapchain was refused with XR_ERROR_LIMIT_REACHED (-10) → right eye grey; our projection
-swapchain was halved (1536/eye) in case memory is the limit (unverified). Frame data snapshot
+swapchain was originally halved (1536/eye) while investigating memory. Issue #387 below confirms a swapchain
+count cap; reducing image sizes does not avoid it. Frame data snapshot
 (SteamVR runtimes, Lepton scripts, logs; never commit Valve binaries): `~/frameport-research/frame-data-2026-09-30/`.
 Not yet verified in the headset.
+
+
+**Issue #387 (2026-10-18, host-tested only):** 4XVR's extra sub-panels hit the session cap at roughly 15–16 live
+swapchains: the same 256×128 create succeeds then fails in the same millisecond, so shrinking images is not a fix.
+Default-off GLES `swapchain_pool` (catalog enabled for 4XVR) starts at eight live app runtime swapchains, reserving runtime
+headroom for up to two 4096² SRGB atlases. Single-face/layer/sample/mip colour images use private app-context textures;
+submitted panels are blitted into packed atlas rectangles after cylinder strips and rect_clamp. Destroy frees rectangles.
+Vulkan is untouched. No adapter revision bump: this opt-in fix should not mark every installed game for update.
+The new catalog key already makes older apps reject the recipe via `unusable_reason`; triage suggests no unknown setting.
+Headset check: repeatedly open/close all 4XVR submenus while playing stereo and 360 video, verify both eyes, panel crops,
+curved strips, alpha and frame pacing; confirm no new -10 errors or menu closures and reuse after closing panels.
 
 
 ## Companion apps / intents (Stremio + 4XVR)
