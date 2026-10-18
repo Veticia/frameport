@@ -1325,7 +1325,7 @@ Repairs shaders that hang the graphics chip at certain effects, from the game's 
 - **Catalog games (2):** Star Wars: Tales from the Galaxy's Edge, Vader Immortal: Episode I.
 - **Source:** [patches/frame/zink_shader_fix.py](../src/frameport/patches/frame/zink_shader_fix.py)
 
-> Loads FramePort's shader-fix Vulkan layer into an OpenGL ES game. On the Frame, OpenGL ES runs on Zink (Mesa's GL on Vulkan); the layer sits between Zink and the driver and inserts the words of the adapter setting zink_shader_fix into the SPIR-V modules whose size and SHA-256 match (every other module is untouched), for example stores that set loop counters and accumulators a shader reads before writing, which hang the GPU (Vader Immortal's lightspeed jump; found by Klownicle, GitHub #49). Does nothing without zink_shader_fix (or zink_shader_dump) in the recipe. The layer adds itself to Android's Vulkan debug layer list for the game's process only.
+> Loads FramePort's shader-fix Vulkan layer into an OpenGL ES game. On the Frame, OpenGL ES runs on Zink (Mesa's GL on Vulkan); the layer sits between Zink and the driver and inserts the words of the adapter setting zink_shader_fix into the SPIR-V modules whose size and SHA-256 match (every other module is untouched), for example stores that set loop counters and accumulators a shader reads before writing, which hang the GPU (Vader Immortal's lightspeed jump; found by Klownicle, GitHub #49). Does nothing without zink_shader_fix (or zink_shader_dump) in the recipe, and either setting brings it in by itself. The layer adds itself to Android's Vulkan debug layer list for the game's process only.
 
 ## <a id="group-adapter"></a>Game settings
 

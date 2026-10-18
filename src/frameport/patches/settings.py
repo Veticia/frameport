@@ -647,8 +647,8 @@ class AdapterSetting(Patch):
             "vk_pipeline_fallback": lambda a: a.engine in ("Unreal", "Other") and "arm64-v8a" in a.abis,
             # wherever the Vulkan shim can be (vk_sanitize); Unreal's Vulkan builds are rarely detected as such
             "vk_shader_dump": lambda a: a.engine in ("Unreal", "Other") and "arm64-v8a" in a.abis,
-            "zink_shader_fix": ap.is_gles,
-            "zink_shader_dump": ap.is_gles,
+            "zink_shader_fix": ap.may_be_gles,
+            "zink_shader_dump": ap.may_be_gles,
             "haptic_fix": lambda a: "libOVRPlugin.so" in a.libs,
             "surface_native": lambda a: "arm64-v8a" in a.abis,  # the xrshim it needs is arm64 only (also above)
             "pose_time_fix": lambda a: "libOVRPlugin.so" in a.libs,
