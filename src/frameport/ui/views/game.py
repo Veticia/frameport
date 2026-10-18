@@ -796,6 +796,14 @@ class GameView:
                 app.open_game(package, advanced=True, show_all=self.show_all)  # the switch shows it's on now
             return handler
 
+        def set_flag(pid, key):
+            def handler(e):
+                r = state["recipe"]
+                r.patches.setdefault(pid, {})[key] = bool(e.control.value)
+                r.reasons[pid] = r.reasons.get(pid) or tr("Set by you.")
+                save(r)
+            return handler
+
         sections = []
         for cat in ("pcvr", "frame", "overport", "adapter", "device"):
             if cat == "adapter":  # one row: the settings themselves are in the Game settings dialog (plain words)
@@ -855,7 +863,15 @@ class GameView:
                     ], spacing=T.S3), padding=ft.Padding(T.S4, T.px(10), T.S4, T.px(10)), border=ft.Border(
                         top=ft.BorderSide(1, T.BORDER))))
                     continue
-                if not technical:
+                flags = any(q.kind == "bool" for q in p.params)
+                if on and flags:  # a patch's own options (e.g. the gamepad's button layout), under it while it's on
+                    params = recipe.params(p.id)
+                    for q in p.params:
+                        sub.append(C.switch(tr(q.help), value=bool(params.get(q.key, q.default)),
+                                            on_change=set_flag(p.id, q.key)) if q.kind == "bool" else
+                                   C.field(value=str(params.get(q.key, q.default) or ""), hint_text=tr(q.help),
+                                           on_blur=set_param(p.id, q.key)))
+                if not technical or flags:
                     pass
                 elif cat == "adapter":
                     val = recipe.params(p.id).get("value", p.params[0].default)

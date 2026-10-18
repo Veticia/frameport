@@ -824,10 +824,21 @@ class SteamGamepad(Patch):
                    "tells SDL games to use it (SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD). Steam Input must be "
                    "on for the game's shortcut; the controllers must be on when the game starts (a pad Steam makes "
                    "later isn't seen until the next start). The APK isn't changed. Off for one start: "
-                   "FRAMEPORT_NO_GAMEPAD=1 in the game's launch options.")
+                   "FRAMEPORT_NO_GAMEPAD=1 in the game's launch options. Steam Input's own per-game remapping may "
+                   "not reach the app (GitHub #162); the options below change the buttons inside the app instead "
+                   "(applied with Update on Frame).")
     category = "device"
     needs_vr = False
     stage = "install"  # the agent reads it from the recipe at finalize (deployment.json steam_gamepad)
+    params = [
+        Param("swap_sticks", "bool", False, "Swap the sticks: the right stick moves through menus like the left one "
+                                            "(for using one controller)"),
+        Param("swap_ab", "bool", False, "Swap A and B"),
+        Param("keys", "str", "", "Own key layout lines (Android .kl), separated by ';', e.g. 'key 304 DPAD_DOWN' "
+                                 "(A presses D-pad down) or 'key 305 BACK'"),
+    ]
+    KL_LINE = re.compile(r"(key [0-9]{1,4} [A-Z][A-Z0-9_]{0,40}( (FUNCTION|WAKE))?"
+                         r"|axis 0x[0-9a-f]{1,2} (invert )?[A-Z][A-Z0-9_]{0,40}( flat [0-9]{1,5})?)")
 
     def applies(self, a):
         return a.vr_kind == "none"
@@ -839,7 +850,17 @@ class SteamGamepad(Patch):
         return None
 
     def install(self, ctx: InstallContext) -> None:
-        pass  # the launcher line (agent: GAMEPAD_LINE) exports SDL's hint and puts the Podman wrapper on PATH
+        # the launcher line (agent: GAMEPAD_LINE) exports SDL's hint and puts the Podman wrapper on PATH; the wrapper
+        # builds the app's key layout from these (agent: gamepad_kl)
+        layout = ",".join(k for k in ("swap_sticks", "swap_ab") if ctx.params.get(k))
+        lines = [" ".join(ln.split()) for ln in str(ctx.params.get("keys") or "").split(";") if ln.strip()]
+        bad = [ln for ln in lines if not self.KL_LINE.fullmatch(ln)]
+        if bad:
+            raise ValueError(f"Not a key layout line: {bad[0]!r} (for example 'key 304 DPAD_DOWN')")
+        if layout:
+            ctx.env["FRAMEPORT_GAMEPAD_LAYOUT"] = layout
+        if lines:
+            ctx.env["FRAMEPORT_GAMEPAD_KEYS"] = "; ".join(lines)
 
 
 def foveation_options(params):

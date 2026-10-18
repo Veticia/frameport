@@ -2602,9 +2602,13 @@ Lets the game use your controllers as a gamepad instead of a pointer, for 2D gam
 - `device.steam_gamepad` · also for 2D apps
 - **Changes:** Install only: written on the Frame when the game is installed; the APK isn't changed.
 - **Suggested (on):** 2D app that declares gamepad support (android.hardware.gamepad or Android TV's launcher): pass the controllers to it as a gamepad.
+- **Options:**
+  - `swap_sticks`: bool, default `False` — Swap the sticks: the right stick moves through menus like the left one (for using one controller)
+  - `swap_ab`: bool, default `False` — Swap A and B
+  - `keys`: str, default empty — Own key layout lines (Android .kl), separated by ';', e.g. 'key 304 DPAD_DOWN' (A presses D-pad down) or 'key 305 BACK'
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
 
-> Lepton's Android only gets a keyboard, a pointer and touch from the Frame, so a 2D game never sees a controller (the controllers only move the pointer; SDL games show their touch controls). This passes Steam Input's virtual gamepad ("Microsoft X-Box 360 pad", made by Steam for the Frame's controllers and paired Bluetooth pads) into this app's container with an Xbox 360 key layout, and tells SDL games to use it (SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD). Steam Input must be on for the game's shortcut; the controllers must be on when the game starts (a pad Steam makes later isn't seen until the next start). The APK isn't changed. Off for one start: FRAMEPORT_NO_GAMEPAD=1 in the game's launch options.
+> Lepton's Android only gets a keyboard, a pointer and touch from the Frame, so a 2D game never sees a controller (the controllers only move the pointer; SDL games show their touch controls). This passes Steam Input's virtual gamepad ("Microsoft X-Box 360 pad", made by Steam for the Frame's controllers and paired Bluetooth pads) into this app's container with an Xbox 360 key layout, and tells SDL games to use it (SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD). Steam Input must be on for the game's shortcut; the controllers must be on when the game starts (a pad Steam makes later isn't seen until the next start). The APK isn't changed. Off for one start: FRAMEPORT_NO_GAMEPAD=1 in the game's launch options. Steam Input's own per-game remapping may not reach the app (GitHub #162); the options below change the buttons inside the app instead (applied with Update on Frame).
 
 ### <a id="device-text_input_window"></a>Show the app's Android window (for typing)
 
