@@ -46,7 +46,7 @@ try:
 except ImportError:  # Windows: pc_revive loads this file for its VDF code only (GitHub #131)
     fcntl = None
 
-AGENT_VERSION = 102
+AGENT_VERSION = 103
 HOME = os.path.expanduser("~")
 STEAM = os.path.join(HOME, ".local/share/Steam")
 ANCHORS = os.path.join(HOME, "Applications/quest-frame")
@@ -3634,6 +3634,38 @@ axis 0x10 HAT_X
 axis 0x11 HAT_Y
 """
 BTN_SOUTH = 0x130  # BTN_A / BTN_GAMEPAD: Linux's gamepad button range starts here
+# A game's own button layout (device.steam_gamepad's options, GitHub #162: Steam Input's per-game remapping doesn't
+# reach a 2D app): its launcher exports FRAMEPORT_GAMEPAD_LAYOUT (comma list: swap_sticks = the right stick is
+# Android's main stick, which Android's own D-pad navigation follows; swap_ab) and FRAMEPORT_GAMEPAD_KEYS (Android .kl
+# lines separated by ';', each replacing the line for the same key code or axis), read by podman_run_args.
+KL_LINE = re.compile(r"(key [0-9]{1,4} [A-Z][A-Z0-9_]{0,40}( (FUNCTION|WAKE))?"
+                     r"|axis 0x[0-9a-f]{1,2} (invert )?[A-Z][A-Z0-9_]{0,40}( flat [0-9]{1,5})?)")
+
+
+def gamepad_kl(layout="", keys=""):
+    """GAMEPAD_KL with a game's layout options and own lines (invalid ones left out); the text and what was left out."""
+    lines = {}
+    for line in GAMEPAD_KL.splitlines()[1:]:
+        kind, code = line.split()[:2]
+        lines[(kind, code if kind == "axis" else str(int(code)))] = line
+    opts = {o.strip() for o in (layout or "").split(",") if o.strip()}
+    if "swap_sticks" in opts:
+        lines[("axis", "0x00")], lines[("axis", "0x03")] = "axis 0x00 Z flat 4096", "axis 0x03 X flat 4096"
+        lines[("axis", "0x01")], lines[("axis", "0x04")] = "axis 0x01 RZ flat 4096", "axis 0x04 Y flat 4096"
+    if "swap_ab" in opts:
+        lines[("key", "304")], lines[("key", "305")] = "key 304   BUTTON_B", "key 305   BUTTON_A"
+    skipped = []
+    for line in (keys or "").split(";"):
+        line = " ".join(line.split())
+        if not line:
+            continue
+        if not KL_LINE.fullmatch(line):
+            skipped.append(line)
+            continue
+        kind, code = line.split()[:2]
+        lines[(kind, code if kind == "axis" else str(int(code)))] = line
+    head = GAMEPAD_KL.splitlines()[0] + (f" Options: {layout or '-'}; own lines: {keys}" if opts or keys else "")
+    return "\n".join([head, *lines.values()]) + "\n", skipped
 
 
 def has_key_bit(caps, code):
@@ -3706,7 +3738,13 @@ def podman_run_args(args, env, sys_root="/sys", dev_root="/dev"):
     extra = []
     if PAD_DIR not in taken:
         extra += ["--mount", f"type=bind,source={os.path.join(dev_root, 'input')},destination={PAD_DIR},rw"]
-    layout = gamepad_layout_file() if extra else ""
+    text, skipped = gamepad_kl(env.get("FRAMEPORT_GAMEPAD_LAYOUT", ""), env.get("FRAMEPORT_GAMEPAD_KEYS", ""))
+    layout = gamepad_layout_file(text) if extra else ""
+    if skipped:
+        print(f"FramePort gamepad: key layout lines left out (not .kl syntax): {'; '.join(skipped)}", file=sys.stderr)
+    if text != GAMEPAD_KL:
+        print(f"FramePort gamepad: own button layout ({env.get('FRAMEPORT_GAMEPAD_LAYOUT') or '-'}"
+              f"{'; ' + env['FRAMEPORT_GAMEPAD_KEYS'] if env.get('FRAMEPORT_GAMEPAD_KEYS') else ''})", file=sys.stderr)
     for product in sorted({"11ff", *(p["product"] for p in pads)}):  # 11ff: Steam's pad, also when it comes later
         target = f"/system/usr/keylayout/Vendor_28de_Product_{product}.kl"
         if layout and target not in taken and re.fullmatch(r"[0-9a-f]{4}", product):
@@ -3754,18 +3792,21 @@ def gamepad_links(appid, parent, poll=1.0, refresh=15.0, exec_=None, pads=steam_
         time.sleep(poll)
 
 
-def gamepad_layout_file():
-    path = os.path.join(os.path.dirname(PODMAN_BIN), "steam-gamepad.kl")
+def gamepad_layout_file(text=GAMEPAD_KL):
+    """The key layout file for `text`: steam-gamepad.kl, or one per distinct own layout (steam-gamepad-<hash>.kl)."""
+    name = "steam-gamepad.kl" if text == GAMEPAD_KL else \
+        f"steam-gamepad-{hashlib.sha256(text.encode()).hexdigest()[:12]}.kl"
+    path = os.path.join(os.path.dirname(PODMAN_BIN), name)
     try:
         with open(path) as f:
-            if f.read() == GAMEPAD_KL:
+            if f.read() == text:
                 return path
     except OSError:
         pass
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = f"{path}.{os.getpid()}.tmp"
     with open(tmp, "w") as f:
-        f.write(GAMEPAD_KL)
+        f.write(text)
     os.replace(tmp, path)
     return path
 
@@ -6882,6 +6923,15 @@ def cmd_collect_diag(args):
         for i, part in enumerate(game_logs(base)):
             files[f"game-log-{i}.txt"] = part[-max_bytes:]
     logs = os.path.join(STEAM, "logs")
+    if dep.get("steam_gamepad"):  # which controller layout Steam activated, and the pads the container got (#162)
+        text = _tail(os.path.join(base, "gamepad.log"), max_bytes)
+        if text is not None:
+            files["gamepad.log"] = text
+        text = _tail(os.path.join(logs, "controller.txt"), 4 * max_bytes)
+        if text:
+            keep = [ln for ln in text.splitlines() if re.search(
+                r"Queueing activation|warmed config|Opted-in Controller|Loaded Config|virtual gamepad|xinput slot", ln)]
+            files["steam-controller.txt"] = "\n".join(keep[-400:]) + "\n"
     text = _tail(os.path.join(logs, f"lepton-steamlaunch-{appid}.log"), max_bytes)  # Lepton's launcher log
     if text is not None:
         files[f"lepton-steamlaunch-{appid}.log"] = text
