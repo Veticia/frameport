@@ -789,6 +789,15 @@ capture/build flow saves and copies the new room before an `ok` result; errors, 
 `failed`. Captures share a global lock, stale protocol files are cleared on launch, and the watcher stops with the
 launcher. Logs: `<base>/scan-watch.log`. Device validation is still required.
 
+PR #246 (@alicecatpaw, merged into mr-scene 2026-10-18): FrameBridge trims frames to maxLayerCount (Punch Fit sent
+21+ layers; projection layers and FrameBridge's fade quad always stay), drops quads with zero size or an empty image
+rect, and logs up to 10 quads with pose and swapchain. Two Unity patches, both only from a catalog recipe or the
+user's choice: `frame.meta_depth_occlusion` (Depth API occlusion off; Laser Dance's lasers vanished up close) and
+`frame.unity_scene_active_rooms` (OVRSceneManager's player-in-room check). The PR's own META discovery and boundary
+visibility code was replaced by this branch's (`scene_meta.c`). The PR's recipes were checked on the author's Frame
+only; open question: does OVRPort's dispatcher advertise XR_META_environment_depth (then a FrameBridge setting that
+hides it would fix depth occlusion for every engine).
+
 ## Vulkan pipelines refused: Fossilize and Turnip (Transformers, #349)
 
 Transformers Beyond Reality: Redux (Unreal, Vulkan) ended its first frames with Unreal's "Shader compilation failures
