@@ -11,6 +11,7 @@ from .core.events import Reporter
 from .core.models import Analysis, BuildResult, Recipe, SourceGame
 from .core.paths import work_dir
 from .patches import base, upstream
+from .patches.frame import zink_shader_fix
 from .patches.overport import OVERPORT_PATCHES
 from .tools import overport as overport_tool
 from .validate.static import check_apk
@@ -54,6 +55,9 @@ def apk_patches(selection: dict) -> list[base.Patch]:
     if "frame.adapter" in selection and "device.foveation" not in selection:
         # Prepare verified game-specific support independently of the player's runtime preference.
         patches.append(base.get("device.foveation"))
+    if zink_shader_fix.configured(selection) and "frame.zink_shader_fix" not in selection:
+        # the shader dump / fix settings only work through this layer (GitHub #382: the switch alone did nothing)
+        patches.append(base.get("frame.zink_shader_fix"))
     return sorted(patches, key=lambda p: p.order)
 
 

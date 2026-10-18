@@ -10,6 +10,7 @@ are set hang the GPU) by Klownicle, GitHub #49."""
 from __future__ import annotations
 
 from ...analysis import elf
+from .. import applicability as ap
 from ..base import ApkContext, Patch, register
 from . import artifact
 
@@ -48,12 +49,13 @@ class ZinkShaderFix(Patch):
                    "the adapter setting zink_shader_fix into the SPIR-V modules whose size and SHA-256 match (every "
                    "other module is untouched), for example stores that set loop counters and accumulators a shader "
                    "reads before writing, which hang the GPU (Vader Immortal's lightspeed jump; found by Klownicle, "
-                   "GitHub #49). Does nothing without zink_shader_fix (or zink_shader_dump) in the recipe. The layer "
+                   "GitHub #49). Does nothing without zink_shader_fix (or zink_shader_dump) in the recipe, and either "
+                   "setting brings it in by itself. The layer "
                    "adds itself to Android's Vulkan debug layer list for the game's process only.")
     order = 73
 
     def applies(self, a):
-        return "GLES" in a.graphics and "arm64-v8a" in a.abis
+        return ap.may_be_gles(a) and "arm64-v8a" in a.abis
 
     def apply(self, ctx: ApkContext) -> bool:
         ws = ctx.ws

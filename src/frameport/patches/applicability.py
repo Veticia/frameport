@@ -20,6 +20,12 @@ def is_gles(a: Analysis) -> bool:
     return "GLES" in a.graphics
 
 
+def may_be_gles(a: Analysis) -> bool:
+    """GLES, or Unity whose boot.config merely mentions Vulkan: many such builds render with OpenGL ES (SynthRiders,
+    I Am Cat; GitHub #382), so GLES-only diagnostics and fixes stay offered."""
+    return is_gles(a) or a.graphics == "Vulkan (Unity boot.config)"
+
+
 def is_vulkan(a: Analysis) -> bool:
     return a.graphics.startswith("Vulkan")
 
