@@ -109,64 +109,18 @@ def test_patch_shader_proximity_fade_ignores_unknown_build_and_unrelated_shader(
     assert res is None and subs == 0
 
 
-def test_migration_meta_depth_occlusion_deferred_and_applied_after_reanalysis(tmp_path):
-    from frameport.core import library
-    from frameport.pipeline import _store_analysis
+def test_reanalysis_keeps_user_recipes_without_the_patch(tmp_path):
+    """Catalog-only patch: a re-analysis that finds the keywords doesn't change a recipe the user edited."""
     from test_patches import _analysis
 
-    fake_apk = tmp_path / "game.apk"
-    fake_apk.write_bytes(b"PK\x03\x04")
+    from frameport.core import library
+    from frameport.pipeline import _store_analysis
 
-    # Entry whose analysis predates the meta_depth_occlusion field
-    data = {
-        "settings": {"migrations": []},
-        "games": {
-            "com.test.mrgame": {
-                "package": "com.test.mrgame",
-                "apk": str(fake_apk),
-                "analysis": {
-                    "package": "com.test.mrgame",
-                    "engine": "Unity",
-                    "extra": {"analysis_version": 13},  # predates meta_depth_occlusion
-                },
-                "recipe": {
-                    "package": "com.test.mrgame",
-                    "source": "user",
-                    "patches": {},
-                    "reasons": {},
-                },
-            }
-        },
-    }
-
-    # First migration run: deferred because analysis predates field and game has an APK
-    library._migrate(data)
-    assert "meta_depth_occlusion" not in data["settings"]["migrations"]
-    assert "frame.meta_depth_occlusion" not in data["games"]["com.test.mrgame"]["recipe"]["patches"]
-
-    # Save to library to test _store_analysis with user recipe
-    library.upsert_game(
-        "com.test.mrgame",
-        apk=str(fake_apk),
-        recipe={"package": "com.test.mrgame", "source": "user", "patches": {}, "reasons": {}},
-        analysis={"package": "com.test.mrgame", "engine": "Unity", "extra": {"analysis_version": 13}},
-    )
-
-    new_a = _analysis(
-        package="com.test.mrgame",
-        engine="Unity",
-        graphics="Vulkan",
-        extra={"analysis_version": 23, "meta_depth_occlusion": True},
-    )
-
-    _store_analysis("com.test.mrgame", new_a)
-    stored = library.game("com.test.mrgame")
-    assert "frame.meta_depth_occlusion" in stored["recipe"]["patches"]
-
-    # Now that the game's analysis includes meta_depth_occlusion, migration completes and marks done
-    data["games"]["com.test.mrgame"] = stored
-    library._migrate(data)
-    assert "meta_depth_occlusion" in data["settings"]["migrations"]
-
-
-
+    apk = tmp_path / "game.apk"
+    apk.write_bytes(b"PK\x03\x04")
+    recipe = {"package": "com.test.mrgame", "source": "user", "patches": {}, "reasons": {}}
+    library.upsert_game("com.test.mrgame", apk=str(apk), recipe=recipe,
+                        analysis={"package": "com.test.mrgame", "engine": "Unity", "extra": {}})
+    _store_analysis("com.test.mrgame", _analysis(package="com.test.mrgame", engine="Unity",
+                                                 extra={"meta_depth_occlusion": True}))
+    assert "frame.meta_depth_occlusion" not in library.game("com.test.mrgame")["recipe"]["patches"]
