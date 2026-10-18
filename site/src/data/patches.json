@@ -549,6 +549,11 @@
   "title": "Start the game in the app's main process",
   "group": "Steam Frame patches"
  },
+ "frame.meta_depth_occlusion": {
+  "anchor": "frame-meta_depth_occlusion",
+  "title": "Unity: disable Meta depth occlusion",
+  "group": "Steam Frame patches"
+ },
  "frame.meta_permissions": {
   "anchor": "frame-meta_permissions",
   "title": "Declare Meta-only permissions",
@@ -667,6 +672,11 @@
  "frame.unity_runtime_msaa_off": {
   "anchor": "frame-unity_runtime_msaa_off",
   "title": "Unity: keep MSAA off at runtime (OVRManager)",
+  "group": "Steam Frame patches"
+ },
+ "frame.unity_scene_active_rooms": {
+  "anchor": "frame-unity_scene_active_rooms",
+  "title": "Unity: skip Meta's player-in-room check",
   "group": "Steam Frame patches"
  },
  "frame.unity_text_input": {
