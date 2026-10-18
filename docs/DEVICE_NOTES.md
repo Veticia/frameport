@@ -753,6 +753,34 @@ can be enabled and persist after restart. Check actual runtime refresh/pacing se
 identity alone does not implement refresh-rate support. Rebuild with Quest 2 for the control: original `Oculus Quest2`,
 original Quest 2 UUID, type 9 if logged, and previous option visibility. Also smoke-test a Unity OVRPlugin game
 with the default Quest 3 choice for regressions. No device access was used during implementation.
+
+## Mixed reality: scanned rooms
+
+**Mixed reality: scanned rooms (agent v92, 2026-10-16, branch mr-scene; docs/mr/):** Quest MR games read the room
+through Meta's scene APIs; the Frame offers none, and Valve's chaperone is no room (2D outline raised to 2.43 m, often
+the default 1 m circle -> the Android runtime's STAGE rect falls back to 1x1 m; XRService's plane detection is
+horizontal-only, its persistent map sparse ORB, its XRIPC single-client; cameras are XRService's alone,
+IVRTrackedCamera gives no frames). **The passthrough's RoomView 3D depth mesh is readable** (docs/mr/PHASE0.md:
+IVRBlockQueue_005 `/xrservice/roomview3d/meshData|meshLayout`, metadata through the C++ `IVRPaths_002` on the block
+handle, `meshIsUpToDate` on the queue handle; 132x128 fan, ~30/s; raw->standing moves during a session -> convert
+with the final one), so FramePort scans rooms itself: agent `room_capture` (Background/Overlay OpenVR app, prompts =
+artifacts/roomscan/*.png via IVROverlay_028 slots 1/3/20/22/35/43/44/63, `scripts/mr/render_prompts.py`) -> `.fprs`
+dump -> `fp_roomscan` (native/roomscan, freestanding, offline) -> `room.txt` + `room-mesh.bin`
+(docs/mr/ROOM_FORMAT.md; outline = positive shoelace in x-z, wall inward normal (-dz, dx)) in
+`~/.local/share/frameport/rooms/<universe>/`; launch.sh copies it next to settings.conf (`_room_sync`, games with
+`scene_emul`); FrameBridge (`scene_room.c/scene_meta.c/scene_anchors.c`) serves N walls, volumes (BOUNDED_3D),
+planes, GLOBAL_MESH (XR_META_spatial_entity_mesh), XR_META discovery/persistence (newer Meta SDKs and MRUK), anchors
+saved in `files/framebridge-anchors.txt`; all through xrshim (OVRPort's dispatcher drops unknown META calls).
+`scene_emul` is now suggested for every USE_SCENE/USE_ANCHOR_API game (migration `scene_emul_all`; NOPE and Pinball
+FX had none). PC: Frame page "Room" card, `frameport frame room scan|status|from-boundary|import|export|build|show`.
+Real data (owner's room, 2026-10-16): floor at 0, table surfaces, orthogonal walls found; the ceiling needs "look up".
+
+Scan on request (agent v103): scene-emulation launchers run `_scan_watch` alongside the game. FrameBridge's
+`framebridge-scan-request` in the game's external files directory gets an ack, then the existing prompted headset
+capture/build flow saves and copies the new room before an `ok` result; errors, cancellation and timeout return
+`failed`. Captures share a global lock, stale protocol files are cleared on launch, and the watcher stops with the
+launcher. Logs: `<base>/scan-watch.log`. Device validation is still required.
+
 ## Vulkan pipelines refused: Fossilize and Turnip (Transformers, #349)
 
 Transformers Beyond Reality: Redux (Unreal, Vulkan) ended its first frames with Unreal's "Shader compilation failures

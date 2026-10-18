@@ -89,12 +89,17 @@ def test_launcher_sync_and_upgrade(monkeypatch, tmp_path, capsys):
     a.write_launcher(str(anchor), str(base), pkg, "Scene", 123, "/lepton", {}, scene_room=True)
     text = (anchor / "launch.sh").read_text()
     assert text.count("# frameport-room-sync") == 1
+    assert text.count("# frameport-scan-watch") == 1
+    assert text.index("_scan_watch") > text.index("\nchild=$!")
+    assert '9>&- & scanwatch=$!' in text
     assert text.index("_room_sync") < text.index("\nsetsid ")
     assert a.set_room_sync_line(text, pkg, True) == text
-    old = "\n".join(line for line in text.splitlines() if "# frameport-room-sync" not in line) + "\n"
+    old = "\n".join(line for line in text.splitlines() if "# frameport-room-sync" not in line and "# frameport-scan-watch" not in line) + "\n"
     (anchor / "launch.sh").write_text(old)
     a.upgrade_launchers()
     assert (anchor / "launch.sh").read_text().count("# frameport-room-sync") == 1
+    a.upgrade_launchers()
+    assert (anchor / "launch.sh").read_text().count("# frameport-scan-watch") == 1
     r = box_room(4, 3)
     r.universe = 7
     a.room_store(dumps(r))
@@ -146,6 +151,7 @@ def test_live_scene_setting_updates_only_the_quest_launcher(monkeypatch, tmp_pat
     a.write_launcher(str(anchor), str(anchor), pkg, "Live", 123, "/lepton", {})
     path = anchor / "launch.sh"
     assert "# frameport-room-sync" not in path.read_text()
+    assert "# frameport-scan-watch" not in path.read_text()
     (anchor / "settings.conf").write_text("scene_emul=1\n")
     a.room_setting_changed(pkg, dep, {"scene_emul": 1})
     assert "# frameport-room-sync" in path.read_text()
@@ -154,6 +160,7 @@ def test_live_scene_setting_updates_only_the_quest_launcher(monkeypatch, tmp_pat
     (anchor / "settings.conf").write_text("scene_emul=0\n")
     a.room_setting_changed(pkg, dep, {"scene_emul": 0})
     assert "# frameport-room-sync" not in path.read_text()
+    assert "# frameport-scan-watch" not in path.read_text()
     assert not (anchor / "room.txt").exists()
     assert not a.deployment(pkg)["scene_room"]
 
@@ -190,3 +197,81 @@ def test_finalize_records_resolved_scene_setting(monkeypatch, tmp_path, settings
     a.configure_install(dict(package=PKG, title="Example", settings=settings, recipe=recipe),
                         dict(base=str(base), anchor=str(base), appid=42, lepton="/lepton"), 0)
     assert a.deployment(PKG)["scene_room"] is enabled
+
+
+@pytest.mark.parametrize("failure", [False, True])
+def test_scan_request_capture_and_delivery(monkeypatch, tmp_path, failure):
+    a = load_agent(monkeypatch, tmp_path)
+    pkg = "com.test.scan"
+    base = Path(a.ANCHORS, pkg)
+    base.mkdir(parents=True)
+    (base / "deployment.json").write_text(json.dumps(dict(package=pkg, base=str(base), scene_room=True)))
+    folder = base / "external"
+    folder.mkdir()
+    mesh = Mesh(vertices=[(0, 0, 0), (1, 0, 0), (0, 0, 1)], indices=[0, 1, 2])
+    def capture(*args, **kwargs):
+        assert (folder / "framebridge-scan-ack").read_text() == "ack 42\n"
+        if failure:
+            raise a.AgentError("cancelled")
+        return {"frames": 40}
+    def build(args):
+        r = box_room(4, 3)
+        r.universe = 7
+        r.mesh = mesh
+        a.room_store(dumps(r), write_mesh(mesh))
+        return {"room": {"universe": 7}}
+    monkeypatch.setattr(a, "capture_roomview", capture)
+    monkeypatch.setattr(a, "cmd_room_build", build)
+    def spawn(argv, **kwargs):
+        a.room_capture_worker(argv[-1])
+        return SimpleNamespace(poll=lambda: 0, returncode=0)
+    monkeypatch.setattr(a.subprocess, "Popen", spawn)
+    a.scan_watch_request(pkg, str(folder), "42", lambda: True)
+    result = (folder / "framebridge-scan-result").read_text()
+    if failure:
+        assert result == "failed 42 cancelled\n"
+        assert not (base / "room.txt").exists()
+    else:
+        assert result == "ok 42\n"
+        assert parse((base / "room.txt").read_text()).universe == 7
+        assert (base / "room-mesh.bin").read_bytes() == write_mesh(mesh)
+        assert Path(a.ROOMS_DIR, "current").readlink() == Path("7")
+
+
+def test_scan_watch_cleans_stale_files(monkeypatch, tmp_path):
+    a = load_agent(monkeypatch, tmp_path)
+    pkg = "com.test.scan"
+    base = Path(a.ANCHORS, pkg)
+    base.mkdir(parents=True)
+    (base / "deployment.json").write_text(json.dumps(dict(package=pkg, base=str(base))))
+    folder = base / "lepton-data/external/Android/data" / pkg / "files"
+    folder.mkdir(parents=True)
+    for name in ("request", "ack", "result"):
+        (folder / ("framebridge-scan-" + name)).write_text("stale")
+    monkeypatch.setattr(a.os, "getppid", lambda: 1)
+    monkeypatch.setattr(a.signal, "signal", lambda *args: None)
+    a.scan_watch_worker(pkg)
+    assert not list(folder.iterdir())
+
+
+def test_scan_lock_excludes_another_capture(monkeypatch, tmp_path):
+    a = load_agent(monkeypatch, tmp_path)
+    Path(a.ROOMS_DIR).mkdir(parents=True)
+    with open(Path(a.ROOMS_DIR, ".scan.lock"), "a") as lock:
+        a.fcntl.flock(lock, a.fcntl.LOCK_EX)
+        with pytest.raises(a.AgentError, match="already running"):
+            a.room_capture_worker('{}')
+
+
+@pytest.mark.parametrize("alive, reason", [(False, "cancelled"), (True, "timeout")])
+def test_scan_watch_stops_capture(monkeypatch, tmp_path, alive, reason):
+    a = load_agent(monkeypatch, tmp_path)
+    stopped = []
+    child = SimpleNamespace(pid=123, poll=lambda: None, wait=lambda **kw: stopped.append("wait"))
+    monkeypatch.setattr(a.subprocess, "Popen", lambda *args, **kw: child)
+    monkeypatch.setattr(a.os, "killpg", lambda pid, sig: stopped.append((pid, sig)))
+    clock = iter([0, 351])
+    monkeypatch.setattr(a.time, "monotonic", lambda: next(clock))
+    a.scan_watch_request("com.test.scan", str(tmp_path), "99", lambda: alive)
+    assert (tmp_path / "framebridge-scan-result").read_text() == f"failed 99 {reason}\n"
+    assert stopped == [(123, a.signal.SIGTERM), "wait"]

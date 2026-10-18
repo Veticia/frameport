@@ -66,6 +66,38 @@
   `launch.sh` at the new folder and only then deletes the old copy; on the same filesystem it renames instead.
   Moving a game whose Lepton data holds absolute paths, or a PC VR prefix, is not yet verified on the device.
 
+## Room data
+
+- SteamVR on the Frame has no Meta scene/anchor extensions. Its chaperone supplies only a 2D outline raised to
+  2.43 m, without furniture, ceiling or a room mesh. Valve's default boundary is a 20-point circle of roughly 1 m
+  radius; FramePort refuses to treat it as a room.
+- FrameBridge's `scene_emul=1` serves saved room data, with a guardian box when no room is available. OVRPort's
+  loader only dispatches functions in its own table: newer Meta entry points go through FramePort's extension shim.
+  MRUK uses discovery (`xrDiscoverSpacesMETA`, older versions `xrQuerySpacesFB`) and requests Space Setup when
+  discovery returns no rooms. Volumes hang below their top-face anchor in Meta's coordinate convention.
+- Room files use STAGE coordinates (metres, +Y up, floor y=0, -Z forward). The format contract is
+  [mr/ROOM_FORMAT.md](mr/ROOM_FORMAT.md). On the Frame: `~/.local/share/frameport/rooms/<universe>/room.txt`,
+  optional `room-mesh.bin` and `scan.log`; `rooms/current` points to the most recently saved room.
+- A room belongs to its chaperone universe. The agent reads the last universe switch from `vrserver.txt`, falling
+  back to the newest universe in `~/.config/openvr/config/chaperone_info.vrchap`; dummy 424242 means none.
+  A matching room is selected first, else `current`; the app reports `aligned: false` after a universe change.
+- Quest launchers copy that room beside `settings.conf` before Lepton starts; FrameBridge reads
+  `dirname($FRAMEBRIDGE_CONFIG)/room.txt`. Stale copies are removed if no room exists or emulation is disabled.
+  Each game's persistent anchors stay in `/sdcard/Android/data/<pkg>/files/framebridge-anchors.txt`.
+- With `scene_emul`, launch.sh starts `_scan_watch <pkg>` after Lepton, closing fd 9; its exit trap stops the
+  watcher, which also exits if the launcher disappears. It polls once a second and logs to `<base>/scan-watch.log`.
+  In `<base>/lepton-data/external/Android/data/<pkg>/files/`, FrameBridge writes `framebridge-scan-request`
+  (`request <id> <unix_seconds>`); the watcher clears stale request/ack/result files at startup, writes
+  `framebridge-scan-ack` (`ack <id>`), reuses the headset capture/build worker, stores the current room and copies
+  it beside settings.conf before atomically writing `framebridge-scan-result` (`ok <id>` or `failed <id> <reason>`).
+  A global `rooms/.scan.lock` excludes concurrent captures, including manual scans; `rooms/.lock` still protects
+  room publication. Launcher exit cancels the scan; a 350-second deadline leaves time for the six-minute protocol timeout.
+- Frame → Room and `frameport frame room` manage rooms. `from-boundary` creates walls without furniture;
+  `import` / `export` transfer room files; `show` writes an SVG preview; `build <dump.fprs>` syncs the bundled
+  `fp_roomscan` by SHA-256 and runs it on the Frame with `--offline`. `scan` = agent `room_capture`: records the
+  RoomView meshes (`/xrservice/roomview3d/meshData` + `/meshLayout`, `IVRBlockQueue_005`) while in-headset prompts
+  guide the player, then builds the room from that recording.
+
 ## Save backups (Quest games, agent v101, discussion #352)
 - A Lepton game's saves are two folders of `<base>/lepton-data`: `internal/<pkg>` (= `/data/data/<pkg>`:
   `shared_prefs/`, `files/`, `databases/`; Unreal's `files/UE4Game|UnrealGame/.../Saved` often lives here) and
