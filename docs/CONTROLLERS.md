@@ -1,5 +1,9 @@
 # Controller buttons
 
+> **Experimental.** The Frame's runtime accepts these bindings, but the modes haven't been tried in the headset on
+> many games yet. If buttons stop working in a game, set it back to **SteamVR default** (Game settings →
+> Controllers) and report it.
+
 Quest games usually bind Quest Touch controllers. Steam Frame has a d-pad and View button on the left controller,
 and an A/B/X/Y diamond and Menu button on the right. Without a game's own Frame bindings, SteamVR maps Touch X/A
 to the bottom button and Touch Y/B to all three top buttons. View sends Touch Menu. The right X and Y therefore

@@ -14,6 +14,7 @@ from ...recommend import catalog
 from .. import components as C
 from .. import glyphs as G
 from .. import theme as T
+from ..help import HELP
 
 if TYPE_CHECKING:
     from ..app import FramePortApp
@@ -726,7 +727,8 @@ class SettingsView:
                                  help="library_folders"),
             "installing": C.section(tr("Installing"), C.card(self.installing(), padding=T.S4), help="launch_test"),
             "controllers": C.section(tr("Controllers"), C.card(self.controllers(), padding=T.S4),
-                                     help="quest_buttons"),
+                                     help="quest_buttons",
+                                     badge=C.pill(tr("experimental"), T.WARN, tooltip=C.tip(HELP["experimental"]))),
             "tools": C.section(tr("Tools"), C.card(self.tools, padding=ft.Padding(T.S4, T.S2, T.S4, T.S2)),
                                subtitle=tr("FramePort keeps its own copies; nothing is installed system-wide"),
                                action=ft.Row([C.ghost(tr("Update tools"), ft.Icons.UPDATE_ROUNDED,

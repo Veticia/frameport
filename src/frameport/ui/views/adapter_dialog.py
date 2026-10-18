@@ -26,6 +26,7 @@ from ...patches.settings import (
 )
 from .. import components as C
 from .. import theme as T
+from ..help import HELP
 from ..controllers import diagram, diagram_source
 
 if TYPE_CHECKING:
@@ -207,8 +208,12 @@ def _open(app: FramePortApp, package: str, g: dict | None, values: dict, foveati
         label = tr(ui["label"]) if ui.get("label") else tr(base.get(f"adapter.{key}").title)
         help_text = tr(ui["help"]) if ui.get("help") else tr(base.get(f"adapter.{key}").description)
         controls[key] = control_for(key)
+        title = C.body(label, T.TEXT, weight=ft.FontWeight.W_500)
+        if base.get(f"adapter.{key}").experimental:
+            title = ft.Row([title, C.pill(tr("experimental"), T.WARN, tooltip=C.tip(HELP["experimental"]))],
+                           spacing=T.S2, wrap=True)
         line = ft.Row([
-            ft.Column([C.body(label, T.TEXT, weight=ft.FontWeight.W_500), C.meta(help_text, T.TEXT_2)],
+            ft.Column([title, C.meta(help_text, T.TEXT_2)],
                       spacing=T.px(2), expand=True),
             controls[key]], spacing=T.S4, vertical_alignment=ft.CrossAxisAlignment.CENTER)
         rows[key] = ft.Container(ft.Column([line, controller_preview], spacing=T.S2)

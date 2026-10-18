@@ -533,6 +533,8 @@ UI: dict[str, dict] = {
 # they don't work for 32-bit games on the bridge. surface_native: Batman's native video renderer hooks Vulkan
 # functions OVRPort's dispatcher doesn't know
 XRSHIM_SETTINGS = ("hide_fb_foveation", "controller_models", "haptic_fix", "surface_native")
+# shown with an "experimental" pill (Game settings, game page, CLI): not proven in the headset on many games yet
+EXPERIMENTAL_SETTINGS = ("quest_buttons",)
 
 
 class AdapterSetting(Patch):
@@ -548,6 +550,7 @@ class AdapterSetting(Patch):
         self.default = default
         self.revision = REVISIONS.get(key, 1)
         self.a32 = key not in XRSHIM_SETTINGS
+        self.experimental = key in EXPERIMENTAL_SETTINGS
 
     @property
     def summary(self) -> str:

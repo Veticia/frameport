@@ -687,8 +687,11 @@ def card(content: ft.Control, padding: int | None = None, bgcolor: str | None = 
 
 
 def section(heading: str, *controls: ft.Control, subtitle: str | None = None,
-            action: ft.Control | None = None, help: str | None = None) -> ft.Column:
-    head = ft.Row([ft.Column([with_help(h2(heading), help)] + ([meta(subtitle)] if subtitle else []), spacing=T.px(2),
+            action: ft.Control | None = None, help: str | None = None, badge: ft.Control | None = None) -> ft.Column:
+    title = with_help(h2(heading), help)
+    if badge:  # e.g. an "experimental" pill, right after the heading
+        title = ft.Row([title, badge], spacing=T.S2, vertical_alignment=ft.CrossAxisAlignment.CENTER)
+    head = ft.Row([ft.Column([title] + ([meta(subtitle)] if subtitle else []), spacing=T.px(2),
                              expand=True)]
                   + ([action] if action else []), vertical_alignment=ft.CrossAxisAlignment.CENTER)
     return ft.Column([head, *controls], spacing=T.S3)
