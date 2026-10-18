@@ -42,6 +42,7 @@ Generated from [catalog/games](../catalog/games) by `scripts/compat_list.py`.
 | Creed | Quest | ✅ Works |  |
 | Crisis Zone VR | Quest | ✅ Works |  |
 | cubism | Quest | ✅ Works |  |
+| cubism | Quest | ✅ Works |  |
 | Dance Central | Quest | ✅ Works |  |
 | Deep Cuts | Quest | ✅ Works |  |
 | Demeo | Quest | ✅ Works |  |
@@ -77,6 +78,7 @@ Generated from [catalog/games](../catalog/games) by `scripts/compat_list.py`.
 | Jurassic World Aftermath Collection | Quest | ✅ Works |  |
 | Keep Talking and Nobody Explodes | Quest | ✅ Works |  |
 | Kill It With Fire VR | Quest | ✅ Works |  |
+| KillerFrequency | Quest | ✅ Works |  |
 | Ladder | Quest | ✅ Works |  |
 | Lambda1VR | Quest | ✅ Works |  |
 | LEGO® Bricktales | Quest | ✅ Works |  |
