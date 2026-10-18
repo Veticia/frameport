@@ -4705,7 +4705,13 @@ def cmd_room_build(args):
         if record.get("mesh"):
             with open(os.path.join(out, record["mesh"]["filename"]), "rb") as f:
                 mesh = f.read()
-        room_store(text, mesh, result.stderr)
+        scan_log = result.stderr
+        try:
+            with open(dump + ".log") as log:
+                scan_log += "\n" + log.read()
+        except OSError:
+            pass
+        room_store(text, mesh, scan_log)
     return {"report": report, **cmd_room_status({})}
 
 
@@ -4914,6 +4920,135 @@ class _ScanPrompt:
         self.handle = None
 
 
+def _scan_point(m, p):
+    return tuple(sum(m[r * 4 + c] * p[c] for c in range(3)) + m[r * 4 + 3] for r in range(3))
+
+
+def _render_scan_preview(cells, raw_to_standing, center, size=256, width=6.0):
+    """Raw 10 cm voxel keys -> top-down RGBA. Image top is standing -Z; tallest class wins overlaps."""
+    pixels = bytearray(size * size * 4)
+    classes = bytearray(size * size)
+    colors = (bytes((155, 155, 155, 110)), bytes((245, 140, 45, 150)), bytes((55, 155, 240, 150)))
+    for key in cells:
+        x, y, z = _scan_point(raw_to_standing, tuple((v + 0.5) * 0.1 for v in key))
+        if y < -0.3:
+            continue
+        col = int(math.floor(((x - center[0]) / width + 0.5) * size))
+        row = int(math.floor(((z - center[2]) / width + 0.5) * size))
+        if not (0 <= col < size and 0 <= row < size):
+            continue
+        kind = 0 if y < 0.3 else 1 if y <= 1.5 else 2
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                xx, yy = col + dx, row + dy
+                if 0 <= xx < size and 0 <= yy < size:
+                    i = yy * size + xx
+                    if classes[i] <= kind + 1:
+                        pixels[i * 4:i * 4 + 4] = colors[kind]
+                        classes[i] = kind + 1
+    return bytes(pixels)
+
+
+class _ScanPreview:
+    """Best-effort floor overlay; same IVROverlay_028 C table setup as _ScanPrompt.
+
+    Slots verified against openvr-2.15.6.h. Keep voxels in raw space because Valve moves STAGE during capture.
+    """
+    SLOTS = {"Create": 1, "Destroy": 3, "Width": 22, "Absolute": 33, "Raw": 62, "Show": 43}
+
+    def __init__(self, rv, log=None):
+        self.rv, self.log = rv, log or (lambda message: print(message, file=sys.stderr, flush=True))
+        self.handle, self.disabled = None, False
+        self.cells, self.origin = {}, None
+        self.dirty, self.last_render, self.uploads = False, -float("inf"), 0
+        try:
+            ct = rv.ct
+            error = ct.c_int(0)
+            table = rv.vr.VR_GetGenericInterface(b"FnTable:IVROverlay_028", ct.byref(error))
+            if not table or error.value:
+                raise RuntimeError("IVROverlay_028 unavailable")
+            fn = ct.cast(table, ct.POINTER(ct.c_void_p))
+            U, E = ct.c_uint64, ct.c_int
+            signatures = {"Create": (ct.c_char_p, ct.c_char_p, ct.POINTER(U)), "Destroy": (U,),
+                          "Width": (U, ct.c_float), "Absolute": (U, E, ct.POINTER(rv.M34)),
+                          "Raw": (U, ct.c_void_p, ct.c_uint32, ct.c_uint32, ct.c_uint32), "Show": (U,)}
+            self.functions = {name: ct.CFUNCTYPE(E, *args)(fn[self.SLOTS[name]])
+                              for name, args in signatures.items()}
+            h = U(0)
+            self._call("Create", b"frameport.roomscan.preview", b"FramePort floor coverage", ct.byref(h))
+            self.handle = h
+            self._call("Width", h, 6.0)
+        except Exception as exc:
+            self._disable(exc)
+
+    def _call(self, name, *args):
+        error = self.functions[name](*args)
+        if error:
+            raise RuntimeError(f"{name}: overlay error {error}")
+
+    def _disable(self, exc):
+        if not self.disabled:
+            self.disabled = True
+            self._log(f"scan preview disabled: {exc}")
+            self.close()
+
+    def _log(self, message):
+        try:
+            self.log(message)
+        except Exception:
+            pass  # diagnostic I/O must never abort capture
+
+    def feed(self, vertices, pose, now=None):
+        if self.disabled:
+            return
+        try:
+            if self.origin is None:
+                self.origin = (pose[3], pose[7], pose[11])
+            for offset in range(0, len(vertices) - 11, 16 * 12):
+                point = struct.unpack_from("<3f", vertices, offset)
+                if not all(map(math.isfinite, point)) or not 0.09 <= sum(v * v for v in point) <= 16:
+                    continue
+                raw = _scan_point(pose, point)
+                key = tuple(math.floor(v / 0.1) for v in raw)
+                if key not in self.cells:
+                    self.dirty = True
+                self.cells[key] = self.cells.get(key, 0) + 1
+            now = time.monotonic() if now is None else now
+            if not self.dirty or now - self.last_render < 1.0:
+                return
+            transform = self.rv.raw_to_standing()
+            center = _scan_point(transform, self.origin)
+            matrix = self.rv.M34()
+            # Rx(-90 degrees): local +Z (front) -> standing +Y; local +Y -> -Z.
+            for i, value in enumerate((1, 0, 0, center[0], 0, 0, 1, 0.015, 0, -1, 0, center[2])):
+                matrix.m[i] = value
+            self._call("Absolute", self.handle, 1, self.rv.ct.byref(matrix))  # TrackingUniverseStanding
+            rgba = _render_scan_preview(self.cells, transform, center)
+            self.buffer = self.rv.ct.create_string_buffer(rgba)
+            started = time.monotonic()
+            try:
+                self._call("Raw", self.handle, self.buffer, 256, 256, 4)
+            finally:
+                elapsed = time.monotonic() - started
+                self.uploads += 1
+                if self.uploads <= 20 or self.uploads % 10 == 0:
+                    self._log(f"scan preview SetOverlayRaw #{self.uploads}: {elapsed * 1000:.2f} ms")
+            self._call("Show", self.handle)
+            self.last_render, self.dirty = now, False
+            if elapsed > 0.05:
+                self._disable(f"SetOverlayRaw too slow ({elapsed * 1000:.2f} ms)")
+        except Exception as exc:
+            self._disable(exc)
+
+    def close(self):
+        if self.handle is not None:
+            handle, self.handle = self.handle, None
+            try:
+                self._call("Destroy", handle)
+            except Exception as exc:
+                self._disable(exc)
+
+
 ROOM_SCAN_LOOK_FRAMES = 5   # recorded frames looking up / down (~1.7 s at 3/s) that count as "ceiling/floor seen"
 ROOM_SCAN_MIN_SECONDS = 60  # a complete scan still records this long: a 32 s one found 2 of 7 furniture boxes
 
@@ -4939,13 +5074,14 @@ def _scan_complete(started, now, yaw_bins, pitch):
             and pitch["up"] >= ROOM_SCAN_LOOK_FRAMES and pitch["down"] >= ROOM_SCAN_LOOK_FRAMES)
 
 
-def capture_roomview(seconds, out_path, wait=0.0, max_hz=3.0, progress=None, prompts=None):
+def capture_roomview(seconds, out_path, wait=0.0, max_hz=3.0, progress=None, prompts=None, preview=True, preview_log=None):
     """Record RoomView 3D meshes into a .fprs dump: `seconds` of fresh meshes (after waiting up to `wait` s for the
     first one), at most `max_hz` frames per second. progress(dict) is called about once a second. Returns a summary:
     frames, duration, yaw coverage (30 deg bins seen), frames looking up/down, warnings."""
-    rv = _RoomViewReader(VR_APP_OVERLAY if prompts else None)
+    rv = _RoomViewReader(VR_APP_OVERLAY if prompts or preview else None)
     ct = rv.ct
     prompt = _ScanPrompt(rv, prompts) if prompts else None
+    floor_preview = _ScanPreview(rv, preview_log) if preview else None
     tmp = out_path + ".part"
     offsets, raw_poses = [], []
     yaw_bins, pitch = set(), {"up": 0, "down": 0}
@@ -5021,8 +5157,12 @@ def capture_roomview(seconds, out_path, wait=0.0, max_hz=3.0, progress=None, pro
                 f.write(verts)
                 f.write(indices)
                 last_mesh, last_write = mesh_id, now
+                if floor_preview:
+                    floor_preview.feed(verts, pose)
         r2s = rv.raw_to_standing()
     finally:
+        if floor_preview:
+            floor_preview.close()
         if prompt:
             prompt.close("done" if offsets else "failed")
         rv.close()
@@ -5067,7 +5207,7 @@ def cmd_room_capture(args):
     _write_json(ROOM_SCAN_STATUS, {"state": "waiting", "started": time.time(), "seconds": seconds})
     p = run(["systemd-run", "--user", "--collect", "--quiet", f"--unit={ROOM_SCAN_UNIT}-{int(time.time())}",
              "--setenv=HOME=" + HOME, sys.executable, os.path.abspath(__file__), "_room_capture",
-             json.dumps({"seconds": seconds, "wait": wait})])
+             json.dumps({"seconds": seconds, "wait": wait, "preview": args.get("preview", True)})])
     if p.returncode != 0:
         _write_json(ROOM_SCAN_STATUS, {"state": "failed", "error": p.stderr.strip()[-300:]})
         raise AgentError(f"couldn't start the room scan: {p.stderr.strip()[-300:]}")
@@ -5108,9 +5248,14 @@ def _room_capture_worker(payload):
         status.update(p, state="recording" if p.get("recording") else "waiting")
         _write_json(ROOM_SCAN_STATUS, status)
 
+    def preview_log(message):
+        with open(dump + ".log", "a") as log:
+            log.write(message + "\n")
+
     try:
         summary = capture_roomview(job["seconds"], dump, wait=job["wait"], progress=progress,
-                                   prompts=ROOM_SCAN_PROMPTS if os.path.isdir(ROOM_SCAN_PROMPTS) else None)
+                                   prompts=ROOM_SCAN_PROMPTS if os.path.isdir(ROOM_SCAN_PROMPTS) else None,
+                                   preview=job.get("preview", True), preview_log=preview_log)
         status.update(capture=summary, state="building")
         _write_json(ROOM_SCAN_STATUS, status)
         if summary["frames"] < ROOM_SCAN_MIN_FRAMES:  # never replace a saved room with a scrap of one
@@ -5125,6 +5270,8 @@ def _room_capture_worker(payload):
         for old in sorted(glob.glob(os.path.join(ROOM_SCAN_DUMPS, "scan-*.fprs")))[:-ROOM_SCAN_KEEP]:
             try:
                 os.remove(old)
+                if os.path.isfile(old + ".log"):
+                    os.remove(old + ".log")
             except OSError:
                 pass
 

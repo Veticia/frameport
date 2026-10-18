@@ -68,6 +68,18 @@
 
 ## Room data
 
+Live floor coverage (agent v104) is enabled by default for manual and game-requested scans; the capture
+payload accepts `preview: false`, and `frameport frame room scan --no-preview` disables it. A world-locked,
+upward-facing 6 m square at floor height follows the current raw-to-STAGE calibration and stays centred on the
+scan's first recorded camera position. Every 16th depth vertex contributes to raw-space 10 cm voxels; at most once
+per second, newly occupied cells redraw a 256×256 RGBA map: grey floor (<0.3 m), orange raised surfaces
+(0.3–1.5 m), blue tall surfaces (>1.5 m), unseen transparent. The partly transparent dots show coverage, not a
+validated room boundary. IVROverlay_028 slots 1/3/22/33/43/62 (OpenVR 2.15.6 header) create/destroy/set width/set
+absolute STAGE transform/show/upload raw pixels. Each upload is 256 KiB (at most 256 KiB/s); timing for the first
+20 uploads and every tenth thereafter, plus failures, goes to `rooms/scans/scan-*.fprs.log` and the built room’s `scan.log`. Overlay errors or an
+upload taking over 50 ms disable the preview while capture continues; headset appearance and upload cost still
+need device validation.
+
 - SteamVR on the Frame has no Meta scene/anchor extensions. Its chaperone supplies only a 2D outline raised to
   2.43 m, without furniture, ceiling or a room mesh. Valve's default boundary is a 20-point circle of roughly 1 m
   radius; FramePort refuses to treat it as a room.
