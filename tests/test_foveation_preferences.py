@@ -87,10 +87,11 @@ def test_catalog_defaults_survive_and_explicit_choice_wins():
 
 def test_radius_test_and_off_reset_managed_exports():
     env = foveation_env("test.game", {"mode": "fixed", "radius": .2, "test": True})
-    assert env["FOVE_INNER"] == "0.2" and env["FOVE_OUTER"] == "0.4"
+    assert env["FOVE_LEVEL"] == "hi"
+    assert env["FOVE_INNER"] is None and env["FOVE_OUTER"] is None
     assert env["LEPTON_ENV_FRAMEPORT_FOVEATION_TEST"] == "1"
     off = foveation_env("test.game", {"mode": "off"}, baseline={k: v for k, v in env.items() if v})
-    assert off["FOVE_INNER"] is None and off["LEPTON_ENV_FRAMEPORT_FOVEATION_TEST"] is None
+    assert off["FOVE_LEVEL"] is None and off["LEPTON_ENV_FRAMEPORT_FOVEATION_TEST"] is None
 
 
 def test_resolution_label_explains_actual_effect():
@@ -129,8 +130,9 @@ def test_game_dialog_saves_personal_choice_without_touching_recipe(monkeypatch):
                 any(o.key == "tracked" for o in c.options))
     mode.on_select(SimpleNamespace(control=SimpleNamespace(value="fixed")))
     radius = next(c for c in controls if isinstance(c, ft.Dropdown) and
-                  any(o.key == "0.3" for o in c.options))
-    radius.on_select(SimpleNamespace(control=SimpleNamespace(value="0.3")))
+                  any(o.key == "med" for o in c.options))
+    assert [(o.key, o.text) for o in radius.options] == list(ad.Foveation.LEVEL_CHOICES)
+    radius.on_select(SimpleNamespace(control=SimpleNamespace(value="med")))
     advanced_row = next(c for c in controls if isinstance(c, ft.Row) and c.data == "switch" and
                         any(getattr(t, "value", None) == "Show advanced settings" for t in walk(c)))
     advanced = next(c for c in walk(advanced_row) if isinstance(c, ft.Switch))
@@ -145,7 +147,7 @@ def test_game_dialog_saves_personal_choice_without_touching_recipe(monkeypatch):
     save = dialogs[-1].actions[-1]
     save.on_click(None)
     saved = library.game("test.game")
-    assert saved["foveation"] == {"mode": "fixed", "radius": .3, "test": True}
+    assert saved["foveation"] == {"mode": "fixed", "level": "med", "test": True}
     assert saved["recipe"] == game["recipe"]
     ad._open(app, "test.game", saved, ad.recipe_values(saved))
     mode = next(c for c in walk(dialogs[-1]) if isinstance(c, ft.Dropdown) and
@@ -160,3 +162,42 @@ def test_adapter_build_prepares_internal_foveation_support():
     from frameport.build import apk_patches
     assert "device.foveation" in [p.id for p in apk_patches({"frame.adapter": {}})]
     assert "device.foveation" not in [p.id for p in apk_patches({"frame.launcher": {}})]
+
+
+@pytest.mark.parametrize("radius,level", [(0, ""), (.1, "hi"), (.2, "hi"), (.25, "med"),
+    (.3, "lo"), (.45, "lo"), ("unknown", ""), (float("nan"), ""), (.9, "")])
+def test_legacy_radius_read_migrates_without_mutating_storage(radius, level):
+    entry = {"foveation": {"mode": "tracked", "radius": radius}}
+    before = dict(entry["foveation"])
+    assert foveation_preference(entry) == {"mode": "tracked", "level": level}
+    assert entry["foveation"] == before
+    env = foveation_env("test.game", entry["foveation"])
+    assert env["FOVE_LEVEL"] == (level or None)
+    assert env["FOVE_INNER"] is None and env["FOVE_OUTER"] is None
+
+
+@pytest.mark.parametrize("level", ["", "lo", "med", "hi"])
+def test_supported_level_exports_and_explicit_level_wins(level):
+    env = foveation_env("test.game", {"mode": "tracked", "level": level, "radius": .2})
+    assert env["FOVE_LEVEL"] == (level or None)
+    assert env["FDM_DEBUG"] == "enable"
+
+
+def test_default_removes_obsolete_radius_exports_and_legacy_recipe_reads():
+    env = foveation_env("test.game", {"mode": ""}, baseline={"FOVE_INNER": ".4", "FOVE_OUTER": ".8"})
+    assert env["FOVE_INNER"] is None and env["FOVE_OUTER"] is None
+    entry = {"recipe": {"patches": {"device.foveation": {"mode": "fixed", "radius": .25}}}}
+    assert foveation_preference(entry) == {"mode": "fixed", "level": "med"}
+
+
+@pytest.mark.parametrize("level,expected", [("hi", "hi"), ("1", ""), (None, "")])
+def test_installed_only_dialog_reads_supported_level(monkeypatch, level, expected):
+    from frameport.ui.views import adapter_dialog as ad
+    monkeypatch.setattr(library, "game", lambda package: None)
+    received = []
+    monkeypatch.setattr(ad, "_open", lambda *args: received.append(args[-1]))
+    target = SimpleNamespace(set_settings=lambda *args: {"settings": {}, "foveation_env": {
+        "ENABLE_VULKAN_FDM_INJECTION_LAYER": "1", "FDM_DEBUG": "enable", "FOVE_LEVEL": level}})
+    app = SimpleNamespace(target=target, run_bg=lambda fn: fn())
+    ad.show_adapter_dialog(app, "test.game")
+    assert received == [{"mode": "tracked", "level": expected, "test": False}]

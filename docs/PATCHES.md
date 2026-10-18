@@ -2460,12 +2460,12 @@ Render less detail outside your gaze; adjust the full-resolution area or darken 
 - **Options:**
   - `support`: bool, default `False` — Internal APK compatibility support
   - `mode`: str, default empty — Catalog default: tracked, fixed or off (empty = Valve's default)
-  - `radius`: float, default `0.0`, 0–0.45 — Full-resolution radius; 0 keeps the current runtime default
+  - `level`: str, default empty — Runtime profile: lo, med, hi (empty = Default)
   - `test`: bool, default `False` — Darken lower-resolution regions (diagnostic)
 - **Catalog games (5):** Ocean Rift, Quantum Void, Tea For God, The 7th Guest VR, Vampire: The Masquerade - Justice.
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
 
-> Reduces shading away from the full-resolution area, following each eye's gaze. Default area size keeps the runtime's current profile unchanged. Custom radius is a fraction of the shorter eye-image dimension; the transition ends at twice that radius. Larger areas retain more detail but save less GPU work. Fixed stops the area following your eyes. The optional test darkens actual coarse-shaded fragments. Runtime choices are in Game settings. Tested on RE4, Deadpool and Asgard's Wrath 2. The Climb 2 gets a version-guarded private bridge at 1.0 scale; Batman gets its hash-verified allocation fix (unsupported OVRPlugin versions are refused). Other games may need additional fixes; turn this off if artifacts appear.
+> Reduces shading away from the full-resolution area, following each eye's gaze. Default keeps the runtime profile unchanged. Low has the largest full-resolution center; medium and high use smaller centers and stronger peripheral detail reduction. Larger areas retain more detail but save less GPU work. Fixed stops the area following your eyes. The optional test darkens actual coarse-shaded fragments. Runtime choices are in Game settings. Tested on RE4, Deadpool and Asgard's Wrath 2. The Climb 2 gets a version-guarded private bridge at 1.0 scale; Batman gets its hash-verified allocation fix (unsupported OVRPlugin versions are refused). Other games may need additional fixes; turn this off if artifacts appear.
 
 ### <a id="device-headset_model"></a>Headset model
 

@@ -45,8 +45,8 @@ def test_injection_keeps_swapchains_ordinary():
 def test_custom_size_and_fixed_mode_and_reset():
     assert context({"mode": "tracked", "test": True}).env["LEPTON_ENV_FRAMEPORT_FOVEATION_TEST"] == "1"
     assert "LEPTON_ENV_FRAMEPORT_FOVEATION_TEST" not in context({"mode": "tracked"}).env
-    assert context({"mode": "tracked", "radius": 0.35}).env["FOVE_INNER"] == "0.35"
-    assert context({"mode": "tracked", "radius": 0.35}).env["FOVE_OUTER"] == "0.7"
+    assert context({"mode": "tracked", "radius": 0.35}).env["FOVE_LEVEL"] == "lo"
+    assert context({"mode": "tracked", "level": "hi"}).env["FOVE_LEVEL"] == "hi"
     assert context({"mode": "fixed"}).env["FDM_DEBUG"] == "enable,disable_offsets"
     assert context({"mode": "off"}).env == {
         "VK_INSTANCE_LAYERS": "", "LEPTON_ENV_DISABLE_VULKAN_FDM_INJECTION_LAYER": "1"}
@@ -57,9 +57,8 @@ def test_custom_size_and_fixed_mode_and_reset():
 
 @pytest.mark.parametrize("params", [
     {"mode": "bad"}, {"mode": "off", "test": True}, {"mode": "", "radius": 0.2},
-    {"mode": "tracked", "radius": float("nan")}, {"mode": "tracked", "radius": float("inf")},
-    {"mode": "tracked", "radius": -1}, {"mode": "tracked", "radius": 0.01},
-    {"mode": "tracked", "radius": 0.5}, {"mode": "tracked", "test": "false"}])
+    {"mode": "tracked", "level": "1"}, {"mode": "tracked", "level": 2},
+    {"mode": "off", "level": "lo"}, {"mode": "tracked", "test": "false"}])
 def test_invalid_configuration_refused(params):
     with pytest.raises(ValueError):
         foveation_options(params)

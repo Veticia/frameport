@@ -300,7 +300,7 @@ REFRESH_CHOICES = [(0.0, "Game's choice"), *((float(hz), f"{hz} Hz") for hz in (
 FOVEATION_UI = {
     "mode": dict(group="picture", level="common", label="Foveated rendering (Valve)",
                  help="Reduces shading away from the full-resolution area. Changes apply at the next game start."),
-    "radius": dict(group="picture", level="common", label="Full-resolution area",
+    "level": dict(group="picture", level="common", label="Full-resolution area",
                    help="Larger areas retain more detail but save less GPU work."),
     "test": dict(group="picture", level="advanced", label="Darken coarse fragments (test)",
                  help="Diagnostic only; do not use for benchmarking."),
@@ -809,23 +809,33 @@ def foveation_options(params):
     mode = params.get("mode") or ""
     if mode not in ("", "tracked", "fixed", "off"):
         raise ValueError("Unknown foveation mode")
-    radius = float(params.get("radius") or 0)
-    if not math.isfinite(radius) or (radius != 0 and not 0.05 <= radius <= 0.45):
-        raise ValueError("Full-resolution radius must be Default (0), or 0.05–0.45")
+    level = params.get("level", "")
+    if "level" not in params and params.get("radius"):
+        # Old radius exports never reached the layer. Preserve intent with a supported
+        # preset; unknown legacy values restore Default. No numeric FOVE_LEVEL values.
+        try:
+            radius = float(params["radius"])
+        except (ValueError, TypeError):
+            radius = 0
+        if math.isfinite(radius) and 0.05 <= radius <= 0.45:
+            level = min(((.30, "lo"), (.25, "med"), (.20, "hi")),
+                        key=lambda pair: abs(pair[0] - radius))[1]
+    if level not in ("", "lo", "med", "hi"):
+        raise ValueError("Unknown foveation profile")
     test = params.get("test", False)
     if not isinstance(test, bool):
         raise ValueError("Foveation test mode must be a boolean")
-    if (test or radius) and mode not in ("tracked", "fixed"):
+    if (test or level) and mode not in ("tracked", "fixed"):
         raise ValueError("Choose Eye-tracked or Fixed before configuring foveation size or test mode")
-    return mode, radius, test
+    return mode, level, test
 
 
 class Foveation(Patch):
     id = "device.foveation"
     title = "Foveated rendering (Valve)"
     description = ("Reduces shading away from the full-resolution area, following each eye's gaze. "
-                   "Default area size keeps the runtime's current profile unchanged. Custom radius is a fraction "
-                   "of the shorter eye-image dimension; the transition ends at twice that radius. Larger areas "
+                   "Default keeps the runtime profile unchanged. Low has the largest full-resolution center; medium and high "
+                   "use smaller centers and stronger peripheral detail reduction. Larger areas "
                    "retain more detail but save less GPU work. Fixed stops the area following your eyes. "
                    "The optional test darkens actual coarse-shaded fragments. Runtime choices are in Game settings. "
                    "Tested on RE4, Deadpool and Asgard's Wrath 2. "
@@ -840,13 +850,13 @@ class Foveation(Patch):
     experimental = True
     params = [Param("support", "bool", False, "Internal APK compatibility support"),
               Param("mode", "str", "", "Catalog default: tracked, fixed or off (empty = Valve's default)"),
-              Param("radius", "float", 0.0, "Full-resolution radius; 0 keeps the current runtime default", 0, 0.45),
+              Param("level", "str", "", "Runtime profile: lo, med, hi (empty = Default)"),
               Param("test", "bool", False, "Darken lower-resolution regions (diagnostic)")]
     CHOICES = (("", "Default"), ("tracked", "Eye-tracked"),
                ("fixed", "Fixed (doesn't follow the eyes)"), ("off", "Off"))
-    RADIUS_CHOICES = (("0", "Default (30% radius)"), ("0.1", "10% radius"), ("0.15", "15% radius"),
-                      ("0.2", "20% radius"), ("0.25", "25% radius"), ("0.3", "30% radius"),
-                      ("0.35", "35% radius"), ("0.4", "40% radius"), ("0.45", "45% radius"))
+    # Valve's layer starts at lo when FOVE_LEVEL is unset, so Default is the large area
+    LEVEL_CHOICES = (("", "Default (large)"), ("lo", "Large"), ("med", "Medium (saves more)"),
+                     ("hi", "Small (saves most)"))
 
     def apply(self, ctx):
         from .frame.foveation import apply
@@ -858,11 +868,13 @@ class Foveation(Patch):
 
     def install(self, ctx: InstallContext) -> None:
         # runs after device.lepton_env (install_context), so this choice wins over a recipe's VK_INSTANCE_LAYERS
-        mode, radius, test = foveation_options(ctx.params)
+        mode, level, test = foveation_options(ctx.params)
+        ctx.env.pop("FOVE_INNER", None)
+        ctx.env.pop("FOVE_OUTER", None)
         if not mode:
             return
         for key in ("FDM_DEBUG", "ENABLE_VULKAN_FDM_INJECTION_LAYER",
-                    "LEPTON_ENV_DISABLE_VULKAN_FDM_INJECTION_LAYER", "FOVE_INNER", "FOVE_OUTER",
+                    "LEPTON_ENV_DISABLE_VULKAN_FDM_INJECTION_LAYER", "FOVE_INNER", "FOVE_OUTER", "FOVE_LEVEL",
                     "LEPTON_ENV_FRAMEPORT_FOVEATION_TEST", "LEPTON_ENV_FRAMEPORT_CLIMB_STEREO_OFFSETS",
                     "LEPTON_ENV_FRAMEPORT_VRAPI_FDM_ISOLATE_MONO",
                     "LEPTON_ENV_FRAMEPORT_VRAPI_KEEP_FOCUSED_IMAGE"):
@@ -881,8 +893,8 @@ class Foveation(Patch):
             ctx.env.update(LEPTON_ENV_FRAMEPORT_CLIMB_STEREO_OFFSETS="1",
                            LEPTON_ENV_FRAMEPORT_VRAPI_FDM_ISOLATE_MONO="1",
                            LEPTON_ENV_FRAMEPORT_VRAPI_KEEP_FOCUSED_IMAGE="1")
-        if radius:
-            ctx.env.update(FOVE_INNER=f"{radius:g}", FOVE_OUTER=f"{2 * radius:g}")
+        if level:
+            ctx.env["FOVE_LEVEL"] = level
         if test:
             ctx.env["LEPTON_ENV_FRAMEPORT_FOVEATION_TEST"] = "1"
 
@@ -944,16 +956,20 @@ register(Foveation)
 
 
 FOVEATION_ENV_KEYS = ("FDM_DEBUG", "ENABLE_VULKAN_FDM_INJECTION_LAYER",
-    "LEPTON_ENV_DISABLE_VULKAN_FDM_INJECTION_LAYER", "VK_INSTANCE_LAYERS", "FOVE_INNER", "FOVE_OUTER",
+    "LEPTON_ENV_DISABLE_VULKAN_FDM_INJECTION_LAYER", "VK_INSTANCE_LAYERS", "FOVE_INNER", "FOVE_OUTER", "FOVE_LEVEL",
     "LEPTON_ENV_FRAMEPORT_FOVEATION_TEST", "LEPTON_ENV_FRAMEPORT_CLIMB_STEREO_OFFSETS",
     "LEPTON_ENV_FRAMEPORT_VRAPI_FDM_ISOLATE_MONO", "LEPTON_ENV_FRAMEPORT_VRAPI_KEEP_FOCUSED_IMAGE")
 
 
 def foveation_preference(entry):
-    if "foveation" in entry:
-        return dict(entry["foveation"])
-    params = ((entry.get("recipe") or {}).get("patches") or {}).get("device.foveation") or {}
-    return {k: v for k, v in params.items() if k in ("mode", "radius", "test")}
+    params = entry.get("foveation") if "foveation" in entry else (
+        ((entry.get("recipe") or {}).get("patches") or {}).get("device.foveation") or {})
+    pref = {k: v for k, v in params.items() if k in ("mode", "level", "radius", "test")}
+    if "radius" in pref:
+        _, level, _ = foveation_options(pref)
+        pref.pop("radius")
+        pref["level"] = level
+    return pref
 
 
 def foveation_env(package, params, settings=None, baseline=None):

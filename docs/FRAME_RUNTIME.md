@@ -398,14 +398,57 @@ over Quest games.
 
 Under a Quest game's **Game settings → Picture**, choose **Foveated rendering → Eye-tracked**, then **Save**.
 Changes apply at the next game start.
-The full-resolution area selector defaults to **Default (30% radius)**: no radius override, preserving the
-runtime profile used in the headset experiments. Larger radii retain more detail and save less shading work.
-Custom radii set `FOVE_INNER`; `FOVE_OUTER` is twice that value, matching the runtime's profile proportions.
-The inspected runtime's built-in inner/outer pairs are 0.30/0.60, 0.25/0.50 and 0.20/0.40.
-The shared-texture injection path selects profile 1: 0.30 inner radius and 0.60 outer radius.
+The area selector now uses Valve's supported `FOVE_LEVEL` presets (GitHub #394; binary analysis
+2026-10-17). Default leaves the runtime choice alone; on the shared injection path this is `lo`.
+The old `FOVE_INNER`/`FOVE_OUTER` radius exports had no effect: Lepton does not pass them through,
+and the layer does not read them. The previously documented 0.30/0.60, 0.25/0.50, 0.20/0.40
+radius pairs do **not** describe the generated shared-injection density map.
+
+The inspected arm64 `libVkLayer_VALVE_fdm_injection.so` has these semantics (virtual addresses):
+- `init_fdm_fove_level` at `0x1cdf4` calls the cached option reader, then
+  `debug_parse_flags_option` (`0x21d74`) with table `0x27e70`: named tokens `lo` → 1,
+  `med` → 2, `hi` → 3. It does not call atoi/strtol. Unset, empty, unknown and numeric
+  strings parse to zero and retain the current profile (initialized to 1 at `0x1ce74`).
+  Tokens are case-sensitive and separated by non-alphanumeric/non-underscore characters;
+  matching values are ORed, so combinations can alias another profile. `all` also yields 3;
+  `help` prints the table and returns zero. Use a single preset token.
+- Profile selection at `0x1918c–0x19364` uses normalized **rectangles**, not circular radii.
+  `lo` has a full-density center rectangle `(x=.364, y=.367, width=.295, height=.286)`
+  (constant at `0xe440`), then density byte `0x76` outside. `med` uses rectangles from
+  `0xe988`: sizes `.250×.245`, `.295×.286`, `.386×.367`, with density bytes
+  `0xff`, `0xa8`, `0x76` and `0x50` outside. `hi` uses `0xe9b8`: sizes
+  `.246×.211`, `.281×.246`, `.351×.316`, `.386×.351`, with bytes
+  `0xff`, `0xa8`, `0x76`, `0x50`, then `0x38` outside. Each byte is written to both
+  R8G8 density channels. All three retain a full-density center (`0xff`); medium/high make it smaller
+  and reduce peripheral density more. Coordinates are sampled on the density-map grid (`0x19378` onward).
+- `FDM_DEBUG` flags `lo`/`med`/`hi` also select presets (high takes precedence), but an
+  explicit recognized `FOVE_LEVEL` overrides them (`0x1ce14`). `enable` gates injection;
+  `disable_offsets` fixes the gaze position (`0x1b6c8`), and `yflip` flips the vertical
+  offset (`0x1b9b8`). These three flags do not resize the profile.
+- `FDM_SWAPCHAIN_SIZE` is parsed by `atoi` (`0x1c518`), clamped to nonnegative, and
+  seeds a known swapchain size (`0x1ccf8`). It is a size/matching hint, not a radius.
+  The synthetic map is square with side `ceil(size/32)` (`0x19048–0x19088`); image
+  association also matches this tile size (`0x16c78`). Changing render resolution changes
+  the pixel extent, tile quantization and potentially the matched render target/map. This can
+  change the visible diagnostic area without making the ignored radius exports effective;
+  a matched device capture is needed to establish which path a particular game used.
+
+Per-game library preferences now store `level`. Legacy radius choices are translated on read
+(and written as `level` on Save): nearest old nominal .30 → lo, .25 → med, .20 → hi,
+with larger values clamped by nearest choice; zero or unknown/invalid values → Default.
+This preserves approximate intent, not a claim that these presets implement those radii.
+Explicit `level` wins. Obsolete radius exports are removed from managed launchers.
+
+For device verification, hold game scene, render resolution and gaze constant; compare explicit
+`lo`, `med`, `hi` across fresh game starts (Default should match lo absent another runtime override).
+First use Fixed for a stable comparison, then Eye-tracked to check gaze following. Enable
+**Darken coarse fragments (test)** and adapter `snapshot=N` to capture submitted eye images headlessly
+every N seconds (GLES only, left eye at quarter size); compare the undarkened center and peripheral bands. Existing adapter
+builds need diagnostic support installed. Turn the test and snapshots off before benchmarking.
+Agent `FOVEATION_ENV_KEYS` must include `"FOVE_LEVEL"` for launcher updates via `set_settings`.
 
 `device.foveation` enables Valve's shared Vulkan injection and suppresses competing native foveation through
-`foveation_fix=1`. Game settings stores mode, radius and test selection as a per-game library preference, outside shared recipes. This remains
+`foveation_fix=1`. Game settings stores mode, profile and test selection as a per-game library preference, outside shared recipes. This remains
 experimental: complete images were confirmed in RE4, Batman, Deadpool, The Climb 2 and Asgard's Wrath 2,
 not all Quest games or renderers. RE4 and Batman checks include title/calibration scenes; these are not
 equivalent to extended gameplay coverage. Asgard gameplay was visually confirmed, without an on/off benchmark.
@@ -432,7 +475,7 @@ in Climb the same library also carries the compatibility correction.
 
 High-resolution Deadpool samples crossed from about 45 to 90 FPS with injection enabled, but temperatures and
 power rose as it rendered twice as many frames. Foveation does not guarantee lower temperature at uncapped FPS.
-The new configurable radii have configuration/build coverage; each radius has not been separately play-tested.
+Preset export/migration has configuration coverage; these preset comparisons have not been device-tested here.
 
 ## Monitoring sources (probed 2026-10-07, SteamOS 0.4.3, kernel 6.18; used by the Monitor tab, agent `_monitor`)
 
@@ -459,7 +502,7 @@ game processes without one), temperatures every 2 s, the CPU-cluster power rails
 
 ### Foveation user preferences (discussion #365)
 
-Game settings → Picture provides Default / Eye-tracked / Fixed / Off, radius, and an advanced diagnostic switch.
+Game settings → Picture provides Default / Eye-tracked / Fixed / Off, a runtime profile, and an advanced diagnostic switch.
 `set_settings` (agent 98) atomically rewrites just the managed launcher exports and records them in deployment.json;
 no APK rebuild, reinstall or live device intervention is needed. Changes apply at the next start. Default restores
 recipe/catalog launcher defaults; explicit preferences win. One-time library migration extracts old recipe choices

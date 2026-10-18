@@ -103,7 +103,7 @@ def show_adapter_dialog(app: FramePortApp, package: str) -> None:
                     if env.get("ENABLE_VULKAN_FDM_INJECTION_LAYER") == "1" else "")
             pref = {"mode": mode}
             if mode in ("tracked", "fixed"):
-                pref.update(radius=float(env.get("FOVE_INNER") or 0),
+                pref.update(level=env.get("FOVE_LEVEL") if env.get("FOVE_LEVEL") in ("lo", "med", "hi") else "",
                             test=env.get("LEPTON_ENV_FRAMEPORT_FOVEATION_TEST") == "1")
             _open(app, package, None, vals, pref)
         app.run_bg(load)
@@ -122,24 +122,23 @@ def _open(app: FramePortApp, package: str, g: dict | None, values: dict, foveati
 
     def foveation_change(key, value):
         foveation[key] = value
-        for name in ("radius", "test"):
+        for name in ("level", "test"):
             if name in foveation_rows:
                 foveation_rows[name].visible = (foveation.get("mode") in ("tracked", "fixed") and
                                                (name != "test" or advanced["on"]))
                 C.update(foveation_rows[name])
 
-    foveation_specs = (("mode", Foveation.CHOICES), ("radius", Foveation.RADIUS_CHOICES), ("test", None))
+    foveation_specs = (("mode", Foveation.CHOICES), ("level", Foveation.LEVEL_CHOICES), ("test", None))
     for key, choices in (foveation_specs if not g or g.get("kind", "quest") == "quest" else ()):
         ui = FOVEATION_UI[key]
         if choices:
-            value = str(foveation.get(key, "")) if key == "mode" else f"{float(foveation.get(key) or 0):g}"
+            value = str(foveation.get(key, ""))
             choices = list(choices)
             if value not in [str(v) for v, _ in choices]:
                 choices.append((value, value))
             control = C.dropdown(value=value, width=T.px(220),
                 options=[ft.DropdownOption(key=str(v), text=tr(label)) for v, label in choices],
-                on_select=lambda e, k=key: foveation_change(k, float(e.control.value) if k == "radius"
-                                                         else e.control.value))
+                on_select=lambda e, k=key: foveation_change(k, e.control.value))
         else:
             control = C.switch(value=bool(foveation.get(key)),
                                on_change=lambda e: foveation_change("test", bool(e.control.value)))
@@ -232,7 +231,7 @@ def _open(app: FramePortApp, package: str, g: dict | None, values: dict, foveati
 
     def save(e):
         if foveation.get("mode", "") not in ("tracked", "fixed"):
-            foveation.pop("radius", None)
+            foveation.pop("level", None)
             foveation.pop("test", None)
         foveation_options(foveation)
         app.page.pop_dialog()
