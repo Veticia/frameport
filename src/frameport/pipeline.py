@@ -721,6 +721,20 @@ def add_windows_exe(exe: Path | str, reporter: Reporter | None = None) -> dict:
     return library.upsert_game(entry["package"], exe_confirmed=True)
 
 
+def _linked_game(path: Path, report: ScanReport, reporter: Reporter | None) -> dict | None:
+    """The library entry a downloaded APK belongs to when the scan found it as a game the library already has (an
+    install-link update: the older download is gone, so the scan took the new one as "moved"/"updated" and returned
+    nothing). If the scan left the library's copy (still there: "other copy"/"other version"), the link wins: the
+    entry switches to the download like "Update with a newer APK…"."""
+    for item in report.moved + report.updated:
+        if _same_path(item["path"], path):
+            return library.game(item["package"])
+    for item in report.other_version + report.other_copy:
+        if _same_path(item["path"], path):
+            return replace_apk(item["package"], path, reporter)["entry"]
+    return None
+
+
 def add_from_link(manifest, path: Path, reporter: Reporter | None = None, icon: Path | None = None) -> dict:
     """Add a build downloaded from an install link (deeplink.download) to the library: an APK (with any OBB files
     next to it), a Linux build or a Windows program. A manifest's name becomes the title (FrameDrop: "name is what
@@ -729,10 +743,11 @@ def add_from_link(manifest, path: Path, reporter: Reporter | None = None, icon: 
 
     kind = deeplink.classify(path.name)
     if kind == deeplink.APK:
-        added = add_path(path, reporter, art=True)
-        if not added:
+        report = ScanReport()
+        added = add_path(path, reporter, art=True, report=report)
+        entry = added[0] if added else _linked_game(path, report, reporter)
+        if entry is None:
             raise ValueError(f"{path.name} couldn't be read as an Android app")
-        entry = added[0]
     elif kind == deeplink.LINUX:
         entry = add_linux_app(path, reporter)
     elif kind == deeplink.EXE:

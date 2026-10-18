@@ -161,6 +161,26 @@ def test_another_version_isnt_swapped_silently(tmp_path, monkeypatch, quest_mani
     assert (g["title"], g["tags"], g["recipe"]["source"]) == ("My Game", ["mine"], "user")
 
 
+def test_an_install_link_update_takes_the_new_download(tmp_path, monkeypatch, quest_manifest):
+    """Updating a game from its install link: the scan sees the new download as another version of a library game
+    (and returns nothing); add_from_link must still answer with the game, now on the new file."""
+    from frameport import deeplink
+
+    _setup(tmp_path, monkeypatch, quest_manifest)
+    m = deeplink.Manifest("My Game", [deeplink.ManifestFile("https://a.com/game-2.apk")], "https://a.com/game.json",
+                          version="2")
+    # the earlier download is gone (FramePort removes it), the new one arrives in its own folder
+    shutil.rmtree(tmp_path / "Old")
+    newer = _game(tmp_path / "Dl2", quest_manifest, extra=b"v2")
+    g = pipeline.add_from_link(m, newer)
+    assert g["package"] == PKG and g["apk"] == str(newer) and g["link"]["version"] == "2"
+    assert (g["tags"], g["recipe"]["source"]) == (["mine"], "user")
+    # the earlier download still on disk: the link still switches the game to the new file
+    newest = _game(tmp_path / "Dl3", quest_manifest, extra=b"v3")
+    g = pipeline.add_from_link(m, newest)
+    assert g["apk"] == str(newest) and g["source_sha256"] == pipeline.builder.sha256(newest)
+
+
 def test_a_second_copy_leaves_the_existing_one(tmp_path, monkeypatch, quest_manifest):
     _setup(tmp_path, monkeypatch, quest_manifest)
     _game(tmp_path / "Copy", quest_manifest)
