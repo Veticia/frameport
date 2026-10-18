@@ -421,3 +421,17 @@ def test_relaunch_environment_drops_the_running_apps_own_variables():
                              "SERIOUS_PYTHON_SITE_PACKAGES": "x", "PYTHONHOME": "C:/Temp/serious_python_temp",
                              "PYTHONPATH": "y", "USERPROFILE": "C:/Users/u", "PSModulePath": "z"})
     assert env == {"PATH": "/bin", "USERPROFILE": "C:/Users/u", "PSModulePath": "z"}
+
+
+def test_source_restart_keeps_a_hidden_console_on_windows(monkeypatch):
+    """2026-10-17: DETACHED_PROCESS gave every console child (ssh) of a restarted dev install its own visible terminal."""
+    from frameport.ui import updater
+
+    calls = []
+    monkeypatch.setattr(updater.sys, "platform", "win32")
+    monkeypatch.setattr(updater.subprocess, "Popen", lambda cmd, **k: calls.append(k))
+    u = updater.Updater.__new__(updater.Updater)
+    monkeypatch.setattr(u, "_quit", lambda: None, raising=False)
+    u._restart_process()
+    flags = calls[0]["creationflags"]
+    assert flags & 0x08000000 and not flags & 0x00000008  # CREATE_NO_WINDOW, not DETACHED_PROCESS

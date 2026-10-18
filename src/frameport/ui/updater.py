@@ -268,9 +268,12 @@ class Updater:
 
     def _restart_process(self) -> None:
         """Source/wheel installs: start a fresh FramePort, then close this one."""
+        # Windows: a hidden console (CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP), as the dev shortcut gives it.
+        # DETACHED_PROCESS left it without one, so every console program it started (ssh, git) opened its own
+        # visible terminal, and the Frame connection's ssh kept one open.
         subprocess.Popen([sys.executable, "-c", "from frameport.ui.app import main; main()"], close_fds=True,
                          start_new_session=sys.platform != "win32",
-                         creationflags=0x00000008 if sys.platform == "win32" else 0)
+                         creationflags=0x08000000 | 0x00000200 if sys.platform == "win32" else 0)
         self._quit()
 
     def _quit(self) -> None:
