@@ -16,6 +16,9 @@ BASE_SETTINGS = {"scale": 1.0, "foveation_fix": 1, "controller_fix": 1}
 
 # key, kind, default, title, description
 SETTINGS = [
+    ("fixed_resolution", "int", 0, "Keep full resolution (no dynamic resolution)",
+     "Keeps OpenXR layer recommendations at the full swapchain size. Prevents dynamic resolution from moving "
+     "Valve foveation off-centre or leaving a coarse white edge line. May increase GPU load."),
     ("scale", "float", 1.0, "Resolution scale",
      "Multiplies the recommended eye-buffer width and height (0.5–2.0). 1.5 ≈ 2.25× pixels."),
     ("foveation_fix", "int", 1, "Hide Quest foveation", "Hides Quest foveation extensions the Frame runtime lacks."),
@@ -325,6 +328,9 @@ FOVEATION_UI = {
 }
 
 UI: dict[str, dict] = {
+    "fixed_resolution": dict(group="picture", level="advanced", label="Keep full resolution (no dynamic resolution)",
+                help="Prevents dynamic resolution from moving Valve foveation off-centre or leaving a white edge line. "
+                     "May increase GPU load. Used at the next launch.", control=("switch",)),
     "scale": dict(group="picture", level="common", label="Render resolution (supersampling)",
                   help="Changes the game's render resolution. Higher is sharper but slower; 1.0× is the game's own "
                        "resolution.",
@@ -538,7 +544,7 @@ UI: dict[str, dict] = {
 # settings that need the xrshim (frame/adapter.py: OVRPlugin's own arm64 OpenXR lookups routed to the adapter), so
 # they don't work for 32-bit games on the bridge. surface_native: Batman's native video renderer hooks Vulkan
 # functions OVRPort's dispatcher doesn't know
-XRSHIM_SETTINGS = ("hide_fb_foveation", "controller_models", "haptic_fix", "surface_native")
+XRSHIM_SETTINGS = ("fixed_resolution", "hide_fb_foveation", "controller_models", "haptic_fix", "surface_native")
 # shown with an "experimental" pill (Game settings, game page, CLI): not proven in the headset on many games yet
 EXPERIMENTAL_SETTINGS = ("quest_buttons",)
 
@@ -625,6 +631,7 @@ class AdapterSetting(Patch):
                                            or "com.oculus.feature.PASSTHROUGH" in (a.extra.get("features") or {})),
             "alpha_blend_emul": lambda a: (a.extra.get("mr_only")
                                            or "com.oculus.feature.PASSTHROUGH" in (a.extra.get("features") or {})),
+            "fixed_resolution": lambda a: "libOVRPlugin.so" in a.libs or a.xr == "OpenXR",
             "hide_fb_foveation": ap.is_vulkan,
             "flip_emul": ap.is_vulkan,
             "flip_quads": ap.is_vulkan,

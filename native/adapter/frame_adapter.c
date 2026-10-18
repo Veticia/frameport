@@ -131,6 +131,7 @@ static int swapchain_fix = 1;
 static int cube_quads = 1;
 static int cube_standin = 1;  // cube swapchains the runtime refuses: served by the adapter (cube_standin.c)
 static int rect_clamp = 1;
+static int fixed_resolution;
 static int fb_color_space;  // fb_color_space: offer XR_FB_color_space when the runtime lacks it (#336)
 static int action_dedup = 1;  // rename duplicate action names in a set (session_fixes.c; GitHub #323)
 static int pose_consistency = 0;  // repeat xrLocateViews queries for one display time get the same poses (GitHub #8)  // clamp submitted image rects to their swapchain (SteamVR rejects a 1 px overrun)
@@ -207,6 +208,7 @@ static void read_settings(const char *path) {
         if (sscanf(line, "swapchain_fix=%f", &value) == 1) swapchain_fix = value != 0;
         if (sscanf(line, "cube_quads=%f", &value) == 1) cube_quads = value != 0;
         if (sscanf(line, "cube_standin=%f", &value) == 1) cube_standin = value != 0;
+        if (sscanf(line, "fixed_resolution=%f", &value) == 1) fixed_resolution = value != 0;
         if (sscanf(line, "rect_clamp=%f", &value) == 1) rect_clamp = value != 0;
         if (sscanf(line, "fb_color_space=%f", &value) == 1) fb_color_space = value != 0;
         if (sscanf(line, "action_dedup=%f", &value) == 1) action_dedup = value != 0;
@@ -298,6 +300,7 @@ static void initialize(void) {
     if (input_diag) LOG("per-game: input_diag=1 (controller-input diagnostics)");
     if (proximity_emul) LOG("per-game: proximity_emul=%d (finger proximity from capacitive touch: %s)", proximity_emul,
                             proximity_emul > 1 ? "thumb + index" : "thumb");
+    if (fixed_resolution) LOG("per-game: fixed_resolution=1 (full swapchain recommendations)");
     if (hide_fb_foveation) LOG("per-game: hide_fb_foveation=1 (Quest Vulkan foveation suppressed)");
     if (hide_space_warp) LOG("per-game: hide_space_warp=1 (XR_FB_space_warp hidden, space warp info removed)");
     if (strip_color_bias) LOG("per-game: strip_color_bias=%d (layer color scale/bias removed)", strip_color_bias);
@@ -593,6 +596,29 @@ static int swapchain_size(XrSwapchain handle, uint32_t *w, uint32_t *h) {
         if (sizes[i].handle == handle && handle != XR_NULL_HANDLE) { *w = sizes[i].w; *h = sizes[i].h; found = 1; }
     pthread_mutex_unlock(&sizes_lock);
     return found;
+}
+
+#include "fixed_resolution.h"
+
+static XRAPI_ATTR XrResult XRAPI_CALL fixed_recommended_resolution(XrSession session,
+        const XrRecommendedLayerResolutionGetInfoMETA *info, XrRecommendedLayerResolutionMETA *out) {
+    PFN_xrGetRecommendedLayerResolutionMETA fn = (PFN_xrGetRecommendedLayerResolutionMETA)
+        lookup(active_instance, "xrGetRecommendedLayerResolutionMETA");
+    if (!info || !out) return XR_ERROR_VALIDATION_FAILURE;
+    XrExtent2Di full;
+    if (!fixed_layer_size(info->layer, &full))
+        return fn ? fn(session, info, out) : XR_ERROR_FUNCTION_UNSUPPORTED;
+    // Read the runtime recommendation only for diagnostics. The override also works
+    // when the runtime lacks this function (OVRPort advertises it itself).
+    XrRecommendedLayerResolutionMETA old = {XR_TYPE_RECOMMENDED_LAYER_RESOLUTION_META};
+    XrResult result = fn ? fn(session, info, &old) : XR_ERROR_FUNCTION_UNSUPPORTED;
+    static unsigned logged;
+    if (logged++ < 5) LOG("fixed_resolution: recommended %dx%d -> %dx%d (runtime=%d)",
+        old.recommendedImageDimensions.width, old.recommendedImageDimensions.height,
+        full.width, full.height, result);
+    out->recommendedImageDimensions = full;
+    out->isValid = XR_TRUE;
+    return XR_SUCCESS;
 }
 
 // Clamp `r` to a w x h image; returns whether it changed (2 = it was empty and now covers the whole image).
@@ -2064,6 +2090,30 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEndFrame(XrSession session, const XrFrameEndInf
     static int warned, failures, passthrough_logged;
     if (dropped && warned++ < 5) LOG("xrEndFrame: dropped %u unusable layer(s)", dropped);
     if (passthrough && !passthrough_logged++) LOG("xrEndFrame: passthrough layer -> ALPHA_BLEND environment");
+    static struct { XrSwapchain swapchain; XrRect2Di rect; uint32_t array; } last_rect[2];
+    static double last_rect_log[2];
+    struct timespec rect_now;
+    clock_gettime(CLOCK_MONOTONIC, &rect_now);
+    double rect_seconds = rect_now.tv_sec + rect_now.tv_nsec / 1e9;
+    for (uint32_t i = 0; i < info->layerCount; ++i) {
+        const XrCompositionLayerBaseHeader *l = info->layers[i];
+        if (!l || l->type != XR_TYPE_COMPOSITION_LAYER_PROJECTION) continue;
+        const XrCompositionLayerProjection *p = (const XrCompositionLayerProjection *)l;
+        for (uint32_t v = 0; v < p->viewCount && v < 2; ++v) {
+            const XrSwapchainSubImage *sub = &p->views[v].subImage;
+            if ((last_rect[v].swapchain != sub->swapchain || last_rect[v].array != sub->imageArrayIndex ||
+                 memcmp(&last_rect[v].rect, &sub->imageRect, sizeof(sub->imageRect))) &&
+                rect_seconds - last_rect_log[v] >= 1.0) {
+                LOG("projection view %u rect change: swapchain=%p rect=%d,%d %dx%d array=%u", v,
+                    (void *)(uintptr_t)sub->swapchain, sub->imageRect.offset.x, sub->imageRect.offset.y,
+                    sub->imageRect.extent.width, sub->imageRect.extent.height, sub->imageArrayIndex);
+                last_rect[v].swapchain = sub->swapchain;
+                last_rect[v].rect = sub->imageRect;
+                last_rect[v].array = sub->imageArrayIndex;
+                last_rect_log[v] = rect_seconds;
+            }
+        }
+    }
     static int views_logged;
     if (views_logged < 3) {  // describe the stereo layer layout a few times to debug eye/stereo problems
         for (uint32_t i = 0; i < info->layerCount; ++i) {
@@ -2250,6 +2300,8 @@ static XRAPI_ATTR XrResult XRAPI_CALL fb_hide_update_swapchain(XrSwapchain swapc
 // For native/xrshim: emulated functions that overport's dispatcher doesn't know (it never asks us for them).
 __attribute__((visibility("default"))) PFN_xrVoidFunction framebridge_extension_proc(const char *name) {
     pthread_once(&init_once, initialize);
+    if (fixed_resolution && name && !strcmp(name, "xrGetRecommendedLayerResolutionMETA"))
+        return (PFN_xrVoidFunction)fixed_recommended_resolution;
     if (name && !strcmp(name, "framebridge_hide_fb_foveation"))
         return (PFN_xrVoidFunction)framebridge_hide_fb_foveation;
     if (hide_fb_foveation_vulkan && name) {
@@ -2300,6 +2352,10 @@ XRAPI_ATTR XrResult XRAPI_CALL xrGetInstanceProcAddr(XrInstance instance, const 
     if (emulated) { *function = emulated; return XR_SUCCESS; }
     if (hide_fb_foveation_vulkan && !strcmp(name, "xrUpdateSwapchainFB")) {
         *function = (PFN_xrVoidFunction)fb_hide_update_swapchain;
+        return XR_SUCCESS;
+    }
+    if (fixed_resolution && !strcmp(name, "xrGetRecommendedLayerResolutionMETA")) {
+        *function = (PFN_xrVoidFunction)fixed_recommended_resolution;
         return XR_SUCCESS;
     }
     HOOK(xrGetSystemProperties)

@@ -785,3 +785,45 @@ SteamVR's own Touch remap (`/opt/steamvr/drivers/frame_controller/resources/inpu
 layout `oculus_touch`) is the diagram's "SteamVR default": X -> d-pad down, Y -> d-pad left/right/up, A -> A,
 B -> B/X/Y, Menu -> View, plus trigger click -> bumper. Games with their own Valve binding file in that folder
 (Beat Saber, Batman, Accounting+, In Death, ...) use that file instead.
+
+
+## Fixed layer resolution / Batman (#406, #394)
+
+Batman: Arkham Shadow (`com.camouflaj.manta`, Unity + OVRPlugin, OpenXR/Vulkan) submits
+`2768x2768`, then corner-anchored `rect=0,32 2736x2736`, `rect=0,64 2704x2704` inside the
+same swapchain. On SteamOS 0.5.6 Valve's FDM injection covers the full swapchain: shrinking
+viewports can move the sharp centre towards the top right and expose a coarse white right edge.
+The runtime recommendation driving OVRPlugin's dynamic resolution remains unverified.
+
+`adapter.fixed_resolution=1` (default off, Batman recipe on) overrides
+`xrGetRecommendedLayerResolutionMETA`: tracked full swapchain dimensions, `isValid=XR_TRUE`.
+The existing rect_clamp size table already records successful xrCreateSwapchain calls and
+retires entries at destruction. Projection views must have matching sizes; quads are supported;
+unknown swapchains, mixed sizes and other layer types retain the runtime behavior. Submitted
+rectangles are never enlarged after rendering. Full resolution may increase GPU load.
+
+The cached OVRPort 3.4.3-aa54c3f dispatcher contains both the extension and function name
+(and a runtime-missing diagnostic). Its fixed routing table is not a guarantee that every
+version forwards the call unchanged. Enable the existing arm64 xrshim for this setting:
+OVRPlugin's loader lookup reaches `framebridge_extension_proc` directly, while native OpenXR
+loaders use the adapter's xrGetInstanceProcAddr hook. No extension hiding: keeping the
+recommendation API available avoids relying on an unverified OVRPlugin fallback. The adapter
+revision stays unchanged because the new setting is opt-in; the catalog requires 1.2.2 so older
+remote clients keep their bundled recipe (`recommend.catalog.unusable_reason`). Rebuild and
+reinstall Batman to receive the binary and shim routing; this is not a settings-only fix for
+an old APK. Device/headset verification is pending.
+
+Headless check: expect `extension shim: xrGetRecommendedLayerResolutionMETA -> FrameBridge`
+for OVRPlugin, then up to five `fixed_resolution: recommended WxH -> 2768x2768 (runtime=...)`
+lines. Compare the size to the actual eye swapchain creation log; scaling can change it.
+`projection view 0 rect change: ... rect=0,0 2768x2768` (and view 1) should remain full size
+through gameplay/loading transitions. Rect changes continue to log at most once per second
+per eye, comparing against the last logged state so a throttled final change is still shown.
+No recommendation logs means this API path was not exercised: do not claim the fix worked.
+Headset check: sharp region centred in both eyes, no white right edge, correct menus/loading
+fades, and acceptable pacing with full-resolution GPU load.
+
+This is separate from #303's `foveation_storage_fix` (clearing SUBSAMPLED allocation flags;
+see PLAYBOOK and FRAME_RUNTIME), which fixes black/coarse storage corruption. It also leaves
+#394's `FOVE_LEVEL=lo/med/hi` presets intact (commits 01ad5e6b, d7f0d514): those select the
+full-swapchain density pattern, not the game's dynamic viewport.

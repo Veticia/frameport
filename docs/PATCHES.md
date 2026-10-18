@@ -2,7 +2,7 @@
 
 # Patches
 
-Every patch and game setting FramePort knows: 186 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
+Every patch and game setting FramePort knows: 187 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
 
 Each entry says what the patch does, whether it changes the APK or only the install, when FramePort suggests it, its options, the catalog games whose recipe names it and the launch-test signatures that suggest it. Patches that are on by default are on for every game, so the catalog rarely names them.
 
@@ -12,7 +12,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 
 - [Patches from OVRPort](#group-overport) (25)
 - [Steam Frame patches](#group-frame) (61)
-- [Game settings](#group-adapter) (77)
+- [Game settings](#group-adapter) (78)
 - [Files and settings on the Frame](#group-device) (10)
 - [PC VR (Proton and Revive)](#group-pcvr) (13)
 
@@ -125,6 +125,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Per-eye diagnostics (log)](#adapter-eye_debug) | `adapter.eye_debug` | Game settings |  |
 | [Draw fades over the picture](#adapter-fade_quad) | `adapter.fade_quad` | Game settings | 2 |
 | [Colour space support](#adapter-fb_color_space) | `adapter.fb_color_space` | Game settings |  |
+| [Keep full resolution (no dynamic resolution)](#adapter-fixed_resolution) | `adapter.fixed_resolution` | Game settings | 1 |
 | [Upside-down panel images (diagnostics)](#adapter-flip_dump) | `adapter.flip_dump` | Game settings |  |
 | [Fix upside-down menus](#adapter-flip_emul) | `adapter.flip_emul` | Game settings |  |
 | [Rotate panels 180°](#adapter-flip_quads) | `adapter.flip_quads` | Game settings |  |
@@ -1606,6 +1607,23 @@ For games that stop at start because the headset reports no colour space (for ex
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
 
 > Offers Meta's colour-space extension when the Frame's runtime lacks it: the game is told the headset uses Rec.709 and may choose any colour space (no conversion is done). For games that quit before their VR session with "Rec.709 color space unavailable" (for example OutRun Quest VR, GitHub #336). Only reaches games that use their own OpenXR loader; OVRPort's dispatcher can't forward the new functions.
+
+### <a id="adapter-fixed_resolution"></a>Keep full resolution (no dynamic resolution)
+
+Prevents dynamic resolution from moving Valve foveation off-centre or leaving a white edge line. May increase GPU load. Used at the next launch.
+
+- `adapter.fixed_resolution`
+- **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
+- **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
+- **Options:**
+  - Value: int, default `0`.
+  - Game settings → Picture → "Keep full resolution (no dynamic resolution)" (advanced).
+- **Catalog games (1):** Batman: Arkham Shadow.
+- **Suggested by launch-test signatures:**
+  - `dynamic-resolution-foveation` (info): The game submits an offset projection viewport.
+- **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
+
+> Keeps OpenXR layer recommendations at the full swapchain size. Prevents dynamic resolution from moving Valve foveation off-centre or leaving a coarse white edge line. May increase GPU load.
 
 ### <a id="adapter-flip_dump"></a>Upside-down panel images (diagnostics)
 
