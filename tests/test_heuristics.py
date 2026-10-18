@@ -128,15 +128,14 @@ def test_meta_permissions_suggested_for_spatial_data():
         assert s and s.recommended
 
 
-def test_meta_depth_occlusion_suggested():
-    """Games referencing Meta Depth API keywords get frame.meta_depth_occlusion by default."""
+def test_meta_depth_occlusion_offered_not_turned_on():
+    """Games with Meta's Depth API keywords are offered frame.meta_depth_occlusion, off (many carry it unused)."""
     from frameport.patches import base
 
     p = base.get("frame.meta_depth_occlusion")
-    a = _analysis(engine="Unity", extra={"meta_depth_occlusion": True})
-    s = p.detect(a)
-    assert s and s.recommended
-    assert p.detect(_analysis(engine="Unity", extra={"meta_depth_occlusion": False})) is None
+    il2cpp = ["libil2cpp.so", "libunity.so"]
+    s = p.detect(_analysis(engine="Unity", libs=il2cpp, extra={"meta_depth_occlusion": True}))
+    assert s and not s.recommended
+    assert p.detect(_analysis(engine="Unity", libs=il2cpp, extra={"meta_depth_occlusion": False})) is None
     assert p.detect(_analysis(engine="Unreal", extra={"meta_depth_occlusion": True})) is None
-
-
+    assert not p.applies(_analysis(engine="Unity", libs=["libmono.so", "libunity.so"]))  # Mono: no libil2cpp.so

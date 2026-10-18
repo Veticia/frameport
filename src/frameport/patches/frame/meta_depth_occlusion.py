@@ -1,4 +1,4 @@
-"""Unity: disable Meta environment depth occlusion (EnvironmentDepthManager).
+"""Unity: disable Meta environment depth occlusion (EnvironmentDepthManager). From PR #246 (@alicecatpaw).
 
 Steam Frame lacks Meta Quest's physical depth sensor (XR_META_environment_depth), leaving
 environment depth textures uninitialized. In shaders using Meta's Depth API (such as Laser Dance's
@@ -158,75 +158,93 @@ def _patch_shader_proximity_fade(data: bytes, is_known_build: bool = True) -> tu
     return None, 0
 
 
+LASER_DANCE = "com.mrf.tvb.laser_dance"
+# Laser Dance's asset fixes, file -> [(offset, struct format, original value, new value)]. The original values at all
+# of these places together identify the build they were made for (no versionName was recorded with them): another
+# build doesn't match all of them and gets none of the asset fixes.
+_LD_SPLIT0 = "sharedassets0.assets.split0"
+_LD_SPLIT79 = "sharedassets0.assets.split79"
+_LD_SPLIT80 = "sharedassets0.assets.split80"
+LASER_DANCE_ASSETS = {
+    # Material 97 (LaserBeam): shader 281 (FX/Laser Beam Hard Edges) -> 279 (Custom/UnlitColorInstancedFading)
+    _LD_SPLIT0: [(0x7B2A0, "<Iq", (0, 281), (0, 279))],
+    # LineRenderers 5495 and 5497 (beam_LOD0): material 97 -> 45 (LaserBeam with shader 279)
+    _LD_SPLIT79: [(0x20A38, "<Iq", (0, 97), (0, 45)), (0x20D78, "<Iq", (0, 97), (0, 45))],
+    # LineLod 13814 (rules 0/1) and 13936 (rules 4/5): LOD0 at every distance
+    _LD_SPLIT80: [(0x9958 + 52, "<f", 2.30, 999.0), (0x9958 + 124, "<f", 2.30, 0.0),
+                  (0xEB40 + 360, "<f", 2.20, 9999.0), (0xEB40 + 432, "<f", 2.20, 0.0)],
+}
+_LD_NOTES = {_LD_SPLIT0: "redirected Material 97 shader from 281 to 279",
+             _LD_SPLIT79: "redirected {n} LineRenderer materials from 97 to 45",
+             _LD_SPLIT80: "adjusted {n} LineLod distance rules to maintain close-range laser visibility"}
+
+
+def _ld_key(name: str) -> str | None:
+    return next((k for k in LASER_DANCE_ASSETS if name.endswith(k)), None)
+
+
+def _ld_matches(fmt: str, data: bytes, off: int, want) -> bool:
+    size = struct.calcsize(fmt)
+    if off + size > len(data):
+        return False
+    got = struct.unpack_from(fmt, data, off)
+    if fmt == "<f":
+        return round(got[0], 2) == want
+    return got == want
+
+
 def _patch_laser_dance_assets(name: str, data: bytes) -> tuple[bytes | None, str | None]:
-    """Patch Laser Dance asset files so laser renderers and materials stay active and visible
-    at close proximity:
-    1. sharedassets0.assets.split0: redirect Material 97 (LaserBeam) shader pointer from 281
-       (FX/Laser Beam Hard Edges) to 279 (Custom/UnlitColorInstancedFading).
-    2. sharedassets0.assets.split79: redirect LineRenderers 5495 and 5497 (beam_LOD0) material
-       pointer from Material 97 to Material 45 (LaserBeam with Shader 279).
-    3. sharedassets0.assets.split80: adjust LineLod components (13814 and 13936) distances:
-       - 13814: max_d of Rule 0 (LOD0) -> 999.0, min_d of Rule 1 (LOD1) -> 0.0
-       - 13936: max_d of Rule 4 (LOD0) -> 9999.0, min_d of Rule 5 (LOD1) -> 0.0
-       ensuring laser beam renderers are enabled continuously at all player distances.
-    """
-    if name.endswith("sharedassets0.assets.split0"):
-        ba = bytearray(data)
-        off = 0x7b2a0
-        if off + 12 <= len(ba) and struct.unpack("<Iq", ba[off : off + 12]) == (0, 281):
-            ba[off : off + 12] = struct.pack("<Iq", 0, 279)
-            return bytes(ba), "redirected Material 97 shader from 281 to 279"
+    """One Laser Dance asset file: the fixes in LASER_DANCE_ASSETS whose original values are in place."""
+    key = _ld_key(name)
+    if not key:
+        return None, None
+    ba = bytearray(data)
+    n = 0
+    for off, fmt, old, new in LASER_DANCE_ASSETS[key]:
+        if _ld_matches(fmt, ba, off, old):
+            struct.pack_into(fmt, ba, off, *(new if isinstance(new, tuple) else (new,)))
+            n += 1
+    return (bytes(ba), _LD_NOTES[key].format(n=n)) if n else (None, None)
 
-    elif name.endswith("sharedassets0.assets.split79"):
-        ba = bytearray(data)
-        patched = 0
-        for off in [0x20a38, 0x20d78]:
-            if off + 12 <= len(ba) and struct.unpack("<Iq", ba[off : off + 12]) == (0, 97):
-                ba[off : off + 12] = struct.pack("<Iq", 0, 45)
-                patched += 1
-        if patched > 0:
-            return bytes(ba), f"redirected {patched} LineRenderer materials from 97 to 45"
 
-    elif name.endswith("sharedassets0.assets.split80"):
-        ba = bytearray(data)
-        c13814_off = 0x9958
-        c13936_off = 0xeb40
-        patched = 0
-        if c13814_off + 128 <= len(ba):
-            if round(struct.unpack("<f", ba[c13814_off + 52 : c13814_off + 56])[0], 2) == 2.30:
-                ba[c13814_off + 52 : c13814_off + 56] = struct.pack("<f", 999.0)
-                patched += 1
-            if round(struct.unpack("<f", ba[c13814_off + 124 : c13814_off + 128])[0], 2) == 2.30:
-                ba[c13814_off + 124 : c13814_off + 128] = struct.pack("<f", 0.0)
-                patched += 1
+def laser_dance_build(ws) -> dict[str, str] | None:
+    """The asset files of the Laser Dance build the fixes were made for ({key: entry name}), else None."""
+    found = {}
+    for name in ws.names():
+        key = _ld_key(name)
+        if key:
+            found[key] = name
+    if set(found) != set(LASER_DANCE_ASSETS):
+        return None
+    for key, name in found.items():
+        data = ws.read(name)
+        if not all(_ld_matches(fmt, data, off, old) for off, fmt, old, _new in LASER_DANCE_ASSETS[key]):
+            return None
+    return found
 
-        if c13936_off + 436 <= len(ba):
-            if round(struct.unpack("<f", ba[c13936_off + 360 : c13936_off + 364])[0], 2) == 2.20:
-                ba[c13936_off + 360 : c13936_off + 364] = struct.pack("<f", 9999.0)
-                patched += 1
-            if round(struct.unpack("<f", ba[c13936_off + 432 : c13936_off + 436])[0], 2) == 2.20:
-                ba[c13936_off + 432 : c13936_off + 436] = struct.pack("<f", 0.0)
-                patched += 1
 
-        if patched > 0:
-            return bytes(ba), f"adjusted {patched} LineLod distance rules to maintain close-range laser visibility"
+KEYWORDS = (b"HARD_OCCLUSION", b"SOFT_OCCLUSION")
+RENAMED = (b"NO_OCCLUSION_X", b"NO_OCCLUSION_Y")  # same length: the files keep their size and offsets
+MAX_REWRITE = 512 << 20  # asset files larger than this are left alone (they're read into memory to be rewritten)
 
-    return None, None
+
+def _is_asset(name: str) -> bool:
+    return name.endswith(".assets") or ".assets.split" in name
 
 
 class MetaDepthOcclusion(Il2cppReturnPatch):
     id = "frame.meta_depth_occlusion"
     title = "Unity: disable Meta depth occlusion"
     description = (
-        "Steam Frame lacks Meta Quest's physical depth sensor (XR_META_environment_depth), leaving "
-        "environment depth buffers uninitialized. In shaders using Meta's Depth API (such as Laser Dance's "
-        "FX/Laser), the invalid depth causes the shader to treat virtual objects near the player as occluded "
-        "by the physical environment, making objects (e.g. laser beams) disappear when the player approaches "
-        "them. Rewrites EnvironmentDepthManager methods in libil2cpp.so so depth occlusion keywords are never "
-        "enabled at runtime, keeping virtual objects visible at all distances."
+        "The Frame has no depth sensor (XR_META_environment_depth), so the environment depth Meta's Depth API reads "
+        "is never valid. Shaders using it then hide virtual objects near the player behind a room that isn't there "
+        "(for example Laser Dance's lasers vanish when approached). Rewrites EnvironmentDepthManager's support/"
+        "availability checks and its occlusion-keyword setter in libil2cpp.so (found with Cpp2IL), and renames the "
+        "HARD_OCCLUSION / SOFT_OCCLUSION shader keywords in the game's asset files that contain them, so occlusion is "
+        "never turned on. For Laser Dance's known build it also keeps the laser beams' materials and close-range "
+        "LODs visible. Only for games with this symptom."
     )
     order = 48
-    revision = 6
     targets = {
         "Meta.XR.EnvironmentDepth/Meta/XR/EnvironmentDepth/EnvironmentDepthManager.cs": {
             "get_IsSupported": RET_ZERO,
@@ -244,95 +262,71 @@ class MetaDepthOcclusion(Il2cppReturnPatch):
     check_name = "Meta depth occlusion"
 
     def applies(self, a):
-        return a.engine == "Unity"
+        return a.engine == "Unity" and "libil2cpp.so" in a.libs and not a.only_32bit
 
     def detect(self, a):
-        if a.engine == "Unity" and (a.extra or {}).get("meta_depth_occlusion"):
-            return Suggestion(
-                True,
-                "App uses Meta Depth API occlusion keywords (HARD_OCCLUSION/SOFT_OCCLUSION), which "
-                "cause virtual objects to vanish when approached due to missing depth sensor on Steam Frame.",
-            )
+        if self.applies(a) and (a.extra or {}).get("meta_depth_occlusion"):
+            # many Meta XR SDK games carry the Depth API without using it: only for a game with the symptom
+            return Suggestion(False, "Uses Meta's Depth API occlusion (HARD_OCCLUSION / SOFT_OCCLUSION): turn on if "
+                                     "objects vanish when you come close to them.")
         return None
 
     def apply(self, ctx: ApkContext) -> bool:
         ws = ctx.ws
-        # 1. First apply Il2cppReturnPatch (libil2cpp.so method returns)
         il2cpp_ok = super().apply(ctx)
 
-        is_laser_dance = (
-            getattr(ctx, "analysis", None)
-            and getattr(ctx.analysis, "package", "") == "com.mrf.tvb.laser_dance"
-        )
+        laser_dance = ws and getattr(ctx.analysis, "package", "") == LASER_DANCE and laser_dance_build(ws)
+        if getattr(ctx.analysis, "package", "") == LASER_DANCE and not laser_dance:
+            ctx.notes.append("Laser Dance asset fixes skipped: not the build they were made for")
 
-        # 2. In-place replace HARD_OCCLUSION and SOFT_OCCLUSION across .assets files only.
-        # Leaving global-metadata.dat unchanged prevents managed code from enabling the renamed keyword
-        # variant at runtime, ensuring occlusion variants cannot be selected.
-        replaced_files = 0
-        total_replacements = 0
-        patched_shader_files = 0
-        total_shader_subs = 0
-        laser_dance_asset_patches = 0
+        renamed_files = renamed = shader_files = shader_subs = ld_files = 0
+        for name in sorted(ws.names()):
+            if not _is_asset(name):
+                continue
+            ld = bool(laser_dance)
+            # files without the keywords are only streamed, never held in memory (except Laser Dance's known build)
+            has_keywords = ws.contains(name, KEYWORDS)
+            if not (has_keywords or ld):
+                continue
+            if ws.size(name) > MAX_REWRITE:
+                ctx.notes.append(f"{name}: too large to rewrite, occlusion keywords left as they are")
+                continue
+            data = ws.read(name)
+            modified = False
+            if ld and _ld_key(name):
+                new, note = _patch_laser_dance_assets(name, data)
+                if new is not None:
+                    data, modified = new, True
+                    ld_files += 1
+                    ctx.notes.append(f"{name}: {note}")
+            if ld:
+                new, subs = _patch_shader_proximity_fade(data, is_known_build=True)
+                if new is not None and subs:
+                    data, modified = new, True
+                    shader_files += 1
+                    shader_subs += subs
+                    ctx.notes.append(f"{name}: neutralized distance proximity fade in {subs} shader subprograms")
+            counts = [data.count(k) for k in KEYWORDS]
+            if any(counts):
+                for k, r in zip(KEYWORDS, RENAMED, strict=True):
+                    data = data.replace(k, r)
+                renamed_files += 1
+                renamed += sum(counts)
+                ctx.notes.append(f"{name}: disabled {counts[0]} HARD_OCCLUSION and {counts[1]} SOFT_OCCLUSION "
+                                 "keywords")
+                modified = True
+            if modified:
+                ws.put(name, data)
 
-        for name in list(ws.names()):
-            if name.endswith(".assets") or ".assets.split" in name:
-                data = ws.read(name)
-                modified = False
-
-                if is_laser_dance and ".assets.split" in name:
-                    new_asset, note = _patch_laser_dance_assets(name, data)
-                    if new_asset is not None:
-                        data = new_asset
-                        laser_dance_asset_patches += 1
-                        ctx.notes.append(f"{name}: {note}")
-                        modified = True
-
-                # Patch compiled shader proximity fade for known Laser Dance build
-                if is_laser_dance and (name.endswith(".assets") or ".assets.split" in name):
-                    new_data, subs = _patch_shader_proximity_fade(data, is_known_build=True)
-                    if new_data is not None and subs > 0:
-                        data = new_data
-                        patched_shader_files += 1
-                        total_shader_subs += subs
-                        ctx.notes.append(
-                            f"{name}: neutralized distance proximity fade in {subs} shader subprograms"
-                        )
-                        modified = True
-
-                h_count = data.count(b"HARD_OCCLUSION")
-                s_count = data.count(b"SOFT_OCCLUSION")
-                if h_count or s_count:
-                    data = (
-                        data.replace(b"HARD_OCCLUSION", b"NO_OCCLUSION_X")
-                        .replace(b"SOFT_OCCLUSION", b"NO_OCCLUSION_Y")
-                    )
-                    replaced_files += 1
-                    total_replacements += (h_count + s_count)
-                    ctx.notes.append(
-                        f"{name}: disabled {h_count} HARD_OCCLUSION and {s_count} SOFT_OCCLUSION keywords"
-                    )
-                    modified = True
-
-                if modified:
-                    ws.put(name, data)
-
-        if replaced_files > 0:
-            ctx.reporter.log(
-                f"Meta depth occlusion: neutralised {total_replacements} "
-                f"occlusion keywords across {replaced_files} files"
-            )
-        if patched_shader_files > 0:
-            ctx.reporter.log(
-                f"Meta depth occlusion: neutralised proximity fade in {total_shader_subs} "
-                f"shader subprograms across {patched_shader_files} files"
-            )
-        if laser_dance_asset_patches > 0:
-            ctx.reporter.log(
-                f"Meta depth occlusion: applied {laser_dance_asset_patches} Laser Dance laser asset fixes"
-            )
-
-        return il2cpp_ok or (replaced_files > 0) or (patched_shader_files > 0) or (laser_dance_asset_patches > 0)
+        if renamed_files:
+            ctx.reporter.log(f"Meta depth occlusion: neutralised {renamed} occlusion keywords across "
+                             f"{renamed_files} files")
+        if shader_files:
+            ctx.reporter.log(f"Meta depth occlusion: neutralised proximity fade in {shader_subs} shader subprograms "
+                             f"across {shader_files} files")
+        if ld_files:
+            ctx.reporter.log(f"Meta depth occlusion: applied Laser Dance laser asset fixes to {ld_files} files")
+        return bool(il2cpp_ok or renamed_files or shader_files or ld_files)
 
 
 register(MetaDepthOcclusion)
-
