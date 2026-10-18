@@ -23,6 +23,17 @@ def test_discovery_suggests_scene_emulation(line):
     assert finding.suggest == ["adapter.scene_emul"]
 
 
+def test_served_room_raises_no_scene_warnings():
+    # OVRPort lists XR_FB_scene and names xrDiscoverSpacesMETA before the shim takes over; FrameBridge served the room
+    log = ("overportOXR: - XR_FB_scene 1\n"
+           "overportOXR: Unknown proc addr: xrDiscoverSpacesMETA\n"
+           "FrameBridge: extension shim: xrQuerySpacesFB -> FrameBridge\n"
+           "FrameBridge: scene: emulation active (anchored to STAGE)\n"
+           "FrameBridge: scene: discovery request=398895087617 results=1\n")
+    ids = {f.id for f in triage(log, "RUNNING", "com.example.mr").findings}
+    assert "scene-missing" not in ids and "mr-discovery-unsupported" not in ids
+
+
 def test_loaded_scan_is_not_a_missing_room():
     result = triage("FrameBridge: scene: loaded room.txt (source scan)", "RUNNING")
     assert not any(f.id.startswith("mr-") for f in result.findings)
