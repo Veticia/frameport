@@ -6,6 +6,11 @@ from . import library
 QUEST_BUTTONS = "adapter.quest_buttons"
 CHOICES = ((0, "SteamVR default"), (1, "Mirror"), (2, "Quest pair"))
 
+# Test Quest Controllers (github.com/spoopyghosty0/TestQuestControllers): a small app that shows every Quest controller
+# input it receives on a 3D model, for trying the controller button modes. Installed through its install link.
+TESTER_PACKAGE = "io.github.spoopyghosty0.testquestcontrollers"
+TESTER_MANIFEST = "https://raw.githubusercontent.com/spoopyghosty0/TestQuestControllers/main/frameport-install.json"
+
 
 def quest_buttons_default() -> int:
     value = library.setting("input.quest_buttons", 0)

@@ -143,7 +143,8 @@ def main() -> int:
              ("settings-index", lambda a: a.page.run_task(a.settings_view.show_section, "pc")),
              ("settings-folders", lambda a: a.page.run_task(a.settings_view.show_section, "folders")),
              ("settings-installing", lambda a: a.page.run_task(a.settings_view.show_section, "installing")),
-             ("settings-data", lambda a: a.page.run_task(a.settings_view.show_section, "data"))]
+             ("settings-data", lambda a: a.page.run_task(a.settings_view.show_section, "data")),
+             ("settings-controllers", lambda a: a.page.run_task(a.settings_view.show_section, "controllers"))]
     if game:
         steps.insert(1, ("game", lambda a: a.open_game(game)))
         steps.insert(2, ("game-customize", lambda a: a.open_game(game, advanced=True)))

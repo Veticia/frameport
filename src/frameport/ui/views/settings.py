@@ -203,9 +203,24 @@ class SettingsView:
                             value=str(mode), width=T.px(300),
                             options=[ft.DropdownOption(str(v), tr(label)) for v, label in controllers.CHOICES],
                             on_select=changed)
+        # the tester app: installed through its install link (FramePort's own install question), else opened
+        if library.game(controllers.TESTER_PACKAGE):
+            tester = C.secondary(tr("Open Test Quest Controllers"), ft.Icons.SPORTS_ESPORTS_OUTLINED,
+                                 lambda e: app.open_game(controllers.TESTER_PACKAGE),
+                                 tooltip=C.tip(HELP["controller_tester"]))
+        else:
+            from .link_dialog import open_link
+
+            tester = C.secondary(tr("Get Test Quest Controllers"), ft.Icons.SPORTS_ESPORTS_OUTLINED,
+                                 lambda e: open_link(app, controllers.TESTER_MANIFEST),
+                                 tooltip=C.tip(HELP["controller_tester"]))
+        tip = C.callout(ft.Row([
+            C.body(tr("Try the modes first: Test Quest Controllers shows which Quest button each Frame button "
+                      "sends."), T.TEXT, expand=True),
+            tester], vertical_alignment=ft.CrossAxisAlignment.CENTER), "info", ft.Icons.LIGHTBULB_OUTLINE_ROUNDED)
         return ft.Column([
             C.body(tr("Choose which Quest Touch buttons the Frame's face buttons send.")),
-            choice, preview,
+            choice, preview, tip,
             C.meta(tr("Used when installing or updating games that follow the global default. "
                       "Each game's Game settings can override it. Changes take effect at the next launch. "
                       "Games installed before this feature need Update on Frame once for the mode to work.")),
