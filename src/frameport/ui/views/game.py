@@ -171,7 +171,7 @@ class GameView:
                                        tr("Upload videos into this player's storage on the Frame.")))
         if g.get("kind") not in ("rift", "linux") and app.frame_state == "connected" and \
                 C.install_state(g, app.frame_info) in ("installed", "outdated"):
-            buttons.append(C.secondary(tr("Back up saves"), ft.Icons.SAVE_OUTLINED,
+            buttons.append(C.secondary(tr("Back up saves"), ft.Icons.SAVE_ROUNDED,
                                        lambda e: app.backup_saves(pkg)))
         more = C.menu_button(C.menu_items(app.game_actions(pkg, quick=False)), icon=ft.Icons.MORE_HORIZ_ROUNDED,
                              icon_color=T.TEXT_2, tooltip=tr("More actions"))
