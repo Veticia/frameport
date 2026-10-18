@@ -149,6 +149,12 @@ def test_box_fallback_unchanged(harness, tmp_path, text):
     assert "scene: capture requested -> guardian box" in log
 
 
+def test_scene_capture_completes_after_a_delay(harness, tmp_path):
+    # a same-frame answer was missed by Pinball FX's prompt logic: the completion waits like a real scan
+    log = run(harness, tmp_path, "capture_delay")
+    assert "complete in 30 ms" in log and "scene: capture complete delivered" in log
+
+
 def test_box_size_settings(harness, tmp_path):
     log = run(harness, tmp_path, "override")
     assert "scene: room 3.00 x 4.00 x 2.70 m" in log
