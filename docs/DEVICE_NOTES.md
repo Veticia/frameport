@@ -785,3 +785,69 @@ SteamVR's own Touch remap (`/opt/steamvr/drivers/frame_controller/resources/inpu
 layout `oculus_touch`) is the diagram's "SteamVR default": X -> d-pad down, Y -> d-pad left/right/up, A -> A,
 B -> B/X/Y, Menu -> View, plus trigger click -> bumper. Games with their own Valve binding file in that folder
 (Beat Saber, Batman, Accounting+, In Death, ...) use that file instead.
+
+
+## Embedded Khronos OpenXR loaders (GitHub #254)
+
+PrimedGun v2 (`org.primedgun.v2`, 2.0.0-alpha.4) embeds the Khronos loader in
+`libmetroid_prime_port.so` (no loader DT_NEEDED). Its diagnostics show both Android
+broker queries failing, then `/vendor/etc/openxr/1/active_runtime.json`, runtime
+`SteamVR/OpenXR`, and no FrameBridge messages. The supplied `openxr_android.cpp`
+initializes the loader with the VM and SDL activity. This is Vulkan OpenXR; retain
+the catalog's removal of `frame.vk_sanitize` (the game assembles the Vulkan soname).
+
+`frame.static_openxr_loader` is general: analysis v23 detects arm64 game libraries
+with Khronos manifest strings and negotiation/manifest markers. Complete manifest
+paths (including ABI variants) are replaced in `.rodata`, NUL padded, with
+`/sdcard/fp_openxr_runtime.json`. Khronos also builds paths from fragments: the
+verified `platform_utils.hpp` layout uses five partition prefixes, `/etc/openxr/`,
+the major API version and `/active_runtime[.aarch64].json`. For this complete table,
+prefixes become `/sd` and the subdir becomes `card/fp/`; all candidates then resolve
+to `/sdcard/fp/1/active_runtime[.aarch64].json`. The undecorated manifest is written;
+a missing ABI-specific file falls back to it. No offsets or sizes change. **Pooled
+partition strings can also be used by game code**; this cannot be ruled out from
+synthetic tests. Only the complete known fragment table is accepted. Other layouts
+need analysis/rewrite support before they can be patched.
+
+Both broker authorities become `org.fp_null.openxr.*`, causing provider lookup to
+fail and the loader to fall back to files even if a broker is later installed.
+Only the game's copy is changed. Agent v103 writes both manifest spellings into
+`<base>/lepton-data/external` (the game's private `/sdcard`), records
+`static_openxr_loader` in deployment.json, and repairs them before every launch.
+Launcher upgrades preserve that repair. A configuration-only finalize also writes
+them. The payload is `{"file_format_version":"1.0.0","runtime":{"library_path":"libfp_xrruntime.so","name":"FramePort"}}`.
+
+The shim exports negotiation and initialization, loads FrameBridge by soname,
+forwards Android loader initialization through its GIPA, and returns that GIPA to
+the outer loader. FrameBridge then loads `libopenxr_loader_original.so`, an
+unmodified Khronos loader reused from OVRPort's downloaded generic runtime.
+This works for recipes with `overport: False`: the patch supplies the original
+loader before `frame.adapter` installs FrameBridge, its settings payload and
+foveation support. Settings still use `settings.conf` through the normal launcher.
+No Meta dispatcher is needed. The loader's unmodified system paths keep it from
+recursing through the game manifest. Android linker namespaces, symbol binding
+between the two loaders, runtime handles across the chain, and FrameBridge's
+behavior without the OVRPort dispatcher still require a device check.
+
+Source verification: Khronos OpenXR-SDK-Source
+[`release-1.0.34/src/common/platform_utils.hpp`](https://github.com/KhronosGroup/OpenXR-SDK-Source/blob/release-1.0.34/src/common/platform_utils.hpp)
+and the same fragment layout in release-1.1.53;
+[`manifest_file.cpp`](https://github.com/KhronosGroup/OpenXR-SDK-Source/blob/release-1.0.34/src/loader/manifest_file.cpp)
+leaves a bare library filename unchanged for dlopen and tries brokers before files;
+[`runtime_interface.cpp`](https://github.com/KhronosGroup/OpenXR-SDK-Source/blob/release-1.0.34/src/loader/runtime_interface.cpp)
+forwards loader initialization to the runtime export before negotiation (or through
+GIPA afterwards). The reporter's diagnostic ELF summary contains no embedded
+loader version or raw string table; the exact game's loader revision and binary
+rewrite remain unverified. Host tests cover complete and assembled synthetic ELF
+layouts, idempotence, unchanged other bytes, APK apply/validate with no OVRPort,
+negotiation rejection, Android init forwarding and missing-chain failure. No Frame
+connection or device test was performed.
+
+Headless acceptance after rebuilding and installing with this development build:
+`uv run frameport test org.primedgun.v2`. Expect `fp_xrruntime: chain resolved:
+FrameBridge`, `fp_xrruntime: xrInitializeLoaderKHR forwarded to FrameBridge: 0`,
+`fp_xrruntime: negotiated runtime interface 1: FrameBridge`, then FrameBridge's
+`scale=... loader=...libopenxr_loader_original.so`, `xrCreateInstance` and pacing /
+`new layer:` lines. The outer loader should log the private sdcard manifest, the
+inner loader the real vendor manifest. Require RUNNING and submitted frames;
+headset rendering and controls need separate confirmation.

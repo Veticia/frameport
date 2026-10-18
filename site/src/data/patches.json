@@ -594,6 +594,11 @@
   "title": "Start straight in VR (skip the 2D launcher)",
   "group": "Steam Frame patches"
  },
+ "frame.static_openxr_loader": {
+  "anchor": "frame-static_openxr_loader",
+  "title": "Embedded OpenXR loader: use FrameBridge",
+  "group": "Steam Frame patches"
+ },
  "frame.swapchain_limit": {
   "anchor": "frame-swapchain_limit",
   "title": "Allow swapchains larger than 4096 px",

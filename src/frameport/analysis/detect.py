@@ -9,7 +9,7 @@ from pathlib import Path
 
 from ..apk import axml
 from ..core.models import Analysis
-from . import elf
+from . import elf, static_openxr
 from .luajit import xlua_47bit, xlua_sha256
 from .unity_split import split_build as unity_split_build
 
@@ -54,7 +54,8 @@ IL2CPP_METADATA = "assets/bin/Data/Managed/Metadata/global-metadata.dat"
 #     USB MIDI driver polls the missing USB service: frame.usb_midi_watcher, GitHub #297) (2026-10)
 # 22: unreal_binned3 (Unreal built with FMallocBinned3 reserves tens of GiB at load: frame.unreal_noreserve,
 #     GitHub #349) (2026-10)
-ANALYSIS_VERSION = 22
+# 23: statically linked Khronos OpenXR loaders (GitHub #254)
+ANALYSIS_VERSION = 23
 
 
 # Android versions by API level (for messages); the Frame's Lepton container runs Android 11 (API 30)
@@ -339,7 +340,8 @@ def analyze(path: Path, deep: bool = True, data_bytes: int | None = None) -> Ana
     libset = set(libs)
     engine = ("Unreal" if libset & {"libUE4.so", "libUnreal.so"} else "Unity" if "libunity.so" in libset
               else "CryEngine" if "libCrySystem.so" in libset or cry_project else "Other")
-    has_openxr, has_vrapi = "libopenxr_loader.so" in libset, "libvrapi.so" in libset
+    static_loaders = [n for n, d in lib_bytes.items() if static_openxr.detected(n, d)] if abi == "arm64-v8a" else []
+    has_openxr, has_vrapi = bool(static_loaders) or "libopenxr_loader.so" in libset, "libvrapi.so" in libset
     xr = "OpenXR+VrApi" if has_openxr and has_vrapi else "OpenXR" if has_openxr else "VrApi" if has_vrapi else "?"
     is_overport = "libopenxr_loader_generic.so" in libset or "liboverport.config.so" in libset
     # VrApi called directly by the engine (no OVRPlugin): overport cannot translate it.
@@ -404,6 +406,7 @@ def analyze(path: Path, deep: bool = True, data_bytes: int | None = None) -> Ana
         is_overport_output=is_overport,
         debuggable=bool(axml.Axml(manifest).get_bool("application", "debuggable")),
         extra={
+            "static_openxr_loader": static_loaders,
             "analysis_version": ANALYSIS_VERSION,
             "xlua_47bit": xlua_47bit(lib_bytes.get("libxlua.so", b"")),
             "xlua_sha256": xlua_sha256(lib_bytes.get("libxlua.so", b"")),
@@ -431,7 +434,8 @@ def analyze(path: Path, deep: bool = True, data_bytes: int | None = None) -> Ana
             "unreal_version": unreal_version,
             "oculus_os_refs": sorted(oculus_os_refs),
             "xr_layer_exts": sorted(layer_exts),  # composition-layer extensions the game's own libraries request
-            "vr_kind": vr_kind(libset, manifest_strings),
+            "vr_kind": ("openxr" if static_loaders
+                        and vr_kind(libset, manifest_strings) == "none" else vr_kind(libset, manifest_strings)),
             "headset": headset(meta, abis, vr_kind(libset, manifest_strings), requires_6dof(manifest)),
             # a Google Daydream / Cardboard build (GVR / Cardboard SDK): no path to the Frame's headset (GitHub #335)
             "google_vr": google_vr(libset, cats, manifest_strings, gvr_java, boot),

@@ -1,14 +1,16 @@
 package: org.primedgun.v2
 title: PrimedGun v2
 status: unknown
-notes: 'Without the Vulkan library rename: the game builds the library name from two pieces, so the renamed name didn''t
-  exist ("libfp_vkn.so"), its renderer fell back to OpenGL and VR couldn''t start (GitHub #254). Not yet confirmed in
-  the headset.'
+notes: 'Vulkan via a statically linked Khronos OpenXR loader bypassed FrameBridge (GitHub #254).
+  The embedded-loader patch routes it through FrameBridge; device validation is still pending.
+  Keep the Vulkan library rename disabled: this game assembles its library name from two pieces,
+  so renaming it prevented Vulkan from loading and VR could not start. Not yet confirmed in the headset.'
 tested_version: 2.0.0-alpha.4
 engine: Other
 xr: OpenXR
 frame:
 - frame.sdl_clipboard
+- frame.static_openxr_loader
 frame_remove:
 - frame.vk_sanitize
 updated: '2026-10-18'

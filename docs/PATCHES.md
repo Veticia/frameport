@@ -2,7 +2,7 @@
 
 # Patches
 
-Every patch and game setting FramePort knows: 186 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
+Every patch and game setting FramePort knows: 187 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
 
 Each entry says what the patch does, whether it changes the APK or only the install, when FramePort suggests it, its options, the catalog games whose recipe names it and the launch-test signatures that suggest it. Patches that are on by default are on for every game, so the catalog rarely names them.
 
@@ -11,7 +11,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 ## Groups
 
 - [Patches from OVRPort](#group-overport) (25)
-- [Steam Frame patches](#group-frame) (61)
+- [Steam Frame patches](#group-frame) (62)
 - [Game settings](#group-adapter) (77)
 - [Files and settings on the Frame](#group-device) (10)
 - [PC VR (Proton and Revive)](#group-pcvr) (13)
@@ -77,6 +77,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [SDL apps: start without a clipboard service](#frame-sdl_clipboard) | `frame.sdl_clipboard` | Steam Frame patches | 6 |
 | [Stress Level Zero: let Unity start Vulkan itself](#frame-slz_vulkan_hooks) | `frame.slz_vulkan_hooks` | Steam Frame patches | 1 |
 | [Start straight in VR (skip the 2D launcher)](#frame-start_activity) | `frame.start_activity` | Steam Frame patches |  |
+| [Embedded OpenXR loader: use FrameBridge](#frame-static_openxr_loader) | `frame.static_openxr_loader` | Steam Frame patches | 1 |
 | [Allow swapchains larger than 4096 px](#frame-swapchain_limit) | `frame.swapchain_limit` | Steam Frame patches | default |
 | [Team Beef ports: treat the Frame as a Meta headset](#frame-tbxr_vendor) | `frame.tbxr_vendor` | Steam Frame patches | 1 |
 | [Unity App UI: no Android 12 vibrator](#frame-unity_appui_vibrator) | `frame.unity_appui_vibrator` | Steam Frame patches |  |
@@ -934,6 +935,21 @@ Opens the app straight in VR, skipping its flat launcher screen. Turn off to use
 - **Source:** [patches/frame/manifest_fixes.py](../src/frameport/patches/frame/manifest_fixes.py)
 
 > Some apps open a flat Android launcher that then starts a separate VR activity (for example WiiCompiled). Shown with Lepton's flat window, that window stays in view after the VR part starts. This makes the VR activity the one Lepton starts (its LAUNCHER category), so the app opens in VR with no flat window. Everything only the launcher does (choosing or importing content) is skipped: turn it off for a run when you need the launcher, and turn off "Show the app's Android window".
+
+### <a id="frame-static_openxr_loader"></a>Embedded OpenXR loader: use FrameBridge
+
+Makes an embedded OpenXR loader use FrameBridge and your game settings.
+
+- `frame.static_openxr_loader`
+- **Changes:** Changes the APK (a rebuild and reinstall apply it).
+- **Suggested (on):** The embedded Khronos OpenXR loader bypasses FrameBridge.
+- **Requires:** [`frame.adapter`](#frame-adapter)
+- **Catalog games (1):** PrimedGun v2.
+- **Suggested by launch-test signatures:**
+  - `static-openxr-loader-bypass` (warning): A Khronos loader loaded the system runtime without FrameBridge.
+- **Source:** [patches/frame/static_openxr_loader.py](../src/frameport/patches/frame/static_openxr_loader.py)
+
+> Routes a game's statically linked Khronos OpenXR loader through FrameBridge by rewriting its runtime manifest paths in place into its own /sdcard (including assembled paths). Disables its Android runtime broker queries so they fall back to that file. Ships a runtime shim and an unmodified inner Khronos loader, which reads the system runtime manifest. Reinstall to write the per-game manifest.
 
 ### <a id="frame-swapchain_limit"></a>Allow swapchains larger than 4096 px
 
