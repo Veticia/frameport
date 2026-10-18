@@ -48,6 +48,32 @@ class ApkWorkspace:
             return self.replace[original]
         return self._zip.read(original)
 
+    def size(self, name: str) -> int:
+        """Uncompressed size of an entry (staged content if replaced)."""
+        if name in self.add:
+            return len(self.add[name])
+        original = next((o for o, new in self.rename.items() if new == name), name)
+        if original in self.replace:
+            return len(self.replace[original])
+        return self.infos[original].file_size
+
+    def contains(self, name: str, needles: tuple[bytes, ...], chunk: int = 4 << 20) -> bool:
+        """Whether an entry contains any of `needles`, streamed in chunks (big entries aren't read into memory)."""
+        if name in self.add:
+            return any(n in self.add[name] for n in needles)
+        original = next((o for o, new in self.rename.items() if new == name), name)
+        if original in self.replace:
+            return any(n in self.replace[original] for n in needles)
+        keep = max(len(n) for n in needles) - 1
+        tail = b""
+        with self._zip.open(original) as f:
+            while block := f.read(chunk):
+                window = tail + block
+                if any(n in window for n in needles):
+                    return True
+                tail = window[-keep:] if keep else b""
+        return False
+
     def lib(self, name: str) -> str:
         return self.libdir + name
 

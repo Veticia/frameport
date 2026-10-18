@@ -1,12 +1,14 @@
 import os
 import struct
 
-import lz4.block
+import pytest
 
 from frameport.patches.frame.meta_depth_occlusion import (
     _patch_laser_dance_assets,
     _patch_shader_proximity_fade,
 )
+
+lz4_block = pytest.importorskip("lz4.block")  # UnityPy's dependency; the patch skips the shader fix without it
 
 
 def test_patch_shader_proximity_fade_synthetic():
@@ -28,7 +30,7 @@ def test_patch_shader_proximity_fade_synthetic():
     raw = raw + noise
     decomp_sz = len(raw)
 
-    comp = lz4.block.compress(raw, mode='high_compression', compression=10, store_size=False)
+    comp = lz4_block.compress(raw, mode='high_compression', compression=10, store_size=False)
     comp_sz = len(comp)
 
     # Wrap in asset data: decomp_sz (uint32), comp_sz (uint32), comp_bytes
@@ -41,7 +43,7 @@ def test_patch_shader_proximity_fade_synthetic():
 
     # Decompress new_data and verify c_10_0 is present and c_2_0 is replaced
     new_comp = new_data[8:8+comp_sz]
-    decomp = lz4.block.decompress(new_comp, uncompressed_size=decomp_sz)
+    decomp = lz4_block.decompress(new_comp, uncompressed_size=decomp_sz)
     assert c_10_0 in decomp
     assert c_2_0 not in decomp[:80] # In subprogram area
 
@@ -83,7 +85,7 @@ def test_patch_laser_dance_assets():
 def test_analysis_version_bumped():
     from frameport.analysis.detect import ANALYSIS_VERSION
 
-    assert ANALYSIS_VERSION >= 23
+    assert ANALYSIS_VERSION >= 24
 
 
 def test_patch_shader_proximity_fade_ignores_unknown_build_and_unrelated_shader():
@@ -97,7 +99,7 @@ def test_patch_shader_proximity_fade_ignores_unknown_build_and_unrelated_shader(
     noise = (os.urandom(256) * 300)[:60000]
     raw = raw + noise
     decomp_sz = len(raw)
-    comp = lz4.block.compress(raw, mode='high_compression', compression=10, store_size=False)
+    comp = lz4_block.compress(raw, mode='high_compression', compression=10, store_size=False)
     asset_data = struct.pack('<II', decomp_sz, len(comp)) + comp
 
     # If is_known_build=False, returns None, 0 immediately
@@ -124,3 +126,56 @@ def test_reanalysis_keeps_user_recipes_without_the_patch(tmp_path):
     _store_analysis("com.test.mrgame", _analysis(package="com.test.mrgame", engine="Unity",
                                                  extra={"meta_depth_occlusion": True}))
     assert "frame.meta_depth_occlusion" not in library.game("com.test.mrgame")["recipe"]["patches"]
+
+
+def _ld_files(build_ok=True):
+    split0 = bytearray(0x7B2A0 + 32)
+    struct.pack_into("<Iq", split0, 0x7B2A0, 0, 281)
+    split79 = bytearray(0x20D78 + 32)
+    struct.pack_into("<Iq", split79, 0x20A38, 0, 97)
+    struct.pack_into("<Iq", split79, 0x20D78, 0, 97 if build_ok else 96)
+    split80 = bytearray(0xEB40 + 500)
+    for off, v in ((0x9958 + 52, 2.30), (0x9958 + 124, 2.30), (0xEB40 + 360, 2.20), (0xEB40 + 432, 2.20)):
+        struct.pack_into("<f", split80, off, v)
+    d = "assets/bin/Data/"
+    return {d + "sharedassets0.assets.split0": bytes(split0), d + "sharedassets0.assets.split79": bytes(split79),
+            d + "sharedassets0.assets.split80": bytes(split80)}
+
+
+@pytest.mark.parametrize("build_ok", [True, False])
+def test_laser_dance_asset_fixes_only_for_the_known_build(tmp_path, build_ok):
+    import zipfile
+
+    from test_patches import _analysis
+
+    from frameport.apk.workspace import ApkWorkspace
+    from frameport.core.events import Reporter
+    from frameport.patches import base
+    from frameport.patches.frame.meta_depth_occlusion import MetaDepthOcclusion, laser_dance_build
+
+    apk = tmp_path / "ld.apk"
+    with zipfile.ZipFile(apk, "w") as z:
+        z.writestr("AndroidManifest.xml", b"<manifest/>")
+        for name, data in _ld_files(build_ok).items():
+            z.writestr(name, data)
+    with ApkWorkspace(apk) as ws:
+        assert bool(laser_dance_build(ws)) is build_ok
+        ctx = base.ApkContext(ws, _analysis(package="com.mrf.tvb.laser_dance", engine="Unity"), {}, Reporter(), {})
+        MetaDepthOcclusion().apply(ctx)
+        split0 = ws.read("assets/bin/Data/sharedassets0.assets.split0")
+        assert struct.unpack_from("<Iq", split0, 0x7B2A0) == ((0, 279) if build_ok else (0, 281))
+
+
+def test_workspace_contains_streams_across_chunks(tmp_path):
+    import zipfile
+
+    from frameport.apk.workspace import ApkWorkspace
+
+    apk = tmp_path / "a.apk"
+    with zipfile.ZipFile(apk, "w") as z:
+        z.writestr("big.assets", b"x" * 10 + b"HARD_OCCLUSION" + b"y" * 10)
+        z.writestr("none.assets", b"z" * 40)
+    with ApkWorkspace(apk) as ws:
+        assert ws.contains("big.assets", (b"HARD_OCCLUSION",), chunk=8)  # the keyword spans chunk borders
+        assert not ws.contains("none.assets", (b"HARD_OCCLUSION",), chunk=8)
+        assert ws.size("big.assets") == 34
