@@ -786,6 +786,18 @@ def add_from_link(manifest, path: Path, reporter: Reporter | None = None, icon: 
 LINK_CHECK_HOURS = 6
 
 
+def link_installed_version(g: dict) -> str:
+    """The version of a game from an install link that updates are compared against: the one its manifest named,
+    else the APK's own versionName from the analysis (manifests that named no version, e.g. a first release), else
+    "". No file access: the game page calls it while drawing."""
+    version = (g.get("link") or {}).get("version")
+    if version:
+        return str(version)
+    if is_rift(g) or is_linux(g):
+        return ""
+    return str((g.get("analysis") or {}).get("version") or "")
+
+
 def check_link_updates(force: bool = False, reporter: Reporter | None = None) -> list[str]:
     """Fetch the manifest of every game installed from an install link whose manifest named a version again, and mark
     the ones with a newer version (`link_update` = {"version", "checked"}; cleared when the manifest no longer offers
@@ -800,16 +812,16 @@ def check_link_updates(force: bool = False, reporter: Reporter | None = None) ->
     library.set_setting("links.last_update_check", time.time())
     found = {}
     for g in library.games():
-        link = g.get("link")
-        if not deeplink.can_check_updates(link):
+        link, current = g.get("link"), link_installed_version(g)
+        if not deeplink.can_check_updates(link, current):
             continue
         try:
-            m = deeplink.check_update(link)
+            m = deeplink.check_update(link, current)
         except Exception as exc:  # noqa: BLE001 - offline, moved manifest…: try again next time
             if reporter:
                 reporter.log(f"{g['package']}: update check failed: {exc}")
             continue
-        found[g["package"]] = {"version": m.version, "checked": time.time()} if m else None
+        found[g["package"]] = {"version": m.version, "checked": time.time(), "current": current} if m else None
     with library.edit() as data:
         for pkg, offer in found.items():
             if pkg not in data["games"]:

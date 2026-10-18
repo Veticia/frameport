@@ -817,6 +817,8 @@
  "Install {title} on {value}": "",
  "installed": "",
  "Installed": "",
+ "Installed from an install link ({host}), version {version}.": "",
+ "Installed from an install link ({host}).": "",
  "Installed games ({len})": "",
  "Installed the theme \"{name}\"": "",
  "Installed theme file · {file}": "",

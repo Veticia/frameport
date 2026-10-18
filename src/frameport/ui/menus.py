@@ -37,6 +37,7 @@ class MenuState:
     android: bool = False          # a Quest/Android game (not PC VR, not a Linux app): it can get a newer APK
     new_version: bool = False      # a Linux app or PC VR game: it can get a newer version (file or folder)
     saves: bool = False            # a Quest/Android game installed on the connected Frame: back up / restore saves
+    link: bool = False             # installed from an install link that can be fetched again: Check for updates
 
 
 def menu_sections(g: dict, st: MenuState, act: Callable[[str], Callable]) -> list:
@@ -59,6 +60,8 @@ def menu_sections(g: dict, st: MenuState, act: Callable[[str], Callable]) -> lis
         top.append((tr("Update with a newer APK…"), ft.Icons.UPGRADE_ROUNDED, act("new_apk")))
     if st.new_version and not job:  # the same for Linux apps and PC VR games
         top.append((tr("Update with a newer version…"), ft.Icons.UPGRADE_ROUNDED, act("new_version")))
+    if st.link and not job:  # ask the install link now instead of waiting for the 6-hourly check
+        top.append((tr("Check for updates"), ft.Icons.REFRESH_ROUNDED, act("check_link")))
     if st.on_frame and not rift and not linux and not job:
         # the new build only; the Frame's game data stays (e.g. changed OBBs a normal update would replace)
         top.append((tr("Update app only…"), ft.Icons.SYSTEM_UPDATE_ALT_ROUNDED, act("update_app")))

@@ -18,7 +18,7 @@ from pathlib import Path
 
 import flet as ft
 
-from .. import pipeline
+from .. import deeplink, pipeline
 from ..core import applog, library
 from ..errors import explain
 from ..frame import monitor as M
@@ -1185,6 +1185,7 @@ class FramePortApp:
             "update_app": lambda e: self.update_app_only(pkg),
             "new_apk": lambda e: self.page.run_task(self.update_with_apk, pkg),
             "new_version": lambda e: self.page.run_task(self.update_with_version, pkg),
+            "check_link": lambda e: self._update_from_link([pkg]),
             "uninstall_frame": lambda e: self.uninstall(pkg, "frame"),
             "uninstall_pc": lambda e: self.uninstall(pkg, "pc"),
             "remove": lambda e: self.remove_from_library(pkg),
@@ -1206,7 +1207,7 @@ class FramePortApp:
             selectable=lv is not None,
             media_button=C.is_media_player(g) and not rift,
             movable=connected and C.frame_drive(g, self.frame_info) is not None, android=not rift and not linux,
-            new_version=rift or linux)
+            new_version=rift or linux, link=deeplink.can_check_link(g.get("link")))
         return menu_sections(g, st, handlers.__getitem__)
 
     def open_game_menu(self, pkg: str) -> None:
@@ -2393,6 +2394,12 @@ class FramePortApp:
         elif force:
             self.toast(tr("Game recipes are up to date"))
         return n
+
+    def _update_from_link(self, pkgs: list[str]) -> None:
+        """Ask the install links of these games for a newer version now (the game menu's "Check for updates")."""
+        from .views.link_dialog import update_from_link
+
+        update_from_link(self, pkgs)
 
     def _check_link_updates(self, force: bool = False) -> list[str]:
         """Games installed from an install link whose manifest names a newer version now (pipeline.

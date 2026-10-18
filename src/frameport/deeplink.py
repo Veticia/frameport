@@ -284,10 +284,17 @@ def is_newer_version(candidate: str, current: str) -> bool:
     return bool(candidate and current) and compare_versions(candidate, current) > 0
 
 
-def can_check_updates(link: dict | None) -> bool:
+def can_check_updates(link: dict | None, current: str | None = None) -> bool:
     """Whether a library entry's `link` record can be checked for updates: a manifest fetched from the web (not a bare
-    file link, a dropped local file or the demo) that named a version."""
-    if not isinstance(link, dict) or not link.get("version") or link.get("direct"):
+    file link, a dropped local file or the demo) and a known installed version: the one the manifest named, else
+    `current` (the installed build's own version, for manifests that named none)."""
+    return can_check_link(link) and bool(link.get("version") or current)
+
+
+def can_check_link(link: dict | None) -> bool:
+    """Whether a library entry's `link` record is a manifest fetched from the web that can be fetched again (the
+    game page's "Check for updates"), whether or not it named a version."""
+    if not isinstance(link, dict) or link.get("direct"):
         return False
     source = link.get("source") or ""
     if not source.lower().startswith(("https://", "http://")) or is_demo(source):
@@ -298,11 +305,11 @@ def can_check_updates(link: dict | None) -> bool:
         return False
 
 
-def check_update(link: dict) -> Manifest | None:
-    """The remembered manifest fetched again: returned when it names a newer version than the one installed, else
-    None. Raises LinkError/network errors like fetch_manifest."""
+def check_update(link: dict, current: str | None = None) -> Manifest | None:
+    """The remembered manifest fetched again: returned when it names a newer version than the one installed (the
+    link's version, else `current`), else None. Raises LinkError/network errors like fetch_manifest."""
     m = fetch_manifest(InstallRequest(manifest_url=link["source"]))
-    return m if is_newer_version(m.version, link.get("version") or "") else None
+    return m if is_newer_version(m.version, link.get("version") or current or "") else None
 
 
 # ------------------------------------------------------------------------------------------------- manifest

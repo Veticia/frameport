@@ -205,3 +205,16 @@ def test_save_backups_in_the_full_menu_of_quest_games():
         assert ("Open backups folder" in full) == (g is QUEST), name
         if g is QUEST:
             assert _section_of(entries, "Open backups folder") == "Saves"
+
+
+def test_check_for_updates_for_games_from_install_links():
+    """Games installed from an install link get "Check for updates" in the page's full menu (asks the link now);
+    never while a job runs, never for other games, never in the short right-click menu."""
+    for name, g, st in _states():
+        st.quick = False
+        assert "Check for updates" not in [e[0] for e in _items(menu_sections(g, st, _key))], name
+        st.link = True
+        full = menu_sections(g, st, _key)
+        assert ("Check for updates" in [e[0] for e in _items(full)]) == (not st.job), name
+        st.quick = True
+        assert "Check for updates" not in [e[0] for e in _items(menu_sections(g, st, _key))], name

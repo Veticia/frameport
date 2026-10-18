@@ -151,23 +151,24 @@ def download_and_install(app: FramePortApp, m: deeplink.Manifest, icon=None, ope
 
 def update_from_link(app: FramePortApp, pkgs: list[str]) -> None:
     """Game page / Library bar: games installed from an install link whose manifest offers a newer version (pipeline.
-    check_link_updates). Fetches each manifest again in a job, asks once, then downloads and installs every update
-    like a first install (download_and_install)."""
+    check_link_updates), and the game page's "Check for updates". Fetches each manifest again in a job, asks once,
+    then downloads and installs every update like a first install (download_and_install)."""
     def run(job: Job):
         job.reporter.stage(tr("Reading the install link"))
         offers, failed = [], []
         for pkg in pkgs:
-            link = (library.game(pkg) or {}).get("link")
-            if not deeplink.can_check_updates(link):
+            g = library.game(pkg) or {}
+            link, current = g.get("link"), pipeline.link_installed_version(g)
+            if not deeplink.can_check_updates(link, current):
                 continue
             try:
-                m = deeplink.check_update(link)
+                m = deeplink.check_update(link, current)
             except Exception as exc:  # noqa: BLE001 - one manifest that can't be read doesn't stop the others
                 failed.append(pkg)
                 job.reporter.log(f"{pkg}: {exc}")
                 continue
             if m:
-                offers.append((pkg, link.get("version") or "", m, deeplink.fetch_icon(m)))
+                offers.append((pkg, current, m, deeplink.fetch_icon(m)))
             else:  # the offer was withdrawn meanwhile
                 with library.edit() as data:
                     data["games"].get(pkg, {}).pop("link_update", None)
@@ -213,7 +214,19 @@ def link_update_text(g: dict) -> str | None:
     if not offer:
         return None
     return tr("Version {version} is available from its install link (you have {current}).").format(
-        version=offer.get("version"), current=link.get("version") or "?")
+        version=offer.get("version"), current=link.get("version") or offer.get("current") or "?")
+
+
+def link_check_text(g: dict) -> str | None:
+    """The game page's line for a game installed from an install link with no update known (None: not from a link
+    that can be fetched again). Its row has the "Check for updates" button."""
+    if g.get("link_update") or not deeplink.can_check_link(g.get("link")):
+        return None
+    version = pipeline.link_installed_version(g)
+    host = _host(g["link"].get("source") or "")
+    if version:
+        return tr("Installed from an install link ({host}), version {version}.").format(host=host, version=version)
+    return tr("Installed from an install link ({host}).").format(host=host)
 
 
 DEMO_COVER = "demo-cool-game"  # ui/icons/demo-cool-game.svg (also the site's site/public/demo/cool-game.svg)

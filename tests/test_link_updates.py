@@ -58,6 +58,28 @@ def test_which_links_are_checked(link, ok):
     assert deeplink.can_check_updates(link) is ok
 
 
+def test_links_without_a_version_use_the_installed_one():
+    """A manifest that named no version (e.g. a first release) is still checked: against the installed APK's own
+    versionName. The game page's "Check for updates" needs only a manifest it can fetch again."""
+    link = {"source": SRC, "version": ""}
+    assert not deeplink.can_check_updates(link) and deeplink.can_check_updates(link, "0.1.0")
+    assert deeplink.can_check_link(link) and not deeplink.can_check_link({"source": APK, "version": ""})
+    assert not deeplink.can_check_link({"source": SRC, "direct": True})
+    g = {"package": "com.x", "apk": "/x.apk", "link": link, "analysis": {"version": "0.1.0"}}
+    assert pipeline.link_installed_version(g) == "0.1.0"
+    assert pipeline.link_installed_version({**g, "link": {"source": SRC, "version": "0.2"}}) == "0.2"
+    assert pipeline.link_installed_version({**g, "kind": "linux"}) == ""
+
+
+def test_check_finds_an_update_for_a_link_without_a_version(monkeypatch, tmp_path):
+    library.upsert_game("com.x", title="X", apk=str(tmp_path / "x.apk"), analysis={"version": "0.1.0"},
+                        link={"source": SRC, "name": "X", "version": "", "direct": False})
+    monkeypatch.setattr(deeplink, "fetch_manifest", lambda req: deeplink.manifest_from_data(
+        _data(version="0.2.1"), req.manifest_url))
+    assert pipeline.check_link_updates(force=True) == ["com.x"]
+    assert library.game("com.x")["link_update"]["current"] == "0.1.0"
+
+
 def _add(monkeypatch, tmp_path, version, name="G"):
     path = tmp_path / "Tool.exe"
     path.write_bytes(b"MZ")

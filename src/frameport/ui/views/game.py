@@ -386,7 +386,7 @@ class GameView:
                           "settings."), T.TEXT, expand=True),
                 C.secondary(tr("Use the new recipe"), ft.Icons.AUTO_FIX_HIGH_ROUNDED, take_update)],
                 vertical_alignment=ft.CrossAxisAlignment.CENTER), "info", ft.Icons.NEW_RELEASES_OUTLINED))
-        from .link_dialog import link_update_text, update_from_link
+        from .link_dialog import link_check_text, link_update_text, update_from_link
 
         link_update = link_update_text(g)
         if link_update:
@@ -394,6 +394,14 @@ class GameView:
                 C.body(link_update, T.TEXT, expand=True),
                 C.secondary(tr("Download update"), ft.Icons.SYSTEM_UPDATE_ROUNDED,
                             lambda e: update_from_link(self.app, [pkg]))]), "info", ft.Icons.SYSTEM_UPDATE_ROUNDED))
+        link_check = link_check_text(g)
+        if link_check and not self.app.jobs.busy_with(pkg):
+            # the automatic check runs every 6 h: this asks the install link now
+            out.append(ft.Row([
+                C.meta(link_check, expand=True),
+                C.secondary(tr("Check for updates"), ft.Icons.REFRESH_ROUNDED,
+                            lambda e: update_from_link(self.app, [pkg]))],
+                vertical_alignment=ft.CrossAxisAlignment.CENTER))
         if g.get("steam_name_stale") and installed:
             out.append(C.callout(ft.Row([
                 C.body(tr("The Frame's Steam library still shows the old name."), T.TEXT, expand=True),

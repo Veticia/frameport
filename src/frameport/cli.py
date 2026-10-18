@@ -322,8 +322,8 @@ def link_updates(install: bool = typer.Option(False, "--install", help="download
                                                                       "the Frame (asks first unless --yes)"),
                  yes: bool = typer.Option(False, "--yes", "-y", help="don't ask before downloading"),
                  frame: Optional[str] = typer.Option(None, help=FRAME_HELP)):
-    """Check games installed from install links for newer versions (manifests that name a `version`; the GUI checks
-    at start, every 6 h)."""
+    """Check games installed from install links for newer versions (compared with the version the manifest named, else
+    the installed APK's own; the GUI checks at start, every 6 h, and on the game page's "Check for updates")."""
     from . import deeplink
 
     pkgs = pipeline.check_link_updates(force=True, reporter=printing_reporter())
@@ -332,13 +332,14 @@ def link_updates(install: bool = typer.Option(False, "--install", help="download
         return
     for pkg in pkgs:
         g = library.game(pkg)
-        typer.echo(f"{pkg}: {(g.get('link') or {}).get('version') or '?'} -> {g['link_update']['version']}"
+        typer.echo(f"{pkg}: {pipeline.link_installed_version(g) or '?'} -> {g['link_update']['version']}"
                    f"  ({g['link']['source']})")
     if not install or not (yes or typer.confirm(f"Download and install {len(pkgs)} update(s)?")):
         return
     target = _target(frame)
     for pkg in pkgs:
-        m = deeplink.check_update(library.game(pkg)["link"])
+        g = library.game(pkg)
+        m = deeplink.check_update(g["link"], pipeline.link_installed_version(g))
         if not m:
             continue
         rep = printing_reporter(verbose=False)
