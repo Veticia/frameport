@@ -383,8 +383,10 @@ signatures:
     diagnosis: Frame controller models are on, but the converted models are missing from the game's files. The agent found no Frame controller render models in SteamVR at install time; see the install log, or run the agent's controller_models command.
     suggest: []
   - id: scene-missing
-    # not OVRPlugin's routine "Unavailable OpenXR extension: XR_FB_scene" (printed by every OVRPlugin game)
-    pattern: '(?<!Unavailable OpenXR extension: )XR_FB_scene|XR_FB_spatial_entity.*(not supported|UNSUPPORTED)|xrQuerySpacesFB'
+    # not extension listings, which every Meta XR game prints: OVRPlugin's "Unavailable OpenXR extension:" and
+    # "Name=XR_FB_scene SpecVersion=1", OVRPort's "overportOXR: - XR_FB_scene 1", Unity's 'Meta XR Feature: ...
+    # Extensions="..."' (GitHub #404); XR_FB_scene_capture alone doesn't count either
+    pattern: '(?m)^(?!.*(?:Unavailable OpenXR extension: |Name=|overportOXR: - |Extensions=")).*XR_FB_scene\b|XR_FB_spatial_entity.*(not supported|UNSUPPORTED)|xrQuerySpacesFB'
     severity: warning
     diagnosis: The game wants Meta's room data (scene API), which the Frame lacks. The adapter can emulate a room from the guardian bounds.
     suggest: [adapter.scene_emul]
