@@ -395,3 +395,16 @@ def test_steam_games_and_overlay_apps(fa):
     # an overlay alone is nobody's game
     alone = {"games": [g for g in s["games"] if g["overlay"]]}
     assert main_game(alone) is None and now_playing(alone) is None
+
+
+def test_gpu_ignores_garbage_engine_time(fa):
+    """msm reported SteamVR's compositor engine time near 2**64, rising ~1000x faster than real time: an idle Frame
+    showed 100 % GPU. A delta longer than the interval falls back to cycles / GPU clock (231 MHz in the fixture)."""
+    m, clock = monitor(fa)
+    d = fa.ROOT / "proc" / "101" / "fdinfo" / "7"
+    w(d, "drm-driver:\tmsm\ndrm-engine-gpu:\t17907075587675617085 ns\ndrm-cycles-gpu:\t1000\n")
+    m.sample(wall=2000.0)
+    w(d, "drm-driver:\tmsm\ndrm-engine-gpu:\t17908231185178087810 ns\ndrm-cycles-gpu:\t" f"{1000 + 23_100_000}\n")
+    clock["t"] += 1.0
+    s = m.sample(wall=2001.0)
+    assert s["gpu"]["busy"] == 10.0  # 23.1 M cycles at 231 MHz = 0.1 s of 1 s

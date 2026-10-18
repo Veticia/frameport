@@ -523,7 +523,7 @@ All readable by the steamos user without root; the agent reads them directly (no
 | Metric | Source | Notes |
 |---|---|---|
 | CPU | `/proc/stat` deltas; `cpufreq/policy{0,2,5,7}` | 8 cores in 4 clusters: 0-1 / 2-4 / 5-6 / 7 (max 2.27 / 3.15 / 2.96 / 3.05 GHz) |
-| GPU busy | Sum of `drm-engine-gpu` (ns) deltas in `/proc/<pid>/fdinfo/<fd>` over every render-node fd (msm DRM) | Gives GPU % per process too. A process can hold several render fds: add them all. Lepton games see the node as `/dev/kgsl-3d0` (bind mount of `/dev/dri/renderD128`). `drm-total-memory` reads 0 |
+| GPU busy | Sum of `drm-engine-gpu` (ns) deltas in `/proc/<pid>/fdinfo/<fd>` over every render-node fd (msm DRM) | Gives GPU % per process too. A process can hold several render fds: add them all. Lepton games see the node as `/dev/kgsl-3d0` (bind mount of `/dev/dri/renderD128`). `drm-total-memory` reads 0. msm can report garbage engine time (SteamVR's vrcompositor: near 2^64, rising ~1000x faster than real time; idle Frame at 100 %, 2026-10-18): a per-fd delta longer than the interval falls back to `drm-cycles-gpu` / GPU clock (agent v102 `gpu_busy_ns`) |
 | GPU clock | `/sys/class/devfreq/3d00000.gpu/{cur,max}_freq` | 231–903 MHz in 12 steps |
 | Memory / pressure | `/proc/meminfo`; `/proc/pressure/{cpu,memory,io}` (`some avg10`) | 16 GB RAM, 8 GB swap |
 | Temperatures | `/sys/class/thermal/thermal_zone*/{type,temp}` | 48 zones: `cpu*`/`cpuss*`, `gpuss-*`, `ddr`, `nsph*` (NPU), `pm8550*`/`pm8010*` (power ICs), `modem*`, `camera*`, `video`, `max1720x_bat*` |

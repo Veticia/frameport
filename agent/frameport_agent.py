@@ -46,7 +46,7 @@ try:
 except ImportError:  # Windows: pc_revive loads this file for its VDF code only (GitHub #131)
     fcntl = None
 
-AGENT_VERSION = 101
+AGENT_VERSION = 102
 HOME = os.path.expanduser("~")
 STEAM = os.path.join(HOME, ".local/share/Steam")
 ANCHORS = os.path.join(HOME, "Applications/quest-frame")
@@ -7737,16 +7737,30 @@ def drm_fds(pid):
 
 
 def drm_engine_ns(pid, fds):
-    """Summed `drm-engine-gpu` ns over the process's render fds (several fds = several DRM clients); None if gone."""
-    total, seen = 0, False
+    """{fd: (`drm-engine-gpu` ns, `drm-cycles-gpu`)} of the process's render fds (several fds = several DRM
+    clients); None if gone."""
+    out = {}
     for fd in fds:
         text = _rd(f"{PROC}/{pid}/fdinfo/{fd}")
         i = text.find("drm-engine-gpu:")
         if i < 0:
             continue
-        seen = True
-        total += _num(text[i + 15:].split(None, 1)[0], 0)
-    return total if seen else None
+        j = text.find("drm-cycles-gpu:")
+        out[fd] = (_num(text[i + 15:].split(None, 1)[0], 0),
+                   _num(text[j + 15:].split(None, 1)[0], 0) if j >= 0 else None)
+    return out or None
+
+
+def gpu_busy_ns(prev, cur, dt, hz):
+    """GPU time (ns) one render fd used between two samples. msm sometimes reports garbage engine time (SteamVR's
+    compositor near 2**64, rising ~1000x faster than real time: the Monitor showed an idle Frame at 100 %), so a
+    delta longer than the interval is replaced by cycles / GPU clock."""
+    ns, cycles = cur[0] - prev[0], None if cur[1] is None or prev[1] is None else cur[1] - prev[1]
+    if 0 <= ns <= dt * 1.05e9:
+        return ns
+    if cycles is not None and cycles >= 0 and hz:
+        return min(cycles / hz * 1e9, dt * 1e9)
+    return 0
 
 
 def cgroup_dir(pid):
@@ -7793,7 +7807,7 @@ class Monitor:
         self.plan = monitor_plan()  # collectors per tick (set_modules)
         self.kthreads = set()
         self.drm = {}       # pid -> (fds, time of the fd scan)
-        self.gpu_ns = {}    # pid -> last drm-engine ns
+        self.gpu_ns = {}    # pid -> {fd: (drm-engine ns, drm-cycles)} of the last sample
         self.gpu_pct = {}   # pid -> GPU % in the last tick
         self.gpu_acc = {}   # pid -> GPU ns since the last process scan (the table shows the average over it)
         self.scan_at = -1e9
@@ -7973,18 +7987,20 @@ class Monitor:
     def gpu_sample(self, now, dt):
         """GPU % per process (from the cached render fds) and the summed busy %."""
         total = 0.0
+        hz = _num(_rd(f"{self.gpu}/cur_freq"), 0) if self.gpu else 0
         for pid, (fds, _t) in list(self.drm.items()):
             if not fds:
                 continue
-            ns = drm_engine_ns(pid, fds)
-            if ns is None:
+            cur = drm_engine_ns(pid, fds)
+            if cur is None:
                 continue
             prev = self.gpu_ns.get(pid)
-            self.gpu_ns[pid] = ns
-            if prev is not None and dt > 0 and ns >= prev:
-                pct = min(100.0, (ns - prev) / 1e7 / dt)
+            self.gpu_ns[pid] = cur
+            if prev is not None and dt > 0:
+                used = sum(gpu_busy_ns(prev[fd], c, dt, hz) for fd, c in cur.items() if fd in prev)
+                pct = min(100.0, used / 1e7 / dt)
                 self.gpu_pct[pid] = pct
-                self.gpu_acc[pid] = self.gpu_acc.get(pid, 0) + ns - prev
+                self.gpu_acc[pid] = self.gpu_acc.get(pid, 0) + used
                 total += pct
         return min(100.0, total)
 
