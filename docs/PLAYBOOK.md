@@ -12,6 +12,7 @@ version is `catalog/triage.yaml` (used by `frameport test` / the Job screen); ke
 
 ## Startup failures (visible in launch.log)
 | Symptom | Cause | Fix |
+| `RuntimeManifestFile::FindManifestFiles - using global runtime file /vendor/etc/openxr/1/active_runtime.json`, no FrameBridge lines (#254) | Embedded Khronos loader bypasses the APK loader chain | `frame.static_openxr_loader`: redirect its manifest paths and broker authorities, bundle runtime shim + inner loader + FrameBridge; reinstall to write `/sdcard/fp_openxr_runtime.json`. Device check pending |
 |---|---|---|
 | Valve foveation sharp centre moves to the top right or a white line appears at the right edge as Batman shrinks its projection rect (#406 / #394) | Dynamic resolution draws a corner-anchored subrect inside the full swapchain used by Valve FDM | Enable `adapter.fixed_resolution` (Game settings → Picture), rebuild/reinstall for the new adapter and OVRPlugin shim; verify `fixed_resolution: recommended ... -> ...` and full-size `projection view ... rect change` logs. Headset verification pending; more GPU load |
 | Quest 3-only options missing; OVRPlugin logs `venderId 10291, systemName Oculus Quest2` (#373, Asgard's Wrath 2) | OVRPort's dispatcher overwrites FrameBridge's name and supplies a Quest 2 `XR_META_headset_id`; OVRPlugin prioritizes that UUID | `device.headset_model`: Quest 3 by default, per-game Quest 3S / Quest Pro / Quest 2; rebuild the APK. Byte-checked dispatcher name + UUID edit; Quest 2 leaves the dispatcher unchanged. See DEVICE_NOTES 'Per-game headset identity' |

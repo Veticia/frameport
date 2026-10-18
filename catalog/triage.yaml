@@ -13,6 +13,12 @@ signatures:
     diagnosis: The game submits an offset projection viewport. With Valve foveation, dynamic resolution can move the sharp centre or expose a white edge. Keeping full resolution may help; it increases GPU load and needs the updated adapter and OVRPlugin shim in a rebuilt APK.
     question: With foveated rendering enabled, was the sharp centre misplaced or was there a white line at the picture edge?
     suggest: [adapter.fixed_resolution]
+  - id: static-openxr-loader-bypass
+    pattern: 'RuntimeManifestFile::FindManifestFiles - using global runtime file /[^\r\n]*etc/openxr/1/active_runtime(?:\.[A-Za-z0-9_-]+)?\.json'
+    unless: 'FrameBridge[: ]|fp_xrruntime[: ]'
+    severity: warning
+    diagnosis: A Khronos loader loaded the system runtime without FrameBridge. A statically linked loader may bypass the bundled loader chain; analyze again, enable the embedded OpenXR loader patch when detected, then rebuild and reinstall to write its per-game manifest.
+    suggest: [frame.static_openxr_loader]
   - id: quest2-headset-identity
     pattern: 'venderId[^\r\n]*systemName Oculus Quest2'
     severity: info

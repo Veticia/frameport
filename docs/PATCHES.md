@@ -11,8 +11,8 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 ## Groups
 
 - [Patches from OVRPort](#group-overport) (25)
-- [Steam Frame patches](#group-frame) (61)
-- [Game settings](#group-adapter) (78)
+- [Steam Frame patches](#group-frame) (62)
+- [Game settings](#group-adapter) (77)
 - [Files and settings on the Frame](#group-device) (10)
 - [PC VR (Proton and Revive)](#group-pcvr) (13)
 
@@ -77,6 +77,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [SDL apps: start without a clipboard service](#frame-sdl_clipboard) | `frame.sdl_clipboard` | Steam Frame patches | 6 |
 | [Stress Level Zero: let Unity start Vulkan itself](#frame-slz_vulkan_hooks) | `frame.slz_vulkan_hooks` | Steam Frame patches | 1 |
 | [Start straight in VR (skip the 2D launcher)](#frame-start_activity) | `frame.start_activity` | Steam Frame patches |  |
+| [Embedded OpenXR loader: use FrameBridge](#frame-static_openxr_loader) | `frame.static_openxr_loader` | Steam Frame patches | 1 |
 | [Allow swapchains larger than 4096 px](#frame-swapchain_limit) | `frame.swapchain_limit` | Steam Frame patches | default |
 | [Team Beef ports: treat the Frame as a Meta headset](#frame-tbxr_vendor) | `frame.tbxr_vendor` | Steam Frame patches | 1 |
 | [Unity App UI: no Android 12 vibrator](#frame-unity_appui_vibrator) | `frame.unity_appui_vibrator` | Steam Frame patches |  |
@@ -125,7 +126,6 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Per-eye diagnostics (log)](#adapter-eye_debug) | `adapter.eye_debug` | Game settings |  |
 | [Draw fades over the picture](#adapter-fade_quad) | `adapter.fade_quad` | Game settings | 2 |
 | [Colour space support](#adapter-fb_color_space) | `adapter.fb_color_space` | Game settings |  |
-| [Keep full resolution (no dynamic resolution)](#adapter-fixed_resolution) | `adapter.fixed_resolution` | Game settings | 1 |
 | [Upside-down panel images (diagnostics)](#adapter-flip_dump) | `adapter.flip_dump` | Game settings |  |
 | [Fix upside-down menus](#adapter-flip_emul) | `adapter.flip_emul` | Game settings |  |
 | [Rotate panels 180°](#adapter-flip_quads) | `adapter.flip_quads` | Game settings |  |
@@ -936,6 +936,21 @@ Opens the app straight in VR, skipping its flat launcher screen. Turn off to use
 
 > Some apps open a flat Android launcher that then starts a separate VR activity (for example WiiCompiled). Shown with Lepton's flat window, that window stays in view after the VR part starts. This makes the VR activity the one Lepton starts (its LAUNCHER category), so the app opens in VR with no flat window. Everything only the launcher does (choosing or importing content) is skipped: turn it off for a run when you need the launcher, and turn off "Show the app's Android window".
 
+### <a id="frame-static_openxr_loader"></a>Embedded OpenXR loader: use FrameBridge
+
+Makes an embedded OpenXR loader use FrameBridge and your game settings.
+
+- `frame.static_openxr_loader`
+- **Changes:** Changes the APK (a rebuild and reinstall apply it).
+- **Suggested (on):** The embedded Khronos OpenXR loader bypasses FrameBridge.
+- **Requires:** [`frame.adapter`](#frame-adapter)
+- **Catalog games (1):** PrimedGun v2.
+- **Suggested by launch-test signatures:**
+  - `static-openxr-loader-bypass` (warning): A Khronos loader loaded the system runtime without FrameBridge.
+- **Source:** [patches/frame/static_openxr_loader.py](../src/frameport/patches/frame/static_openxr_loader.py)
+
+> Routes a game's statically linked Khronos OpenXR loader through FrameBridge by rewriting its runtime manifest paths in place into its own /sdcard (including assembled paths). Disables its Android runtime broker queries so they fall back to that file. Ships a runtime shim and an unmodified inner Khronos loader, which reads the system runtime manifest. Reinstall to write the per-game manifest.
+
 ### <a id="frame-swapchain_limit"></a>Allow swapchains larger than 4096 px
 
 Allows very large pictures (8K video, theaters) instead of quitting.
@@ -1607,23 +1622,6 @@ For games that stop at start because the headset reports no colour space (for ex
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
 
 > Offers Meta's colour-space extension when the Frame's runtime lacks it: the game is told the headset uses Rec.709 and may choose any colour space (no conversion is done). For games that quit before their VR session with "Rec.709 color space unavailable" (for example OutRun Quest VR, GitHub #336). Only reaches games that use their own OpenXR loader; OVRPort's dispatcher can't forward the new functions.
-
-### <a id="adapter-fixed_resolution"></a>Keep full resolution (no dynamic resolution)
-
-Prevents dynamic resolution from moving Valve foveation off-centre or leaving a white edge line. May increase GPU load. Used at the next launch.
-
-- `adapter.fixed_resolution`
-- **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
-- **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
-- **Options:**
-  - Value: int, default `0`.
-  - Game settings → Picture → "Keep full resolution (no dynamic resolution)" (advanced).
-- **Catalog games (1):** Batman: Arkham Shadow.
-- **Suggested by launch-test signatures:**
-  - `dynamic-resolution-foveation` (info): The game submits an offset projection viewport.
-- **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
-
-> Keeps OpenXR layer recommendations at the full swapchain size. Prevents dynamic resolution from moving Valve foveation off-centre or leaving a coarse white edge line. May increase GPU load.
 
 ### <a id="adapter-flip_dump"></a>Upside-down panel images (diagnostics)
 

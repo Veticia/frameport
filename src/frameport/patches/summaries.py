@@ -4,6 +4,7 @@ Game settings (adapter.*) use their Game settings help line (patches/settings.UI
 fallback for settings that dialog doesn't show."""
 
 SUMMARIES = {
+    "frame.static_openxr_loader": "Makes an embedded OpenXR loader use FrameBridge and your game settings.",
     # OVRPort (the Quest → OpenXR conversion)
     "patch_copy_libraries": "Adds the parts that let a Quest game run on the Steam Frame. Needed for every Quest "
                             "game.",

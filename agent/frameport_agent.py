@@ -3465,6 +3465,8 @@ def upgrade_launchers():
             new = set_codec_line(new, wants_hw_video(os.path.dirname(path)))
             new = set_gamepad_line(new, wants_gamepad(os.path.dirname(path)))
             pkg = os.path.basename(os.path.dirname(path))
+            dep = deployment(pkg) or {}
+            new = set_openxr_manifest_line(new, pkg, dep.get("static_openxr_loader", False))
             base = launcher_base(new, pkg)
             if base:  # games on a drive whose path has a space reach Lepton through a link (agent v83)
                 new = set_app_dir(new, base, pkg)[0]
@@ -3925,7 +3927,16 @@ def upgrade_linux_launcher(text):
     return text
 
 
-def write_launcher(anchor, base, pkg, title, appid, lepton, env, hw_video=False, gamepad=False, config_sync=False):
+def set_openxr_manifest_line(text, pkg, enabled):
+    line = (f"python3 {shlex.quote(os.path.abspath(__file__))} _openxr_manifest {shlex.quote(pkg)}")
+    text = "\n".join(ln for ln in text.split("\n") if " _openxr_manifest " not in ln)
+    if enabled:
+        text = text.replace("\nfix_perms\n", "\n" + line + "\nfix_perms\n", 1)
+    return text
+
+
+def write_launcher(anchor, base, pkg, title, appid, lepton, env, hw_video=False, gamepad=False,
+                   config_sync=False, static_openxr=False):
     extra = "".join(f"export {k}={shlex.quote(str(v))}\n" for k, v in (env or {}).items()
                     if re.fullmatch(r"[A-Z_][A-Z0-9_]*", k))
     text = LAUNCH_SH.format(title=title.replace("\n", " "), pkg=pkg, app_dir=app_dir_lines(base, pkg), appid=appid,
@@ -3936,6 +3947,7 @@ def write_launcher(anchor, base, pkg, title, appid, lepton, env, hw_video=False,
                             plays_start=plays_lines(anchor)[0],
                             plays_end=plays_lines(anchor)[1], save_snapshot=snapshot_line(pkg),
                             restart=restart_block(pkg, lepton))
+    text = set_openxr_manifest_line(text, pkg, static_openxr)
     text = set_config_sync_line(text, pkg, config_sync)
     text = set_refresh_rate_line(text, pkg)
     path = os.path.join(anchor, "launch.sh")
@@ -3943,6 +3955,32 @@ def write_launcher(anchor, base, pkg, title, appid, lepton, env, hw_video=False,
         f.write(text)
     os.chmod(path + ".tmp", 0o755)
     os.replace(path + ".tmp", path)
+
+
+def write_openxr_runtime_manifest(base, enabled):
+    """Lepton maps this per-game external root to /sdcard. Never follow a game's symlink."""
+    if not enabled:
+        return
+    root = os.path.join(base, "lepton-data", "external")
+    os.makedirs(root, exist_ok=True)
+    payload = {"file_format_version": "1.0.0",
+               "runtime": {"library_path": "libfp_xrruntime.so", "name": "FramePort"}}
+    for rel in ("fp_openxr_runtime.json", "fp/1/active_runtime.json"):
+        parent = os.path.dirname(os.path.join(root, rel))
+        if not _inside(os.path.realpath(parent), os.path.realpath(root)):
+            raise AgentError("refusing linked OpenXR manifest directory outside game storage")
+        os.makedirs(parent, exist_ok=True)
+        target = os.path.join(root, rel)
+        # Atomic replace repairs stale manifests without following the final symlink.
+        fd, tmp = tempfile.mkstemp(prefix=".fp-openxr-", dir=parent)
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(payload, f, separators=(",", ":"))
+            os.chmod(tmp, 0o644)
+            os.replace(tmp, target)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
 
 
 def data_files_dir(base, pkg):
@@ -4481,12 +4519,14 @@ def configure_install(args, prep, moved):
         new_managed[rel] = {"sha256": sha256_file(target), "backup": had_original}
     models = install_controller_models(files_dir, str(settings.get("controller_models", 0)) not in ("0", "0.0"))
     recipe = args.get("recipe") if isinstance(args.get("recipe"), dict) else {}
+    static_openxr = "frame.static_openxr_loader" in (recipe.get("patches") or [])
+    write_openxr_runtime_manifest(base, static_openxr)
     hw_video = HW_VIDEO_PATCH in (recipe.get("patches") or [])  # the shared codec (install_video_codec)
     gamepad = GAMEPAD_PATCH in (recipe.get("patches") or [])  # Steam Input's virtual gamepad (PODMAN_WRAPPER)
     if gamepad:
         ensure_podman_wrapper()
     config_sync = args.get("config_sync") if isinstance(args.get("config_sync"), dict) else {}
-    write_launcher(anchor, base, pkg, title, appid, lepton, args.get("env"), hw_video, gamepad, bool(config_sync))
+    write_launcher(anchor, base, pkg, title, appid, lepton, args.get("env"), hw_video, gamepad, bool(config_sync), static_openxr)
     art_in = os.path.join(base, "incoming-artwork")
     art_moved = False
     if args.get("consume_artwork") and os.path.isdir(art_in):
@@ -4498,6 +4538,7 @@ def configure_install(args, prep, moved):
            "apk": args.get("apk_name", previous.get("apk", "game.apk")),
            "sha256": args.get("apk_sha256") or previous.get("sha256"),
            "recipe": args.get("recipe"), "installed_by": "frameport",
+           "static_openxr_loader": static_openxr,
            "hw_video_decode": hw_video, "steam_gamepad": gamepad, "config_sync": config_sync,
            "agent_version": AGENT_VERSION, "time": time.time()}
     if previous.get("eye_base"):  # the runtime's eye size learned from an earlier start (device.config_sync)
@@ -9090,6 +9131,11 @@ COMMANDS = {n[4:]: f for n, f in globals().items() if n.startswith("cmd_")}
 
 
 def main():
+    if len(sys.argv) == 3 and sys.argv[1] == "_openxr_manifest":
+        dep = deployment(check_pkg(sys.argv[2])) or {}
+        if dep.get("static_openxr_loader"):
+            write_openxr_runtime_manifest(dep["base"], True)
+        return
     if len(sys.argv) >= 3 and sys.argv[1] == "_snapshot_close":
         return snapshot_close(sys.argv[2])
     if len(sys.argv) >= 3 and sys.argv[1] == "_fetch_save_snapshot":
