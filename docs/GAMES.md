@@ -26,6 +26,7 @@ Generated from [catalog/games](../catalog/games) by `scripts/compat_list.py`.
 | Beat Saber | Quest | ✅ Works |  |
 | Beat Saber | PC VR | ✅ Works |  |
 | Beat Saber (co-existence build) | Quest | ✅ Works |  |
+| Black Hole Pool | Quest | ✅ Works |  |
 | Blade & Sorcery: Nomad | Quest | ✅ Works |  |
 | BlazeRush | Quest | ✅ Works |  |
 | BodyCombat | Quest | ✅ Works |  |
@@ -132,9 +133,12 @@ Generated from [catalog/games](../catalog/games) by `scripts/compat_list.py`.
 | Star Wars Pinball VR | Quest | ✅ Works |  |
 | Star Wars: Tales from the Galaxy's Edge | Quest | ✅ Works |  |
 | Stremio | Quest | ✅ Works |  |
+| Summer Sports | Quest | ✅ Works |  |
 | Superfly | Quest | ✅ Works |  |
 | SUPERHOT VR | PC VR | ✅ Works |  |
 | SUPERHOT VR | Quest | ✅ Works |  |
+| Survival Nation | Quest | ✅ Works |  |
+| Surviving Mars: Pioneer | Quest | ✅ Works |  |
 | SynthRiders | Quest | ✅ Works |  |
 | Table Troopers | Quest | ✅ Works |  |
 | Taskmaster | Quest | ✅ Works |  |
@@ -147,6 +151,7 @@ Generated from [catalog/games](../catalog/games) by `scripts/compat_list.py`.
 | The Room VR | Quest | ✅ Works |  |
 | The Tale of Onogoro | Quest | ✅ Works |  |
 | The Walking Dead: Saints & Sinners | Quest | ✅ Works |  |
+| The Wizards | Quest | ✅ Works |  |
 | Time Crisis II VR (Test) | Quest | ✅ Works |  |
 | Time Crisis VR (Experimental) | Quest | ✅ Works |  |
 | Totally Baseball | Quest | ✅ Works |  |
