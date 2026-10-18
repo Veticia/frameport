@@ -1,0 +1,15 @@
+package: org.primedgun.v2
+title: PrimedGun v2
+status: unknown
+notes: 'Without the Vulkan library rename: the game builds the library name from two pieces, so the renamed name didn''t
+  exist ("libfp_vkn.so"), its renderer fell back to OpenGL and VR couldn''t start (GitHub #254). Not yet confirmed in
+  the headset.'
+tested_version: 2.0.0-alpha.4
+engine: Other
+xr: OpenXR
+frame:
+- frame.sdl_clipboard
+frame_remove:
+- frame.vk_sanitize
+updated: '2026-10-18'
+source_hint: PrimedGun v2 Quest APK (github.com/iChris4/MetroidPrimePortVR)
