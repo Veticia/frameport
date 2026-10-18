@@ -10,9 +10,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT = ROOT / "docs/input/quest_buttons.json"
-# d-pad direction marks: triangle corners around the label's centre
-ARROWS = {"↑": ((0, -4), (-5, 3), (5, 3)), "↓": ((0, 4), (-5, -3), (5, -3)),
-          "←": ((-4, 0), (3, -5), (3, 5)), "→": ((4, 0), (-3, -5), (-3, 5))}
+# Frame controller face, own drawing after public photos (Wikimedia Commons "Steam Frame controllers.jpg",
+# CC BY 4.0): offsets from the head's centre for a head of radius 100; `o` = the controller's outer side
+# (-1 left, +1 right). Left: d-pad outer, View above it, stick inner, Steam below. Right: the mirror, with the
+# face buttons as a diamond (Y top, X left, B right, A bottom) and Menu above them.
+PANEL_W, PANEL_H = 520, 380
+HEAD_R = 100
 DOC = ROOT / "docs/CONTROLLERS.md"
 START = "<!-- quest-buttons-table:start -->"
 END = "<!-- quest-buttons-table:end -->"
@@ -46,15 +49,15 @@ def mapping_table(data: dict) -> str:
 
 def illustration(data: dict, colors: dict, mode: str | None = None) -> str:
     compact = mode is not None
-    width, height = (520, 334) if compact else (1080, 750)
+    width, height = (PANEL_W, PANEL_H) if compact else (2 * PANEL_W + 40, 2 * PANEL_H + 104)
     parts = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
              f'viewBox="0 0 {width} {height}" role="img" aria-labelledby="title desc">',
              '<title id="title">Quest Touch buttons on Steam Frame controllers</title>',
              '<desc id="desc">' + escape(
                  (data["modes"][mode]["name"] + ": " + data["modes"][mode]["note"] if compact else
                   "Quest Touch reference and three Frame mappings: SteamVR default, Mirror, and Quest pair.")
-                 + " Each button shows its physical input above and the Touch input it sends below. "
-                   "A dash means unbound. Left Touch buttons are X and Y; right are A and B.") + '</desc>',
+                 + " Each Steam Frame controller button is labelled with the Quest Touch button it sends. "
+                   "A dash means it sends nothing. Left Touch buttons are X and Y; right are A and B.") + '</desc>',
              f'<rect width="{width}" height="{height}" rx="16" fill="{colors["BG"]}"/>',
              '<g font-family="DejaVu Sans,Arial,sans-serif">']
 
@@ -62,60 +65,93 @@ def illustration(data: dict, colors: dict, mode: str | None = None) -> str:
         parts.append(f'<text x="{x}" y="{y}" fill="{color or colors["TEXT"]}" font-size="{size}" '
                      f'font-weight="{weight}" text-anchor="{anchor}">{escape(label)}</text>')
 
-    def button(x, y, physical, touch):
-        color = colors["SECONDARY"] if touch in ("X", "A") else colors["ACCENT"]
+    def tone(touch):
         if touch == "—":
-            color = colors["TEXT_3"]
-        parts.append(f'<circle cx="{x}" cy="{y}" r="25" fill="{colors["SURFACE_2"]}" '
-                     f'stroke="{color}" stroke-width="1.5"/>')
-        if physical in ARROWS:  # drawn, not text: the app's SVG renderer has no arrow glyphs
-            (ax, ay), (bx, by), (cx_, cy_) = ((x + px, y - 10 + py) for px, py in ARROWS[physical])
-            parts.append(f'<polygon points="{ax},{ay} {bx},{by} {cx_},{cy_}" fill="{colors["TEXT_2"]}"/>')
-        else:
-            text(x, y - 6, physical, 11, colors["TEXT_2"], "middle")
-        text(x, y + 15, touch, 19 if len(touch) == 1 else 13, color, "middle", 600)
+            return colors["TEXT_3"]
+        return colors["SECONDARY"] if touch in ("X", "A") else colors["ACCENT"]
 
-    def small(x, y, physical, touch):
-        parts.append(f'<rect x="{x - 57}" y="{y - 16}" width="114" height="32" rx="8" '
-                     f'fill="{colors["SURFACE_2"]}"/>')
-        text(x, y + 5, f"{physical}: {touch}", 12, colors["TEXT_2"], "middle")
+    def sends(x, y, touch, size=15):
+        text(x, y + size * 0.36, touch, size if len(touch) == 1 else size - 4, tone(touch), "middle", 700)
+
+    def touch_button(x, y, label):
+        parts.append(f'<circle cx="{x}" cy="{y}" r="25" fill="{colors["SURFACE_2"]}" '
+                     f'stroke="{tone(label)}" stroke-width="1.5"/>')
+        sends(x, y, label, 19)
+
+    def controller(hx, hy, hand, mapped):
+        o = -1 if hand == "left" else 1
+        shell, edge = colors["BG"], colors["BORDER"]
+        # the handle hangs below the head, a little toward the inner side
+        s = -o * 8
+        parts.append(f'<path d="M{hx - 46 + s},{hy + 70} C{hx - 44 + s},{hy + 128} {hx - 34 + s},{hy + 148} '
+                     f'{hx - 12 + s},{hy + 152} C{hx + 10 + s},{hy + 156} {hx + 30 + s},{hy + 140} '
+                     f'{hx + 46 + s},{hy + 70} Z" fill="{shell}" stroke="{edge}" stroke-width="2"/>')
+        parts.append(f'<circle cx="{hx}" cy="{hy}" r="{HEAD_R}" fill="{shell}" stroke="{edge}" stroke-width="2"/>')
+        # thumbstick (inner side) and Steam button (not mapped: always Steam)
+        sx = hx - o * 34
+        parts.append(f'<circle cx="{sx}" cy="{hy + 18}" r="24" fill="{colors["SURFACE"]}" stroke="{edge}"/>')
+        parts.append(f'<circle cx="{sx}" cy="{hy + 18}" r="15" fill="{colors["SURFACE_2"]}" stroke="{edge}"/>')
+        parts.append(f'<circle cx="{hx + o * 14}" cy="{hy + 62}" r="10" fill="{colors["SURFACE_2"]}" '
+                     f'stroke="{edge}"/>')
+        text(hx + o * 14, hy + 86, "Steam", 9, colors["TEXT_3"], "middle")
+        # View (left) / Menu (right) pill above the d-pad / face buttons
+        px, py = hx - o * 4, hy - 46
+        pill = mapped.get("view" if hand == "left" else "menu", "—")
+        parts.append(f'<rect x="{px - 13}" y="{py - 5}" width="26" height="10" rx="5" '
+                     f'fill="{colors["SURFACE_2"]}" stroke="{tone(pill)}"/>')
+        # a colon, not an arrow: the app's SVG renderer has no arrow glyphs
+        text(px, py - 10, ("View" if hand == "left" else "Menu") + ": " + pill, 10, tone(pill), "middle", 600)
+        cx, cy = hx + o * 42, hy + 2
+        if hand == "left":  # d-pad: a cross of four arms
+            parts.append(f'<path d="M{cx - 14},{cy - 44} h28 v30 h30 v28 h-30 v30 h-28 v-30 h-30 v-28 h30 Z" '
+                         f'fill="{colors["SURFACE_2"]}" stroke="{edge}"/>')
+            for dx, dy, name in ((0, -29, "dpad_up"), (-29, 0, "dpad_left"), (29, 0, "dpad_right"),
+                                 (0, 29, "dpad_down")):
+                sends(cx + dx, cy + dy, mapped.get(name, "—"), 14)
+        else:  # face buttons as a diamond, each with its printed letter
+            for dx, dy, name in ((0, -29, "y"), (-29, 0, "x"), (29, 0, "b"), (0, 29, "a")):
+                touch = mapped.get(name, "—")
+                parts.append(f'<circle cx="{cx + dx}" cy="{cy + dy}" r="14" fill="{colors["SURFACE_2"]}" '
+                             f'stroke="{tone(touch)}" stroke-width="1.5"/>')
+                sends(cx + dx, cy + dy, touch, 14)
+                text(cx + dx + 15, cy + dy - 10, name.upper(), 9, colors["TEXT_3"], "middle")
 
     def panel(x, y, key):
         parts.append(f'<g transform="translate({x} {y})">')
-        parts.append(f'<rect x="0" y="0" width="520" height="334" rx="12" '
+        parts.append(f'<rect x="0" y="0" width="{PANEL_W}" height="{PANEL_H}" rx="12" '
                      f'fill="{colors["SURFACE"]}" stroke="{colors["BORDER"]}"/>')
         title = "Quest Touch reference" if key is None else data["modes"][key]["name"]
         text(20, 31, title, 20, weight=600)
-        text(20, 55, "Physical button above · Touch input below", 13, colors["TEXT_2"])
-        for hand, cx in (("left", 140), ("right", 380)):
-            text(cx, 84, hand.capitalize(), 13, colors["TEXT_2"], "middle")
+        if key is None:
+            text(20, 55, "Two face buttons per hand, plus Menu on the left", 13, colors["TEXT_2"])
+        else:
+            text(20, 55, "Steam Frame controllers: each button shows the Quest button it sends", 13,
+                 colors["TEXT_2"])
+        for hand, hx in (("left", 140), ("right", 380)):
+            text(hx, 84 if key is None else 78, hand.capitalize(), 13, colors["TEXT_2"], "middle")
             if key is None:
                 low, high = ("X", "Y") if hand == "left" else ("A", "B")
                 inner = 23 if hand == "left" else -23
-                button(cx + inner, 196, low, low)
-                button(cx - inner, 141, high, high)
+                touch_button(hx + inner, 206, low)
+                touch_button(hx - inner, 151, high)
                 if hand == "left":
-                    small(cx, 257, "Menu", "Menu")
+                    parts.append(f'<rect x="{hx - 57}" y="{251}" width="114" height="32" rx="8" '
+                                 f'fill="{colors["SURFACE_2"]}"/>')
+                    text(hx, 272, "Menu", 12, colors["TEXT_2"], "middle")
             else:
-                mapped = inverse(data["modes"][key], hand)
-                positions = [(0, -50, "dpad_up", "↑"), (-50, 0, "dpad_left", "←"),
-                             (50, 0, "dpad_right", "→"), (0, 50, "dpad_down", "↓")] if hand == "left" else [
-                                 (0, -50, "y", "Y"), (-50, 0, "x", "X"),
-                                 (50, 0, "b", "B"), (0, 50, "a", "A")]
-                for dx, dy, name, label in positions:
-                    button(cx + dx, 161 + dy, label, mapped.get(name, "—"))
-                small(cx, 257, "View" if hand == "left" else "Menu", mapped.get("view", "—"))
-                small(cx, 302, "Bumper", "—")
-        if key is None:
-            text(260, 306, "Lower: X / A · Upper: Y / B", 14, colors["TEXT_2"], "middle")
+                controller(hx, 186, hand, inverse(data["modes"][key], hand))
+        footnote = ("Lower: X / A · Upper: Y / B" if key is None else
+                    "Sticks, triggers and grips unchanged · bumpers send nothing")
+        text(PANEL_W / 2, PANEL_H - 14, footnote, 12, colors["TEXT_2"], "middle")
         parts.append('</g>')
 
     if compact:
         panel(0, 0, mode)
     else:
         text(20, 32, "Controller buttons", 24, weight=600)
-        text(20, 57, "Blue: X / A · Orange: Y / B or Menu · —: no Touch input", 14, colors["TEXT_2"])
-        for x, y, key in ((16, 72, None), (544, 72, "0"), (16, 414, "1"), (544, 414, "2")):
+        text(20, 57, "Blue: X / A · Orange: Y / B or Menu · —: sends nothing", 14, colors["TEXT_2"])
+        for x, y, key in ((16, 72, None), (PANEL_W + 24, 72, "0"), (16, PANEL_H + 88, "1"),
+                          (PANEL_W + 24, PANEL_H + 88, "2")):
             panel(x, y, key)
     return "\n".join([*parts, '</g>', '</svg>', ''])
 
