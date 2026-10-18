@@ -40,6 +40,8 @@ SUMMARIES = {
     "frame.adapter": "FramePort's layer between the game and the Steam Frame: fills in what the Frame lacks "
                      "(controllers, room, passthrough). Needed for every converted game.",
     "frame.launcher": "Makes the game start from the Frame's Steam library.",
+    "frame.main_process": "Keeps the game from being closed about a minute after it starts (it runs in a separate "
+                          "Android process the Frame doesn't watch).",
     "frame.start_activity": "Opens the app straight in VR, skipping its flat launcher screen. Turn off to use the "
                             "launcher, for example to import new content.",
     "frame.gl_multiview_fbo": "Experimental: shows HUDs, menus and other flat panels that stay black on the Frame "

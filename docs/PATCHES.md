@@ -2,7 +2,7 @@
 
 # Patches
 
-Every patch and game setting FramePort knows: 186 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
+Every patch and game setting FramePort knows: 187 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
 
 Each entry says what the patch does, whether it changes the APK or only the install, when FramePort suggests it, its options, the catalog games whose recipe names it and the launch-test signatures that suggest it. Patches that are on by default are on for every game, so the catalog rarely names them.
 
@@ -11,7 +11,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 ## Groups
 
 - [Patches from OVRPort](#group-overport) (25)
-- [Steam Frame patches](#group-frame) (61)
+- [Steam Frame patches](#group-frame) (62)
 - [Game settings](#group-adapter) (77)
 - [Files and settings on the Frame](#group-device) (10)
 - [PC VR (Proton and Revive)](#group-pcvr) (13)
@@ -63,6 +63,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Launcher category (INFO → LAUNCHER)](#frame-launcher) | `frame.launcher` | Steam Frame patches | default |
 | [GL wrapper: OpenGL ES depth formats (Minecraft)](#frame-ltw_depth) | `frame.ltw_depth` | Steam Frame patches | default |
 | [Fix Lua startup crashes on Frame](#frame-luajit_pointers) | `frame.luajit_pointers` | Steam Frame patches | 1 |
+| [Start the game in the app's main process](#frame-main_process) | `frame.main_process` | Steam Frame patches | default |
 | [Declare Meta-only permissions](#frame-meta_permissions) | `frame.meta_permissions` | Steam Frame patches | 4 |
 | [Meta XR Audio: skip Quest telemetry class](#frame-metaxr_telemetry) | `frame.metaxr_telemetry` | Steam Frame patches | default |
 | [Clear android:debuggable](#frame-nodebug) | `frame.nodebug` | Steam Frame patches | 3 |
@@ -747,6 +748,17 @@ Lets games with a verified older Lua engine get past a startup crash on the Fram
 - **Source:** [patches/frame/luajit_pointers.py](../src/frameport/patches/frame/luajit_pointers.py)
 
 > Older xLua/LuaJIT engines reject native pointers outside their 47-bit range, causing a startup error and sometimes a second crash during Unity shutdown (e.g. BattleTalent). Uses a Lua engine that preserves full pointer values while keeping the game's original xLua bindings and native helpers. Applied only to the verified compatible library build.
+
+### <a id="frame-main_process"></a>Start the game in the app's main process
+
+Keeps the game from being closed about a minute after it starts (it runs in a separate Android process the Frame doesn't watch).
+
+- `frame.main_process` · on by default · also for 2D apps
+- **Changes:** Changes the APK (a rebuild and reinstall apply it).
+- **Suggested (on):** … runs in its own process, which Lepton doesn't watch: it would close the game about a minute in.
+- **Source:** [patches/frame/manifest_fixes.py](../src/frameport/patches/frame/manifest_fixes.py)
+
+> Some apps run their game activity in a process of its own (android:process, e.g. Halo CE VR's ":halo_game"), started from a 2D launcher activity. Lepton starts the game activity directly and watches only the app's main process, which then never exists: about a minute in, Lepton decides the app "did not start" and closes it, at whatever point the game has reached. This runs those activities in the main process (only their android:process value changes).
 
 ### <a id="frame-meta_permissions"></a>Declare Meta-only permissions
 

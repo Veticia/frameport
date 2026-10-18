@@ -559,6 +559,12 @@ signatures:
     severity: fatal
     diagnosis: 'Games can''t start until the Frame restarts: it ran out of kernel keys. Rootless podman leaks one session keyring per container start; the FramePort agent sets keyring=false in ~/.config/containers/containers.conf, and a reboot frees the leaked keys.'
     suggest: []
+  - id: app-separate-process
+    pattern: 'Start proc \d+:[\w.]+:\w+/\S+ for (pre-)?top-activity'
+    severity: error
+    diagnosis: The game's activity runs in an Android process of its own, while Lepton watches only the app's main process, which never starts. About a minute in, Lepton decides the app "did not start" and closes it, wherever the game is. Newer FramePort versions run the activity in the main process (patch "Start the game in the app's main process"); update FramePort and use Update on Frame.
+    suggest: []
+    supersedes: [app-not-started, force-quit]
   - id: app-not-started
     pattern: 'Target app \(.*\) did not start'
     severity: error

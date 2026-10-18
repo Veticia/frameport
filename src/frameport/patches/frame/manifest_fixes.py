@@ -146,7 +146,43 @@ class StartActivity(Patch):
         return [("Only the VR activity is a launcher", ok, ", ".join(starts))]
 
 
+class MainProcess(Patch):
+    id = "frame.main_process"
+    a32 = True
+    needs_vr = False
+    title = "Start the game in the app's main process"
+    description = ("Some apps run their game activity in a process of its own (android:process, e.g. Halo CE VR's "
+                   "\":halo_game\"), started from a 2D launcher activity. Lepton starts the game activity directly "
+                   "and watches only the app's main process, which then never exists: about a minute in, Lepton "
+                   "decides the app \"did not start\" and closes it, at whatever point the game has reached. This "
+                   "runs those activities in the main process (only their android:process value changes).")
+    order = 21
+    default_on = True
+
+    def applies(self, a):
+        return bool((a.extra or {}).get("separate_process"))
+
+    def detect(self, a):
+        found = (a.extra or {}).get("separate_process")
+        if not found:
+            return None
+        return Suggestion(True, f"{found[0].rsplit('.', 1)[-1]} runs in its own process, which Lepton doesn't "
+                                "watch: it would close the game about a minute in.")
+
+    def apply(self, ctx: ApkContext) -> bool:
+        manifest = ctx.ws.read(MANIFEST)
+        fixed = axml.set_main_process(manifest, axml.separate_process_activities(manifest))
+        if fixed:
+            ctx.ws.put(MANIFEST, fixed)
+        return bool(fixed)
+
+    def validate(self, ctx):
+        left = axml.separate_process_activities(ctx.ws.read(MANIFEST))
+        return [("Game activities run in the main process", not left, ", ".join(left) or "all")]
+
+
 register(Launcher)
 register(NoDebuggable)
 register(MetaPermissions)
 register(StartActivity)
+register(MainProcess)

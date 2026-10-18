@@ -524,6 +524,11 @@
   "title": "Fix Lua startup crashes on Frame",
   "group": "Steam Frame patches"
  },
+ "frame.main_process": {
+  "anchor": "frame-main_process",
+  "title": "Start the game in the app's main process",
+  "group": "Steam Frame patches"
+ },
  "frame.meta_permissions": {
   "anchor": "frame-meta_permissions",
   "title": "Declare Meta-only permissions",
