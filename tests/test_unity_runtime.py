@@ -47,12 +47,13 @@ def test_unity_scene_active_rooms_patch_and_detection():
     patched, notes = U.patch_methods(lib, found, R.UnitySceneActiveRooms.targets)
     assert patched[a:a + 8] == U.RET_TRUE and "OVRSceneManager" in notes[0]
 
+    # only from a catalog recipe or the user's choice: shown for Unity scene games, never suggested
     p = base.get("frame.unity_scene_active_rooms")
-    mr = _analysis(engine="Unity", libs=["libil2cpp.so", "libunity.so"], meta_permissions=["com.oculus.permission.USE_SCENE"])
-    assert p.detect(mr).recommended
+    mr = _analysis(engine="Unity", libs=["libil2cpp.so", "libunity.so"],
+                   meta_permissions=["com.oculus.permission.USE_SCENE"])
+    assert p.applies(mr) and p.detect(mr) is None
     plain = _analysis(engine="Unity", libs=["libil2cpp.so", "libunity.so"])
-    assert p.detect(plain) is None and p.applies(plain)
-
+    assert not p.applies(plain)
 
 
 def test_runtime_msaa_suggested_for_gles_ovr_games_only():
