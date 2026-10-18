@@ -17,3 +17,5 @@ verified:
   date: '2026-10-12'
   known_good_sha256: 1a0050272526360542d62e7e6d1fc2daecb765c34378a6fe4ad51568ec550c0d
 source_hint: Punch Fit
+min_app: 1.2.2
+updated: '2026-10-18'

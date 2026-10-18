@@ -197,7 +197,7 @@ Generated from [catalog/games](../catalog/games) by `scripts/compat_list.py`.
 | Majora's Mask VR | Quest | ⚠️ Works with issues | Audio on the file select screen sounds crunchy. |
 | Myst | Quest | ⚠️ Works with issues | Minor graphical glitches on some objects. |
 | Phantom: Covert Ops | Quest | ⚠️ Works with issues | DLC/store button crashes (no Meta store). |
-| Pinball FX VR | Quest | ⚠️ Works with issues | Plays; mixed reality mode not working yet. |
+| Pinball FX VR | Quest | ⚠️ Works with issues | Plays; space warp off (fewer stutters). |
 | Plezy | Quest | ⚠️ Works with issues | Some videos play with strong artifacts and wrong colours; the cause is unknown, possibly hardware video decoding. |
 | Puzzling Places | Quest | ⚠️ Works with issues | Works fine, but pointers dont show well on main menu, easy to work around. |
 | Quantum Void | Quest | ⚠️ Works with issues | no hands |
