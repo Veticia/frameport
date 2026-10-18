@@ -5088,6 +5088,17 @@ def cmd_room_capture_status(args):
 
 
 def room_capture_worker(payload):
+    # Separate from .lock: cmd_room_build -> room_store takes that lock while publishing.
+    os.makedirs(ROOMS_DIR, exist_ok=True)
+    with open(os.path.join(ROOMS_DIR, ".scan.lock"), "a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise AgentError("A room scan is already running")
+        return _room_capture_worker(payload)
+
+
+def _room_capture_worker(payload):
     job = json.loads(payload)
     status = {"state": "waiting", "started": time.time(), "seconds": job["seconds"]}
     os.makedirs(ROOM_SCAN_DUMPS, exist_ok=True)
@@ -5136,11 +5147,105 @@ def wants_scene_room(anchor):
 
 
 def set_room_sync_line(text, pkg, want):
+    text = set_scan_watch_line(text, pkg, want)
     text = "".join(line for line in text.splitlines(True) if "# frameport-room-sync" not in line)
     if not want or "\nsetsid " not in text:
         return text
     line = ROOM_SYNC_LINE.format(agent_q=shlex.quote(os.path.abspath(__file__)), pkg_q=shlex.quote(pkg))
     return text.replace("\nsetsid ", "\n" + line + "\nsetsid ", 1)
+
+
+SCAN_WATCH_LINE = ('python3 {agent_q} _scan_watch {pkg_q} '
+                   '>"$app_dir/scan-watch.log" 2>&1 9>&- & scanwatch=$! # frameport-scan-watch')
+
+
+def set_scan_watch_line(text, pkg, want):
+    text = "".join(line for line in text.splitlines(True) if "# frameport-scan-watch" not in line)
+    if not want or "\nchild=$!\n" not in text:
+        return text
+    line = SCAN_WATCH_LINE.format(agent_q=shlex.quote(os.path.abspath(__file__)), pkg_q=shlex.quote(pkg))
+    text = text.replace("\nchild=$!\n", "\nchild=$!\n" + line + "\n", 1)
+    return text.replace('    trap - EXIT INT TERM\n',
+                        '    trap - EXIT INT TERM\n    [[ -z "${scanwatch:-}" ]] || kill "$scanwatch" 2>/dev/null || true\n', 1) if '${scanwatch:-}' not in text else text
+
+
+def scan_watch_write(folder, name, text):
+    path = os.path.join(folder, "framebridge-scan-" + name)
+    with open(path + ".tmp", "w") as f:
+        f.write(text + "\n")
+    os.replace(path + ".tmp", path)
+
+
+def scan_watch_request(pkg, folder, request_id, alive):
+    scan_watch_write(folder, "ack", "ack " + request_id)
+    child = None
+    try:
+        # A process group lets cancellation stop fp_roomscan as well as the Python capture worker.
+        child = subprocess.Popen([sys.executable, os.path.abspath(__file__), "_room_capture",
+                                  json.dumps({"seconds": 90, "wait": 180})], start_new_session=True)
+        deadline = time.monotonic() + 350
+        while child.poll() is None:
+            if not alive():
+                raise AgentError("cancelled")
+            if time.monotonic() >= deadline:
+                raise AgentError("timeout")
+            time.sleep(1)
+        if child.returncode:
+            raise AgentError("scanner error (possibly another scan is running)")
+        status = cmd_room_capture_status({})
+        if status.get("state") != "done":
+            raise AgentError(status.get("error", "scanner error"))
+        copied = room_sync_worker(pkg)
+        if not copied or not copied.get("room"):
+            raise AgentError("no room copied")
+        scan_watch_write(folder, "result", "ok " + request_id)
+    except Exception as exc:  # every acknowledged request gets a terminal result
+        reason = " ".join(str(exc).split())[:300] or "scanner error"
+        print("scan " + request_id + ": " + reason, flush=True)
+        scan_watch_write(folder, "result", "failed " + request_id + " " + reason)
+    finally:
+        if child is not None and child.poll() is None:
+            os.killpg(child.pid, signal.SIGTERM)
+            try:
+                child.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                os.killpg(child.pid, signal.SIGKILL)
+                child.wait()
+
+
+def scan_watch_worker(pkg):
+    dep = deployment(check_pkg(pkg))
+    if not dep or dep.get("kind", "quest") != "quest":
+        return
+    folder = os.path.join(dep["base"], "lepton-data/external/Android/data", pkg, "files")
+    os.makedirs(folder, exist_ok=True)
+    for name in ("request", "ack", "result"):
+        try:
+            os.unlink(os.path.join(folder, "framebridge-scan-" + name))
+        except FileNotFoundError:
+            pass
+    parent = os.getppid()
+    stopped = [False]
+    def stop(signum, frame):
+        stopped[0] = True
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    def alive():
+        return not stopped[0] and parent > 1 and os.getppid() == parent
+    seen = None
+    while alive():
+        try:
+            with open(os.path.join(folder, "framebridge-scan-request")) as f:
+                fields = f.read(512).split()
+            if len(fields) == 3 and fields[0] == "request" and fields[1] != seen:
+                float(fields[2])
+                seen = fields[1]
+                print("scan requested: " + seen, flush=True)
+                scan_watch_request(pkg, folder, seen, alive)
+        except (OSError, ValueError) as exc:
+            if not isinstance(exc, FileNotFoundError):
+                print(str(exc), flush=True)
+        time.sleep(1)
 
 
 def room_sync_worker(pkg):
@@ -10010,6 +10115,9 @@ def main():
         return 0 if restart_requested(sys.argv[2], sys.argv[3], sys.argv[4]) else 1
     if len(sys.argv) >= 4 and sys.argv[1] == "_dashboard_worker":
         dashboard_worker(sys.argv[2], sys.argv[3])
+        return 0
+    if len(sys.argv) >= 3 and sys.argv[1] == "_scan_watch":
+        scan_watch_worker(sys.argv[2])
         return 0
     if len(sys.argv) >= 3 and sys.argv[1] == "_room_sync":
         print(json.dumps(room_sync_worker(sys.argv[2])))
