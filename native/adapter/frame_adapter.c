@@ -150,6 +150,7 @@ static int flip_emul_setting = 1;
 static int cylinder_strips_on = 1;  // show cylinder layers as flat quad strips (cylinder_strips)
 static int scene_emul;  // scene emulation setting (per game)
 static int scene_hide_bounds;  // per game: the app's STAGE bounds query answers "no play area" (Demeter)
+static int scene_events_via_shim;  // the shim delivers room events: the layer's xrPollEvent leaves them alone
 static float scene_height = 2.5f;  // scene emulation ceiling height (m)
 static float scene_width, scene_depth;  // optional room size override (m)
 static int64_t xr_time_offset;  // XrTime minus CLOCK_MONOTONIC ns, measured at xrWaitFrame
@@ -1533,7 +1534,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrPollEvent(XrInstance instance, XrEventDataBuffe
     mx_audio_initialize(); mx_batman_geometry_initialize();
     PFN_xrPollEvent fn = (PFN_xrPollEvent)lookup(instance, "xrPollEvent");
     if (!fn) return XR_ERROR_FUNCTION_UNSUPPORTED;
-    if (emulate_scene && event) {
+    if (emulate_scene && event && !scene_events_via_shim) {
         pthread_mutex_lock(&scene_lock);
         int got = pop_event(event);
         pthread_mutex_unlock(&scene_lock);
@@ -2398,6 +2399,56 @@ static XRAPI_ATTR XrResult XRAPI_CALL fb_hide_update_swapchain(XrSwapchain swapc
     return fn ? fn(swapchain, state) : XR_ERROR_FUNCTION_UNSUPPORTED;
 }
 
+// Generic calls the shim routes here for the emulated room (OVRPort's dispatcher refuses fake handles' functions):
+// only fake room spaces and FramePort's own room events are handled locally; every real call goes on to OVRPort's
+// dispatcher, whose own work (headset identity, events, controller spaces) was skipped for every scene game before.
+static PFN_xrVoidFunction dispatcher_proc(const char *name) {
+    static PFN_xrGetInstanceProcAddr gipa;
+    static int tried;
+    if (!tried) {
+        tried = 1;
+        void *h = dlopen("libopenxr_loader.so", RTLD_NOW | RTLD_NOLOAD);  // OVRPort's dispatcher (xrshim's next)
+        if (h) gipa = (PFN_xrGetInstanceProcAddr)dlsym(h, "xrGetInstanceProcAddr");
+        LOG("scene: shim calls for real handles go to OVRPort's dispatcher (%s)", gipa ? "found" : "MISSING");
+    }
+    PFN_xrVoidFunction fn = NULL;
+    if (gipa && active_instance) gipa(active_instance, name, &fn);
+    return fn;
+}
+static XRAPI_ATTR XrResult XRAPI_CALL shim_locate_space(XrSpace space, XrSpace base, XrTime time, XrSpaceLocation *loc) {
+    PFN_xrLocateSpace next = is_fake_space(space) || is_fake_space(base) ? NULL
+                             : (PFN_xrLocateSpace)dispatcher_proc("xrLocateSpace");
+    return next ? next(space, base, time, loc) : xrLocateSpace(space, base, time, loc);
+}
+static XrResult shim_locate_spaces_common(const char *name, XrSession session, const XrSpacesLocateInfo *info,
+                                          XrSpaceLocations *locations) {
+    int any_fake = info && is_fake_space(info->baseSpace);
+    for (uint32_t i = 0; info && i < info->spaceCount && !any_fake; ++i) any_fake = is_fake_space(info->spaces[i]);
+    PFN_xrLocateSpaces next = any_fake ? NULL : (PFN_xrLocateSpaces)dispatcher_proc(name);
+    return next ? next(session, info, locations) : locate_spaces_common(name, session, info, locations);
+}
+static XRAPI_ATTR XrResult XRAPI_CALL shim_locate_spaces(XrSession s, const XrSpacesLocateInfo *i, XrSpaceLocations *l) {
+    return shim_locate_spaces_common("xrLocateSpaces", s, i, l);
+}
+static XRAPI_ATTR XrResult XRAPI_CALL shim_locate_spaces_khr(XrSession s, const XrSpacesLocateInfo *i, XrSpaceLocations *l) {
+    return shim_locate_spaces_common("xrLocateSpacesKHR", s, i, l);
+}
+static XRAPI_ATTR XrResult XRAPI_CALL shim_destroy_space(XrSpace space) {
+    PFN_xrDestroySpace next = is_fake_space(space) ? NULL : (PFN_xrDestroySpace)dispatcher_proc("xrDestroySpace");
+    return next ? next(space) : xrDestroySpace(space);
+}
+static XRAPI_ATTR XrResult XRAPI_CALL shim_poll_event(XrInstance instance, XrEventDataBuffer *event) {
+    scene_events_via_shim = 1;
+    if (event) {  // room events first: OVRPort's dispatcher might drop event types it doesn't know
+        pthread_mutex_lock(&scene_lock);
+        int got = pop_event(event);
+        pthread_mutex_unlock(&scene_lock);
+        if (got) return XR_SUCCESS;
+    }
+    PFN_xrPollEvent next = (PFN_xrPollEvent)dispatcher_proc("xrPollEvent");
+    return next ? next(instance, event) : xrPollEvent(instance, event);
+}
+
 // For native/xrshim: emulated functions that overport's dispatcher doesn't know (it never asks us for them).
 __attribute__((visibility("default"))) PFN_xrVoidFunction framebridge_extension_proc(const char *name) {
     pthread_once(&init_once, initialize);
@@ -2427,14 +2478,14 @@ __attribute__((visibility("default"))) PFN_xrVoidFunction framebridge_extension_
     if (name && emulate_scene) {
         PFN_xrVoidFunction scene = scene_emulation(name);
         if (scene) return scene;
-#define SCENE_PROC(fn) if (!strcmp(name, #fn)) return (PFN_xrVoidFunction)fn;
-        SCENE_PROC(xrPollEvent)
-        SCENE_PROC(xrGetSystemProperties)
-        SCENE_PROC(xrLocateSpace)
-        SCENE_PROC(xrLocateSpaces)
-        SCENE_PROC(xrDestroySpace)
+        // xrGetSystemProperties stays with OVRPort (its headset identity; it calls down to our hook for the scene flags)
+#define SCENE_PROC(fn, impl) if (!strcmp(name, #fn)) return (PFN_xrVoidFunction)impl;
+        SCENE_PROC(xrPollEvent, shim_poll_event)
+        SCENE_PROC(xrLocateSpace, shim_locate_space)
+        SCENE_PROC(xrLocateSpaces, shim_locate_spaces)
+        SCENE_PROC(xrLocateSpacesKHR, shim_locate_spaces_khr)
+        SCENE_PROC(xrDestroySpace, shim_destroy_space)
 #undef SCENE_PROC
-        if (!strcmp(name, "xrLocateSpacesKHR")) return (PFN_xrVoidFunction)emu_locate_spaces_khr;
     }
     PFN_xrVoidFunction color = name ? color_space_emulation(name) : NULL;
     return color ? color : (name ? render_model_emulation(name) : NULL);
