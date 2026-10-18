@@ -34,6 +34,21 @@ def test_link_forms_name_the_manifest(link):
     assert deeplink.parse(link).manifest_url == MANIFEST
 
 
+def test_github_file_pages_become_raw_addresses():
+    raw = "https://raw.githubusercontent.com/o/r/main/dir/game.json"
+    for page in ("https://github.com/o/r/blob/main/dir/game.json", "https://github.com/o/r/raw/main/dir/game.json"):
+        assert deeplink.raw_github_url(page) == raw
+        assert deeplink.parse(page).manifest_url == raw
+        assert deeplink.parse(f"https://frameport.app/install?manifest={quote(page, safe='')}").manifest_url == raw
+    apk = "https://github.com/o/r/blob/v2/Game.apk"
+    assert deeplink.parse(f"frameport://install?url={quote(apk, safe='')}").file_url == \
+        "https://raw.githubusercontent.com/o/r/v2/Game.apk"
+    # release downloads, raw addresses and other hosts stay as they are
+    for other in ("https://github.com/o/r/releases/latest/download/game.json", raw,
+                  "https://example.com/o/r/blob/main/game.json"):
+        assert deeplink.raw_github_url(other) == other
+
+
 def test_direct_file_links():
     url = "https://github.com/x/y/releases/download/v1/Game-arm64.apk"
     assert deeplink.parse(f"framedrop://install?url={quote(url, safe='')}").file_url == url

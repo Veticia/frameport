@@ -2,7 +2,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { DEMO_MANIFEST, checkUrl, isDemo, parseInstallParams, readManifest, toFrameportLink } from './install-link.ts';
+import {
+  DEMO_MANIFEST, checkUrl, githubRelease, isDemo, parseInstallParams, rawGithubUrl, readManifest, toFrameportLink,
+} from './install-link.ts';
 
 const MANIFEST = 'https://cdn.example.com/game.framedrop.json';
 
@@ -75,4 +77,29 @@ test('the published demo manifest previews as Cool Game', () => {
   assert.equal(m?.name, 'Cool Game');
   assert.equal(m?.icon, 'https://frameport.app/demo/cool-game.svg');
   assert.deepEqual(m?.files, ['cool-game-arm64.apk']);
+});
+
+test('GitHub file pages become raw.githubusercontent.com addresses (also in the frameport:// link)', () => {
+  const raw = 'https://raw.githubusercontent.com/o/r/main/dir/game.json';
+  for (const page of ['https://github.com/o/r/blob/main/dir/game.json', 'https://github.com/o/r/raw/main/dir/game.json',
+    'https://www.github.com/o/r/blob/main/dir/game.json']) {
+    assert.equal(rawGithubUrl(page), raw);
+  }
+  const p = parseInstallParams(`?manifest=${encodeURIComponent('https://github.com/o/r/blob/v1.2/game.json')}`);
+  assert.equal(p.target, 'https://raw.githubusercontent.com/o/r/v1.2/game.json');
+  assert.equal(p.link, toFrameportLink('manifest', p.target));
+  // everything else is left alone: release downloads, raw addresses, other hosts
+  for (const other of ['https://github.com/o/r/releases/latest/download/game.json', raw,
+    'https://example.com/o/r/blob/main/game.json', 'http://github.com/o/r/blob/main/game.json']) {
+    assert.equal(rawGithubUrl(other), other);
+  }
+});
+
+test('GitHub release downloads are recognised (for the release name from the API)', () => {
+  assert.deepEqual(githubRelease('https://github.com/o/r/releases/latest/download/frameport-install.json'),
+    { owner: 'o', repo: 'r', tag: null });
+  assert.deepEqual(githubRelease('https://github.com/o/r/releases/download/v0.1.0/frameport-install.json'),
+    { owner: 'o', repo: 'r', tag: 'v0.1.0' });
+  assert.equal(githubRelease('https://github.com/o/r/blob/main/x.json'), null);
+  assert.equal(githubRelease('https://raw.githubusercontent.com/o/r/main/x.json'), null);
 });

@@ -91,7 +91,7 @@ import { DOWNLOADS, downloadPage, url } from '../../data/site';
 </Layout>
 
 <script>
-  import { parseInstallParams, readManifest } from '../../scripts/install-link';
+  import { githubRelease, parseInstallParams, readManifest } from '../../scripts/install-link';
 
   const page = document.querySelector<HTMLElement>('main.page')!;
   const $ = <T extends HTMLElement>(sel: string) => page.querySelector<T>(sel)!;
@@ -114,7 +114,31 @@ import { DOWNLOADS, downloadPage, url } from '../../data/site';
       $('[data-name]').textContent = 'Cool Game';
     }
 
-    // the manifest's own name and description, when its host allows reading it from a page (CORS)
+    // a GitHub release download can't be read from a page (no CORS): name the release from GitHub's API instead
+    const releaseInfo = () => {
+      const rel = githubRelease(parsed.target);
+      if (!rel) return;
+      const api = `https://api.github.com/repos/${encodeURIComponent(rel.owner)}/${encodeURIComponent(rel.repo)}`;
+      const opts: RequestInit = { credentials: 'omit', referrerPolicy: 'no-referrer' };
+      const release = rel.tag ? `${api}/releases/tags/${encodeURIComponent(rel.tag)}` : `${api}/releases/latest`;
+      const json = (url: string) => fetch(url, opts).then((r) => (r.ok ? r.json() : null));
+      Promise.all([json(release), json(api)])
+        .then(([r, repo]) => {
+          const name = (typeof r?.name === 'string' && r.name.trim()) || (typeof repo?.name === 'string' && repo.name) || '';
+          if (!name) return;
+          $('[data-name]').textContent = name.slice(0, 200);
+          document.title = `Install ${name.slice(0, 200)} with FramePort`;
+          $('[data-files]').textContent = `A release of ${rel.owner}/${rel.repo}`;
+          if (typeof repo?.description === 'string' && repo.description.trim()) {
+            $('[data-desc]').textContent = repo.description.trim().slice(0, 2000);
+            $('[data-desc]').hidden = false;
+          }
+        })
+        .catch(() => { /* the address alone is shown */ });
+    };
+
+    // the manifest's own name and description, when its host allows reading it from a page (CORS); GitHub file
+    // pages already became their raw.githubusercontent.com address in parseInstallParams
     if (parsed.kind === 'manifest') {
       const ctl = new AbortController();
       setTimeout(() => ctl.abort(), 6000);
@@ -122,7 +146,7 @@ import { DOWNLOADS, downloadPage, url } from '../../data/site';
         .then((r) => (r.ok && Number(r.headers.get('content-length') ?? 0) <= 256 * 1024 ? r.json() : null))
         .then((data) => {
           const m = readManifest(data);
-          if (!m) return;
+          if (!m) { releaseInfo(); return; }
           $('[data-name]').textContent = m.name;
           document.title = `Install ${m.name} with FramePort`;
           $('[data-files]').textContent = m.files.join(', ');
@@ -135,7 +159,7 @@ import { DOWNLOADS, downloadPage, url } from '../../data/site';
             img.src = m.icon;
           }
         })
-        .catch(() => { /* the address alone is shown */ });
+        .catch(() => releaseInfo());
     }
 
     // hand the link to FramePort; if this page is still in front afterwards, FramePort probably isn't there

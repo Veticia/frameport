@@ -68,6 +68,38 @@ export function checkUrl(text: string, what = 'link'): string | null {
   return null;
 }
 
+/**
+ * A GitHub file page (github.com/<owner>/<repo>/blob/<ref>/<path>, or /raw/<ref>/<path>) as the file itself on
+ * raw.githubusercontent.com: a /blob/ address is an HTML page, and raw.githubusercontent.com is the GitHub address a
+ * web page may read (CORS). Other addresses come back unchanged. deeplink.raw_github_url does the same in the app.
+ */
+export function rawGithubUrl(text: string): string {
+  let url: URL;
+  try { url = new URL(text); } catch { return text; }
+  if (url.protocol !== 'https:' || !['github.com', 'www.github.com'].includes(url.hostname.toLowerCase())) return text;
+  const m = url.pathname.match(/^\/([^/]+)\/([^/]+)\/(?:blob|raw)\/(.+)$/);
+  if (!m) return text;
+  return `https://raw.githubusercontent.com/${m[1]}/${m[2]}/${m[3]}`;
+}
+
+export interface GithubRelease { owner: string; repo: string; tag: string | null }
+
+/**
+ * A GitHub release download (github.com/<owner>/<repo>/releases/download/<tag>/<file> or
+ * …/releases/latest/download/<file>; tag null = latest), else null. Release downloads can't be read by a web page
+ * (no CORS), so the page shows the release's name from GitHub's API instead of the manifest's.
+ */
+export function githubRelease(text: string): GithubRelease | null {
+  let url: URL;
+  try { url = new URL(text); } catch { return null; }
+  if (url.protocol !== 'https:' || !['github.com', 'www.github.com'].includes(url.hostname.toLowerCase())) return null;
+  const latest = url.pathname.match(/^\/([^/]+)\/([^/]+)\/releases\/latest\/download\/[^/]+$/);
+  if (latest) return { owner: latest[1], repo: latest[2], tag: null };
+  const tagged = url.pathname.match(/^\/([^/]+)\/([^/]+)\/releases\/download\/([^/]+)\/[^/]+$/);
+  if (tagged) return { owner: tagged[1], repo: tagged[2], tag: decodeURIComponent(tagged[3]) };
+  return null;
+}
+
 export function toFrameportLink(kind: Kind, target: string): string {
   return `frameport://install?${kind}=${encodeURIComponent(target)}`;
 }
@@ -75,8 +107,9 @@ export function toFrameportLink(kind: Kind, target: string): string {
 /** The page's query string → what to install, or why not. */
 export function parseInstallParams(search: string): Parsed {
   const q = new URLSearchParams(search);
-  const manifest = q.get('manifest')?.trim();
-  const file = q.get('url')?.trim();
+  const raw = (v: string | undefined) => (v ? rawGithubUrl(v) : v);
+  const manifest = raw(q.get('manifest')?.trim());
+  const file = raw(q.get('url')?.trim());
   if (manifest) {
     const error = checkUrl(manifest, 'manifest address');
     if (error) return { ok: false, error };

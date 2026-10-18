@@ -64,6 +64,14 @@ Versions compare number by number (`1.10` > `1.9`), and a suffix sorts before th
 
 To build a link from Python: `frameport.deeplink.make_link(manifest_url="https://…/my-game.json")`.
 
+**Where to host the manifest.** The install page shows the manifest's name, description and icon only when the
+manifest's host lets web pages read it (CORS); otherwise it shows "A game or app" (FramePort itself reads any public
+address). On GitHub, commit the manifest to the repository and link it as a file: `https://raw.githubusercontent.com/
+<owner>/<repo>/main/my-game.json`, or the `https://github.com/<owner>/<repo>/blob/main/my-game.json` page address,
+which the page and FramePort turn into the raw address. A manifest attached to a GitHub release
+(`…/releases/download/…`) installs fine, but web pages can't read it: the page then shows the release's name from
+GitHub's API instead.
+
 ## On a website
 
 Image version (any page):

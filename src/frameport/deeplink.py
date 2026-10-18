@@ -185,6 +185,23 @@ def demo_manifest() -> Manifest:
                     version="1.0.0", demo=True)
 
 
+_GITHUB_FILE_PAGE = re.compile(r"^/([^/]+)/([^/]+)/(?:blob|raw)/(.+)$")
+
+
+def raw_github_url(url: str) -> str:
+    """A GitHub file page (github.com/<owner>/<repo>/blob/<ref>/<path>, or /raw/…) as the file itself on
+    raw.githubusercontent.com (a /blob/ address is an HTML page); anything else unchanged. The install page
+    (site/src/scripts/install-link.ts rawGithubUrl) does the same."""
+    try:
+        parts = urlsplit(url.strip())
+    except ValueError:
+        return url
+    if parts.scheme != "https" or (parts.hostname or "").lower() not in ("github.com", "www.github.com"):
+        return url
+    m = _GITHUB_FILE_PAGE.match(parts.path)
+    return f"https://raw.githubusercontent.com/{m[1]}/{m[2]}/{m[3]}" if m else url
+
+
 def parse(text: str) -> InstallRequest:
     """framedrop://install?…, frameport://install?…, the https://framedropvr.com/install?… button link, a manifest
     URL (…json) or a direct file URL."""
@@ -207,12 +224,12 @@ def parse(text: str) -> InstallRequest:
         if manifest and is_demo(manifest):
             return demo_request()
         if manifest:
-            return InstallRequest(manifest_url=check_url(manifest, "manifest address"))
+            return InstallRequest(manifest_url=check_url(raw_github_url(manifest), "manifest address"))
         if file:
-            return InstallRequest(file_url=check_url(file, "file address"))
+            return InstallRequest(file_url=check_url(raw_github_url(file), "file address"))
         raise LinkError("The link doesn't say what to install (no manifest= or url=).")
     if scheme in ("https", "http"):
-        url = check_url(text)
+        url = check_url(raw_github_url(text))
         name = filename_of(url).lower()
         if name.endswith(".json"):
             return InstallRequest(manifest_url=url)
