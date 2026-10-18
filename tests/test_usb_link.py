@@ -18,6 +18,14 @@ def test_pc_usb_addresses_ignores_broadcast(monkeypatch):
     assert usb.pc_usb_addresses("10.86.200.233") == ["10.86.200.234"]
 
 
+def test_pc_usb_addresses_runs_without_a_window_on_windows(monkeypatch):
+    calls = []
+    monkeypatch.setattr(usb.sys, "platform", "win32")
+    monkeypatch.setattr(usb.subprocess, "run", lambda cmd, **k: calls.append(k) or SimpleNamespace(stdout=""))
+    usb.pc_usb_addresses("10.86.200.233")
+    assert calls and all(k.get("creationflags") == 0x08000000 for k in calls)
+
+
 def test_check_reports_missing_usb_link():
     frame = SimpleNamespace(agent=lambda cmd, **k: {"present": False})
     out = usb.check(frame)

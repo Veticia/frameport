@@ -20,9 +20,11 @@ def pc_usb_addresses(frame_ip: str) -> list[str]:
     """This PC's IPv4 addresses in the same /24 as the Frame's USB address (Windows via ipconfig, else `ip`)."""
     prefix = frame_ip.rsplit(".", 1)[0] + "."
     texts = []
+    # CREATE_NO_WINDOW: the windowed Windows app flashed a console for every ipconfig run (GitHub #398)
+    hidden = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
     for cmd in (["ip", "-4", "-o", "addr", "show"], ["ipconfig"], ["ifconfig"], ["ipconfig.exe"]):
         try:
-            texts.append(subprocess.run(cmd, capture_output=True, text=True, timeout=10).stdout)
+            texts.append(subprocess.run(cmd, capture_output=True, text=True, timeout=10, **hidden).stdout)
         except (OSError, subprocess.SubprocessError):
             continue
     text = "\n".join(texts)

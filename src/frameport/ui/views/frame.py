@@ -384,8 +384,9 @@ class FrameView:
                 for _ in range(600):  # up to 20 minutes
                     if app._usb_setup is not token or app.route[0] != "frame":
                         return
-                    if usb.PC_USB_IP in usb.pc_usb_addresses(usb.FRAME_USB_IP) and server_key(usb.FRAME_USB_IP,
-                                                                                                timeout=3):
+                    # the Frame answering over the cable is what counts: this PC's address on it can be listed
+                    # differently (or not at all) by ipconfig, which kept the wait going forever (GitHub #398)
+                    if server_key(usb.FRAME_USB_IP, timeout=3):
                         break
                     time.sleep(2)
                 else:
