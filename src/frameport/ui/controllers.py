@@ -17,6 +17,6 @@ def diagram_source(mode: int) -> str:
 
 
 def diagram(mode: int) -> ft.Image:
-    return ft.Image(src=diagram_source(mode), width=T.px(440), height=T.px(283), fit=ft.BoxFit.CONTAIN,
-                    semantics_label=tr("Frame controller buttons: physical input above, Quest Touch input below. "
-                                       "A dash means unbound."))
+    return ft.Image(src=diagram_source(mode), width=T.px(440), height=T.px(322), fit=ft.BoxFit.CONTAIN,
+                    semantics_label=tr("Steam Frame controllers: each button shows the Quest Touch button it sends. "
+                                       "A dash means it sends nothing."))
