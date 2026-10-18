@@ -2,7 +2,7 @@
 
 # Patches
 
-Every patch and game setting FramePort knows: 184 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
+Every patch and game setting FramePort knows: 185 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
 
 Each entry says what the patch does, whether it changes the APK or only the install, when FramePort suggests it, its options, the catalog games whose recipe names it and the launch-test signatures that suggest it. Patches that are on by default are on for every game, so the catalog rarely names them.
 
@@ -12,7 +12,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 
 - [Patches from OVRPort](#group-overport) (25)
 - [Steam Frame patches](#group-frame) (61)
-- [Game settings](#group-adapter) (75)
+- [Game settings](#group-adapter) (76)
 - [Files and settings on the Frame](#group-device) (10)
 - [PC VR (Proton and Revive)](#group-pcvr) (13)
 
@@ -152,6 +152,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Fix hands lagging behind controllers](#adapter-pose_time_fix) | `adapter.pose_time_fix` | Game settings | 16 |
 | [Treat newer Quest controllers as Touch](#adapter-profile_remap) | `adapter.profile_remap` | Game settings |  |
 | [Animate fingers from touch](#adapter-proximity_emul) | `adapter.proximity_emul` | Game settings |  |
+| [Controller buttons](#adapter-quest_buttons) | `adapter.quest_buttons` | Game settings |  |
 | [Keep pictures in bounds](#adapter-rect_clamp) | `adapter.rect_clamp` | Game settings |  |
 | [Refresh rate](#adapter-refresh_rate) | `adapter.refresh_rate` | Game settings | 3 |
 | [Wait for the game's GPU](#adapter-release_wait) | `adapter.release_wait` | Game settings |  |
@@ -2004,6 +2005,20 @@ For games whose hands' thumbs never move when you touch the buttons or thumbstic
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
 
 > Meta's OVRPlugin reports a thumb (or index finger) resting near the controller through XR_FB_touch_controller_proximity, which the Frame's runtime lacks: "near" stays false and games that animate the hands from it show a thumb that never moves (for example Vader Immortal; found by Klownicle, GitHub #49). Binds the game's proximity actions to the capacitive touch inputs instead: 1 = thumb (thumbstick, face buttons or thumb rest touched), 2 = also the index finger (trigger touched). Only when the runtime lacks the extension.
+
+### <a id="adapter-quest_buttons"></a>Controller buttons
+
+Choose which Quest Touch buttons the Frame's face buttons send. Takes effect at the next launch.
+
+- `adapter.quest_buttons` · experimental
+- **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
+- **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
+- **Options:**
+  - Value: int, default `0`.
+  - Game settings → Controllers → "Controller buttons": SteamVR default (`0`), Mirror (`1`), Quest pair (`2`).
+- **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
+
+> Choose how the Frame's face buttons send Quest Touch inputs: 0 = SteamVR default, 1 = Mirror, 2 = Quest pair. Used at the next launch; SteamVR custom bindings can override it. Requires the runtime's XR_VALVE_frame_controller_interaction extension. Mapping: https://github.com/spoopyghosty0/frameport/blob/main/docs/CONTROLLERS.md
 
 ### <a id="adapter-rect_clamp"></a>Keep pictures in bounds
 
