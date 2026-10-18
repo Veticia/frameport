@@ -42,7 +42,7 @@ typedef struct { XrStructureType type; void *next; uint32_t image; } emul_gles_i
     X(eglChooseConfig) X(eglCreatePbufferSurface) X(eglDestroySurface) X(eglGetCurrentContext) X(eglGetError) \
     X(eglQueryString)
 #define EMUL_GL_FUNCS(X) X(glFenceSync) X(glDeleteSync) X(glWaitSync) X(glClientWaitSync) X(glFlush) \
-    X(glGenFramebuffers) X(glDeleteFramebuffers) X(glBindFramebuffer) X(glFramebufferTexture2D) X(glCheckFramebufferStatus) X(glViewport) \
+    X(glFramebufferTextureLayer) X(glIsEnabled) X(glBlitFramebuffer) X(glGenFramebuffers) X(glDeleteFramebuffers) X(glBindFramebuffer) X(glFramebufferTexture2D) X(glCheckFramebufferStatus) X(glViewport) \
     X(glUseProgram) X(glCreateShader) X(glShaderSource) X(glCompileShader) X(glGetShaderiv) X(glGetShaderInfoLog) \
     X(glDeleteShader) X(glCreateProgram) X(glAttachShader) X(glLinkProgram) X(glGetProgramiv) X(glGetProgramInfoLog) \
     X(glGetUniformLocation) X(glUniform1i) X(glUniform1f) X(glUniform3f) X(glUniform4f) X(glUniformMatrix3fv) \
@@ -1003,6 +1003,7 @@ static void emul_on_destroy_session(XrSession session) {
 }
 
 static XRAPI_ATTR XrResult XRAPI_CALL hook_xrDestroySession(XrSession session) {
+    cube_session_destroy(session);
     emul_on_destroy_session(session);
     PFN_xrDestroySession fn = (PFN_xrDestroySession)lookup(active_instance, "xrDestroySession");
     return fn ? fn(session) : XR_ERROR_FUNCTION_UNSUPPORTED;

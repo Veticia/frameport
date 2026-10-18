@@ -88,6 +88,16 @@ static inline XrVector3f lm_glcube_dir(int face, float u, float v) {
     }
 }
 
+// Cube image array order: +X,-X,+Y,-Y,+Z,-Z. Local +Z faces inward.
+// Quad right/up match GL cube s/t; Vulkan copies reverse rows to compensate its top-left image origin.
+static inline XrPosef lm_cube_quad_pose(XrQuaternionf orientation, int face, float distance) {
+    static const int faces[6] = {1, 3, 4, 5, 2, 0};
+    XrPosef p = lm_face_pose((XrPosef){orientation, {0, 0, 0}}, faces[face], distance);
+    if (face != 2 && face != 3)
+        p.orientation = lm_qmul(p.orientation, (XrQuaternionf){0, 0, 1, 0});
+    return p;
+}
+
 // GL's cube map lookup (OpenGL ES 3.0 spec, table 3.21): direction -> face and (s, t).
 static inline int lm_glcube_lookup(XrVector3f d, float *s, float *t) {
     float ax = fabsf(d.x), ay = fabsf(d.y), az = fabsf(d.z), sc, tc, ma;

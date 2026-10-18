@@ -26,8 +26,8 @@ from ...patches.settings import (
 )
 from .. import components as C
 from .. import theme as T
-from ..help import HELP
 from ..controllers import diagram, diagram_source
+from ..help import HELP
 
 if TYPE_CHECKING:
     from ..app import FramePortApp

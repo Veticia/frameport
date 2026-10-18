@@ -17,7 +17,7 @@
 //  * drops composition layers that reference swapchains that failed to create (layer_fix);
 //  * answers xrGetDisplayRefreshRateFB with the measured display rate when the runtime lacks it or reports 0 Hz
 //    (session_fixes.c);
-//  * serves cube swapchains the runtime refuses as GL/Vulkan cube maps and drops their layers (cube_standin, cube_standin.c);
+//  * serves refused cube swapchains as GL/Vulkan cube maps and emulates cube-only frames with quads (cube_standin, cube_standin.c);
 //  * optionally requests mutable-format swapchain images (mutable_fix, off by default);
 //  * optionally swaps left/right images of stereo projection layers (swap_eyes, off by default);
 //  * emulates XR_FB_passthrough with XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND when the runtime lacks it
@@ -128,6 +128,7 @@ static int frame_open;
 static int sc_acquires, sc_waits, sc_releases, sc_wait_fails;  // per pacing period (layer_debug)  // drop XrCompositionLayerColorScaleBiasKHR (the runtime's color pass)
 static int controller_fix = 1;
 static int swapchain_fix = 1;
+static int cube_quads = 1;
 static int cube_standin = 1;  // cube swapchains the runtime refuses: served by the adapter (cube_standin.c)
 static int rect_clamp = 1;
 static int fb_color_space;  // fb_color_space: offer XR_FB_color_space when the runtime lacks it (#336)
@@ -204,6 +205,7 @@ static void read_settings(const char *path) {
         if (sscanf(line, "gl_error_clear=%f", &value) == 1) gl_error_clear = value != 0;
         if (sscanf(line, "controller_fix=%f", &value) == 1) controller_fix = value != 0;
         if (sscanf(line, "swapchain_fix=%f", &value) == 1) swapchain_fix = value != 0;
+        if (sscanf(line, "cube_quads=%f", &value) == 1) cube_quads = value != 0;
         if (sscanf(line, "cube_standin=%f", &value) == 1) cube_standin = value != 0;
         if (sscanf(line, "rect_clamp=%f", &value) == 1) rect_clamp = value != 0;
         if (sscanf(line, "fb_color_space=%f", &value) == 1) fb_color_space = value != 0;
@@ -635,9 +637,11 @@ static int emul_is_virtual(XrSwapchain handle);
 static void emul_virtual_destroy(XrSwapchain handle);
 static XrResult emul_virtual_enumerate(XrSwapchain handle, uint32_t capacity, uint32_t *count, XrSwapchainImageBaseHeader *images);
 static void emul_on_acquire(XrSwapchain handle, uint32_t index);
-static XrResult standin_after_failure(const XrSwapchainCreateInfo *info, XrSwapchain *out, XrResult result);
+static XrResult standin_after_failure(XrSession session, const XrSwapchainCreateInfo *info, XrSwapchain *out, XrResult result);
 static int is_standin(XrSwapchain handle);
 static void standin_destroy(XrSwapchain handle);
+static void cube_outputs_destroy(void);
+static void cube_session_destroy(XrSession session);
 static XrResult standin_enumerate(XrSwapchain handle, uint32_t capacity, uint32_t *count, XrSwapchainImageBaseHeader *images);
 
 static int known_swapchain(XrSwapchain handle) {
@@ -741,7 +745,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrCreateSwapchain(XrSession session, const XrSwap
         snap_on_create(*swapchain, &fixed);
         return result;
     }
-    if (!swapchain_fix) return standin_after_failure(&fixed, swapchain, result);
+    if (!swapchain_fix) return standin_after_failure(session, &fixed, swapchain, result);
 
     // Frame's runtime rejects some GLES formats (GL_RGBA8) and MSAA swapchains (overport #71).
     if (fixed.sampleCount > 1) {
@@ -764,7 +768,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrCreateSwapchain(XrSession session, const XrSwap
         emul_on_create_swapchain(*swapchain, &fixed);
         snap_on_create(*swapchain, &fixed);
     }
-    return standin_after_failure(&fixed, swapchain, result);
+    return standin_after_failure(session, &fixed, swapchain, result);
 }
 
 XRAPI_ATTR XrResult XRAPI_CALL xrDestroySwapchain(XrSwapchain swapchain) {
@@ -1699,7 +1703,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEndFrame(XrSession session, const XrFrameEndInf
             frames = 0; drift_sum = drift_max = 0;
         }
     }
-    if ((!layer_fix && !swap_eyes && !emulate_passthrough && !flip_quads && !flip_emul && !strip_depth && !fade_quad) || !info || !info->layerCount ||
+    if ((!cube_standin && !layer_fix && !swap_eyes && !emulate_passthrough && !flip_quads && !flip_emul && !strip_depth && !fade_quad) || !info || !info->layerCount ||
         info->layerCount > 64)
         return fn(session, info);
     if (layer_debug) {  // the submitted layer list (order, flags, eyes, chained structs) whenever its shape changes
@@ -1746,6 +1750,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEndFrame(XrSession session, const XrFrameEndInf
     XrCompositionLayerQuad quads[64];
     XrCompositionLayerQuad fade_out;  // fade_quad: at most one fade layer per frame
     int faded = 0;
+    cube_outputs_begin();
     uint32_t count = 0, dropped = 0, swapped = 0, passthrough = 0;
     const XrCompositionLayerBaseHeader *surface_projections[SURF_MAX];
     int surface_projection_count = 0;
@@ -1830,6 +1835,14 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEndFrame(XrSession session, const XrFrameEndInf
                                     ? ((const XrCompositionLayerQuad *)layer)->subImage.swapchain
                                     : ((const XrCompositionLayerCylinderKHR *)layer)->subImage.swapchain)) {
             ++dropped;  // an emulated video surface without a frame yet
+            continue;
+        }
+        if (cube_quads && layer->type == XR_TYPE_COMPOSITION_LAYER_CUBE_KHR &&
+            count + 6 + info->layerCount - i - 1 <= 16 && count + 6 <= 64 &&
+            cube_layer_quads(session, info, i, &quads[count])) {
+            for (int f = 0; f < 6; ++f) kept[count + f] = (const XrCompositionLayerBaseHeader *)&quads[count + f];
+            count += 6;
+            ++swapped;
             continue;
         }
         if (layer_uses_standin(layer)) {  // a cube layer whose swapchain the runtime refused (cube_standin.c)
@@ -2321,6 +2334,10 @@ XRAPI_ATTR XrResult XRAPI_CALL xrGetInstanceProcAddr(XrInstance instance, const 
         HOOK(xrCreateVulkanInstanceKHR)
         HOOK_AS(xrReleaseSwapchainImage, surf_composite_release)
         HOOK_AS(xrWaitSwapchainImage, surf_composite_wait)
+    }
+    if (cube_standin) {
+        HOOK_AS(xrEndSession, cube_end_session)
+        HOOK_AS(xrDestroySession, hook_xrDestroySession)
     }
     if (equirect_emul) {
         HOOK_AS(xrReleaseSwapchainImage, hook_xrReleaseSwapchainImage)

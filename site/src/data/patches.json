@@ -34,6 +34,11 @@
   "title": "Show Steam Frame controllers",
   "group": "Game settings"
  },
+ "adapter.cube_quads": {
+  "anchor": "adapter-cube_quads",
+  "title": "Show cube loading screens",
+  "group": "Game settings"
+ },
  "adapter.cube_standin": {
   "anchor": "adapter-cube_standin",
   "title": "Stand in for cube layers",

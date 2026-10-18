@@ -2,7 +2,7 @@
 
 # Patches
 
-Every patch and game setting FramePort knows: 185 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
+Every patch and game setting FramePort knows: 186 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
 
 Each entry says what the patch does, whether it changes the APK or only the install, when FramePort suggests it, its options, the catalog games whose recipe names it and the launch-test signatures that suggest it. Patches that are on by default are on for every game, so the catalog rarely names them.
 
@@ -12,7 +12,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 
 - [Patches from OVRPort](#group-overport) (25)
 - [Steam Frame patches](#group-frame) (61)
-- [Game settings](#group-adapter) (76)
+- [Game settings](#group-adapter) (77)
 - [Files and settings on the Frame](#group-device) (10)
 - [PC VR (Proton and Revive)](#group-pcvr) (13)
 
@@ -113,6 +113,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Fix inside-out mixed reality](#adapter-alpha_blend_emul) | `adapter.alpha_blend_emul` | Game settings |  |
 | [Use controllers](#adapter-controller_fix) | `adapter.controller_fix` | Game settings | 1 |
 | [Show Steam Frame controllers](#adapter-controller_models) | `adapter.controller_models` | Game settings | 6 |
+| [Show cube loading screens](#adapter-cube_quads) | `adapter.cube_quads` | Game settings |  |
 | [Stand in for cube layers](#adapter-cube_standin) | `adapter.cube_standin` | Game settings |  |
 | [Show curved menus and screens](#adapter-cylinder_strips) | `adapter.cylinder_strips` | Game settings |  |
 | [Show 360° backgrounds and videos](#adapter-equirect_emul) | `adapter.equirect_emul` | Game settings | 7 |
@@ -1432,6 +1433,20 @@ For games that show the headset's own controllers. Takes effect after a reinstal
 
 > Games that ask the headset for its controller models (Meta's runtime controller models, XR_FB_render_model) get the Steam Frame controllers instead of Quest Touch controllers. The models come from the Frame's own SteamVR and are converted on the Frame at install time. Games that ship their own controller meshes aren't affected. Turning it on needs a rebuild (it adds a small library in front of OVRPort's loader).
 
+### <a id="adapter-cube_quads"></a>Show cube loading screens
+
+Shows 360° cube loading screens as six panels around you. Requires stand-in cube layers. Skipped while a 3D scene is submitted.
+
+- `adapter.cube_quads`
+- **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
+- **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
+- **Options:**
+  - Value: int, default `1`.
+  - Game settings → Troubleshooting → "Show cube loading screens" (advanced).
+- **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
+
+> Copies cube-map loading screens into six panels around the viewer (GLES and Vulkan). Mixed projection frames are skipped because the Frame draws panels above the scene. Requires cube_standin.
+
 ### <a id="adapter-cube_standin"></a>Stand in for cube layers
 
 Keeps games running that use a 360° cube layer the Frame lacks (for example Budget Cuts Ultimate). Leave it on.
@@ -1444,7 +1459,7 @@ Keeps games running that use a 360° cube layer the Frame lacks (for example Bud
   - Game settings → Troubleshooting → "Stand in for cube layers" (advanced).
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
 
-> The Frame's runtime has no cube-map layers and refuses their swapchains; OVRPlugin then crashes when it submits the next frame (for example Budget Cuts Ultimate). FrameBridge serves such a swapchain itself (a GL cube map, GLES games) and drops its layers, so the game runs on without that layer.
+> The Frame's runtime has no cube-map layers and refuses their swapchains; OVRPlugin then crashes when it submits the next frame (for example Budget Cuts Ultimate). FrameBridge serves such a swapchain itself on GLES and Vulkan; cube_quads displays its loading screens.
 
 ### <a id="adapter-cylinder_strips"></a>Show curved menus and screens
 

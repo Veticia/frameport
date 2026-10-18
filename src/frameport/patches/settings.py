@@ -58,10 +58,13 @@ SETTINGS = [
      "https://github.com/spoopyghosty0/frameport/blob/main/docs/CONTROLLERS.md"),
     ("swapchain_fix", "int", 1, "Swapchain format fallback",
      "Retry rejected GLES formats/MSAA with sRGB, samples=1."),
+    ("cube_quads", "int", 1, "Show cube layers",
+     "Copies cube-map loading screens into six panels around the viewer (GLES and Vulkan). Mixed projection frames "
+     "are skipped because the Frame draws panels above the scene. Requires cube_standin."),
     ("cube_standin", "int", 1, "Stand-in cube swapchains",
      "The Frame's runtime has no cube-map layers and refuses their swapchains; OVRPlugin then crashes when it submits "
-     "the next frame (for example Budget Cuts Ultimate). FrameBridge serves such a swapchain itself (a GL cube map, "
-     "GLES games) and drops its layers, so the game runs on without that layer."),
+     "the next frame (for example Budget Cuts Ultimate). FrameBridge serves such a swapchain itself on GLES and "
+     "Vulkan; cube_quads displays its loading screens."),
     ("surface_native", "int", 0, "Native video surfaces (Batman renderer)",
      "Plays the game's Android video surface through GPU-shared buffers and composes it as a stereo panorama (Batman: "
      "Arkham Shadow's cutscenes, see docs/SURFACE_VIDEO.md). Specific to that game's renderer: set by its recipe, not "
@@ -514,6 +517,9 @@ UI: dict[str, dict] = {
     "ovrp_hold_physics": dict(group="troubleshooting", level="advanced", label="Steadier hands (older Unity)",
                 help="For older Unity games whose hands trail the controllers (for example Sniper Elite "
                      "VR). In others the hands lag.", control=("switch",)),
+    "cube_quads": dict(group="troubleshooting", level="advanced", label="Show cube loading screens",
+                help="Shows 360° cube loading screens as six panels around you. Requires stand-in cube layers. "
+                     "Skipped while a 3D scene is submitted.", control=("switch",)),
     "cube_standin": dict(group="troubleshooting", level="advanced", label="Stand in for cube layers",
                 help="Keeps games running that use a 360° cube layer the Frame lacks (for example Budget Cuts "
                      "Ultimate). Leave it on.", control=("switch",)),
@@ -865,8 +871,8 @@ class Foveation(Patch):
     id = "device.foveation"
     title = "Foveated rendering (Valve)"
     description = ("Reduces shading away from the full-resolution area, following each eye's gaze. "
-                   "Default keeps the runtime profile unchanged. Low has the largest full-resolution center; medium and high "
-                   "use smaller centers and stronger peripheral detail reduction. Larger areas "
+                   "Default keeps the runtime profile unchanged. Low has the largest full-resolution center; "
+                   "medium and high use smaller centers and stronger peripheral detail reduction. Larger areas "
                    "retain more detail but save less GPU work. Fixed stops the area following your eyes. "
                    "The optional test darkens actual coarse-shaded fragments. Runtime choices are in Game settings. "
                    "Tested on RE4, Deadpool and Asgard's Wrath 2. "

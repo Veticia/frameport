@@ -447,11 +447,34 @@ head-pose deadline ends VR mode without a worn headset (not a game bug).
 
 ## Cube swapchains
 
-**Cube swapchains (GitHub #107, 2026-10-09):** the Frame's runtime refuses `faceCount=6` swapchains (-2,
-XR_ERROR_RUNTIME_FAILURE); OVRPlugin ignores that ("CreateSwapchain for eye 0: 0x0, 0 stages") and crashes in
-ovrp_EndFrame4 (memset). FrameBridge `cube_standin` (default on, `native/adapter/cube_standin.c`) serves a refused cube
-swapchain as one GL cube-map texture in the app's context (GLES only) and drops its layers. Verified headless with
-Budget Cuts Ultimate (2048² sRGB, 12 mips; runs on at ~70 fps); what the cube layer showed is simply missing.
+**Cube swapchains (GitHub #107/#385, 2026-10-17):** the Frame's runtime refuses `faceCount=6`
+swapchains (-2, XR_ERROR_RUNTIME_FAILURE). `cube_standin` (default on, `native/adapter/cube_standin.c`)
+serves refused cubes with a GLES cube texture in the app's context or a Vulkan cube-compatible image.
+This prevents OVRPlugin's empty-image-list crash (Budget Cuts Ultimate; Vulkan UNDERDOGS).
+
+`cube_quads` (int, default 1) now copies mip 0 into six runtime quad swapchains, replacing each cube at
+its original layer-list position. Face order is +X, -X, +Y, -Y, +Z, -Z; inward-facing quad right/up axes
+match GL cube s/t. Vulkan copies reverse rows for its top-left quad image origin. The cube orientation
+rotates the box; its centre follows the stereo view midpoint in the layer's space at displayTime
+(falls back to the space origin without valid tracking). Faces are 100 m square at 50 m distance.
+Eye visibility and layer flags are retained. Quads submitted by the game retain their order.
+
+The Frame draws quads above **every** projection, regardless of order. This implementation conservatively
+drops cubes whenever any projection is submitted, including alpha projections: it supports cube-only
+loading screens with optional quad overlays, not skyboxes behind gameplay. Multiple cubes of the same
+size/format share six swapchains, using separate array slices so their images cannot overwrite one another.
+Each pool is copied once per frame. Other sizes need another six swapchains; runtime allocation refusal
+(particularly near its ~15-swapchain cap) frees partial allocations and disables that pool until reset.
+Pools are freed on stand-in creation/destruction, xrEndSession and session destruction; stand-ins are also freed at
+session destruction. Set `cube_quads=0` for the previous drop-only behaviour.
+
+Look for `cube_quads: created six ... face swapchains (GLES|Vulkan)` and
+`cube_quads: submitting cube as six quads (half-size=50m, mip=0)`. Refusals log
+`cube_quads: face swapchain creation failed (result=...); dropping cube layers`; mixed frames log
+`cube_quads: skipping cube with projection; preserving scene visibility` once.
+Host math/settings/artifact checks and Android builds are available; no device test yet. Headset checks
+still needed: face seams/orientation, sRGB/alpha, GLES context availability, Vulkan synchronization and
+loading-to-gameplay transitions (HardBullet's 1024²/32² Vulkan cubes; Budget Cuts GLES).
 
 ## Hardware video decoding
 

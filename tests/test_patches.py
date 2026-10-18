@@ -192,6 +192,16 @@ def test_controller_models_setting():
     assert "controller_models" not in adapter_settings({})  # off unless selected: existing builds are unchanged
 
 
+def test_cube_quads_applies_like_cube_standin():
+    quads = base.get("adapter.cube_quads")
+    standin = base.get("adapter.cube_standin")
+    assert quads.default == 1
+    for analysis in (_analysis(), _analysis(graphics="GLES or unknown (no Vulkan declaration)"),
+                     _analysis(abis=["armeabi-v7a"])):
+        assert quads.applies(analysis) == standin.applies(analysis)
+    assert adapter_settings({"adapter.cube_quads": {"value": "0"}})["cube_quads"] == 0
+
+
 def test_equirect_emul_setting():
     patch = base.get("adapter.equirect_emul")
     gles = dict(graphics="GLES or unknown (no Vulkan declaration)")
@@ -698,8 +708,10 @@ def test_explicit_eye_tracked_foveation_enables_injection_without_debug_spam():
     env = install_context(r).env
     assert env["ENABLE_VULKAN_FDM_INJECTION_LAYER"] == "1"
     assert env["FDM_DEBUG"] == "enable"  # no frozen gaze or per-frame logging
-    assert env["FOVE_LEVEL"] == "2"  # retain independently configured quality
+    assert "FOVE_LEVEL" not in env  # Valve's layer ignores numbers; the size comes from the level choice (#394)
     assert "VK_INSTANCE_LAYERS" not in env  # keep Steam's other layers
+    r.patches["device.foveation"]["level"] = "med"
+    assert install_context(r).env["FOVE_LEVEL"] == "med"
     assert install_context(Recipe("com.x.game", patches={"device.foveation": {"mode": ""}})).env == {}
 
 

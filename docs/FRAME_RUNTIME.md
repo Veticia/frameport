@@ -124,7 +124,9 @@
   `ComposeLayerQuad` and `ComposeLayerProjection`; cube/cylinder/equirect/equirect2 exist only as enum names, so
   there is nothing to switch on. It has a layer limit ("Exceeded the layer limit"; the value is logged by
   `layer_debug` from `maxLayerCount`). The adapter emulates cylinders (strips) and, per game, equirect layers
-  (`equirect_emul`, an adapter projection layer). Quad layers are drawn above every projection layer regardless of
+  (`equirect_emul`, an adapter projection layer). Refused cube swapchains use GLES/Vulkan stand-ins;
+  `cube_quads` (default on) copies their faces into six quads for frames without a projection
+  (see DEVICE_NOTES "Cube swapchains"). Quad layers are drawn above every projection layer regardless of
   submission order (seen 2026-10-01: quads placed before 4XVR's projection layer covered it).
 - Swapchain formats: GLES `GL_SRGB8_ALPHA8` (35907) / `GL_SRGB8` (35905) only, samples = 1. Vulkan: 43 (R8G8B8A8_SRGB)
   and 50, not 37/44 (UNORM).

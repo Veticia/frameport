@@ -378,6 +378,21 @@ def test_cube_standin_is_a_default_on_adapter_setting():
     assert [s[2] for s in SETTINGS if s[0] == "cube_standin"] == [1]
 
 
+def test_cube_quads_setting_and_artifacts():
+    from frameport.patches.frame import artifact
+    from frameport.patches.frame.adapter import settings_text
+    from frameport.patches.settings import SETTINGS, UI
+
+    assert [s[2] for s in SETTINGS if s[0] == "cube_quads"] == [1]
+    assert UI["cube_quads"]["control"] == ("switch",)
+    assert b"cube_quads=1\n" in settings_text({"adapter.cube_quads": {}})
+    assert b"cube_quads=0\n" in settings_text({"adapter.cube_quads": {"value": 0}})
+    for abi in ("arm64-v8a", "armeabi-v7a"):
+        data = artifact(abi, "libopenxr_loader_generic.so")
+        assert b"cube_quads=%f" in data
+        assert b"cube_quads: submitting cube as six quads" in data
+
+
 def test_unity_pcvr_signatures():
     """Unity's Player.log in a PC VR launch log (agent v67): VR start-up failures and Unity's crash handler."""
     log = ("===== unity log compatdata/pfx/drive_c/users/steamuser/AppData/LocalLow/SUPERHOT Team/SUPERHOT VR/"

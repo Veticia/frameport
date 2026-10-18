@@ -55,6 +55,24 @@ int main(void) {
                 CHECK(lm_glcube_lookup(lm_glcube_dir(f, u, v), &s, &t) == f);
                 CHECK(NEAR(s, (u + 1) / 2) && NEAR(t, (v + 1) / 2));
             }
+    // Cube layer quads: GL image s/t basis, inward normals, rotated layer, mip-0 face order.
+    for (int f = 0; f < 6; ++f) {
+        XrQuaternionf rotation = lm_axis_angle(0, 1, 0, 0.71f);
+        XrPosef p = lm_cube_quad_pose(rotation, f, 50);
+        XrVector3f axis = lm_rotate(rotation, lm_glcube_dir(f, 0, 0));
+        CHECK(VNEAR(p.position, 50 * axis.x, 50 * axis.y, 50 * axis.z));
+        XrVector3f normal = lm_rotate(p.orientation, (XrVector3f){0, 0, 1});
+        CHECK(VNEAR(normal, -axis.x, -axis.y, -axis.z));
+        for (int x = -1; x <= 1; ++x) for (int y = -1; y <= 1; ++y) {
+            XrVector3f offset = lm_rotate(p.orientation, (XrVector3f){x, y, 0});
+            XrVector3f expected = lm_rotate(rotation, lm_glcube_dir(f, x, y));
+            CHECK(VNEAR(expected, axis.x + offset.x, axis.y + offset.y, axis.z + offset.z));
+        }
+        // Vulkan reverses the image rows: source t = 1 - destination v, for the identical GL pose.
+        float s, t;
+        XrVector3f d = lm_glcube_dir(f, 0.4f, -0.6f);
+        CHECK(lm_glcube_lookup(d, &s, &t) == f && NEAR(s, 0.7f) && NEAR(t, 0.2f));
+    }
     // equirect2: full sphere, image centre (u 0.5) straight ahead (-Z), +X to the right, v 1 at the top
     float u, v;
     CHECK(lm_equirect2_uv((XrVector3f){0, 0, -1}, 2 * LM_PI, LM_PI / 2, -LM_PI / 2, &u, &v)
