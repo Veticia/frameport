@@ -43,7 +43,8 @@ def font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
     return ImageFont.load_default(size=size)
 
 
-def panel(title: str, body: str, seen: int | None = None, accent=ACCENT) -> Image.Image:
+def panel(title: str, body: str, seen: int | None = None, accent=ACCENT, ring=SECONDARY,
+          label: str | None = None) -> Image.Image:
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     d.rounded_rectangle((4, 4, W - 4, H - 4), radius=48, fill=BG, outline=SURFACE, width=4)
@@ -54,8 +55,9 @@ def panel(title: str, body: str, seen: int | None = None, accent=ACCENT) -> Imag
         for i in range(DIRECTIONS):
             a0 = -90 + i * 360 / DIRECTIONS + 3
             d.arc((cx - r, cy - r, cx + r, cy + r), a0, a0 + 360 / DIRECTIONS - 6,
-                  fill=(SECONDARY if i < seen else SURFACE), width=26)
-        d.text((cx, cy), f"{seen}/{DIRECTIONS}", font=font(44, True), fill=TEXT, anchor="mm")
+                  fill=(ring if i < seen else SURFACE), width=26)
+        d.text((cx, cy), label if label is not None else f"{seen}/{DIRECTIONS}", font=font(44, True), fill=TEXT,
+               anchor="mm")
         x = 290
     d.text((x, 108), title, font=font(54, True), fill=TEXT, anchor="lm")
     y = 180
@@ -72,6 +74,10 @@ def images() -> dict[str, bytes]:
     for n in range(DIRECTIONS + 1):
         out[f"look_{n:02d}"] = panel("Look around the room", "Turn slowly until the ring is full:\n"
                                      "every wall and your furniture.", seen=n, accent=SECONDARY)
+    for n in range(DIRECTIONS + 1):  # everything seen before the minimum scan time: the ring is the time left
+        out[f"finish_{n:02d}"] = panel("Almost done", "Walls, ceiling and floor are covered.\n"
+                                       "Look closely at your furniture\nuntil the ring fills.", seen=n, accent=OK, ring=OK,
+                                       label=f"{(DIRECTIONS - n) * 5}s")
     data = {}
     for key, img in out.items():
         buf = io.BytesIO()

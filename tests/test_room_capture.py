@@ -36,6 +36,11 @@ def test_prompt_choice(monkeypatch, tmp_path):
     assert a._prompt_for(1.0, set(range(12)), {"up": 0, "down": 0}) == "ceiling"
     assert a._prompt_for(1.0, set(range(12)), {"up": 9, "down": 0}) == "floor"
     assert a._prompt_for(1.0, set(range(11)), {"up": 9, "down": 9}) == "look_11"
+    # all covered before the minimum time: "Almost done" with the time left, not a ring stuck at 12/12
+    done = {"up": 9, "down": 9}
+    assert a._prompt_for(1.0, set(range(12)), done) == "look_12"  # callers without a clock keep the old prompt
+    assert a._prompt_for(1.0, set(range(12)), done, now=1.0 + a.ROOM_SCAN_MIN_SECONDS / 2) == "finish_06"
+    assert a._prompt_for(1.0, set(range(12)), done, now=1.0 + a.ROOM_SCAN_MIN_SECONDS * 2) == "finish_12"
 
 
 def test_scan_completes_early_only_when_everything_was_seen(monkeypatch, tmp_path):
