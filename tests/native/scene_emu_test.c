@@ -295,6 +295,7 @@ int main(int argc,char **argv) {
     const char *mode=argv[1];
     if(!strcmp(mode,"override")) { scene_width=3; scene_depth=4; scene_height=2.7f; }
     emulate_scene=1;
+    scene_capture_delay_ms=0;  // the completion event right away (its delay is for games' prompt logic)
     scene_hide_bounds=!strcmp(mode,"box");  // only box mode hides the play area
     scene_app_mesh=!getenv("SCENE_NO_MESH_EXT");  // the app enabled XR_META_spatial_entity_mesh (the usual case)
     scene_on_create_session(SESSION);
@@ -309,6 +310,15 @@ int main(int argc,char **argv) {
               ((XrEventDataBoundaryVisibilityChangedMETA*)&bev)->boundaryVisibility==XR_BOUNDARY_VISIBILITY_SUPPRESSED_META);
         CHECK(vis(SESSION,XR_BOUNDARY_VISIBILITY_SUPPRESSED_META)==XR_SUCCESS && !pop_event(&bev));  // unchanged: no event
         CHECK(vis(SESSION,(XrBoundaryVisibilityMETA)7)==XR_ERROR_VALIDATION_FAILURE);
+    }
+    if(!strcmp(mode,"capture_delay")) {  // the completion waits, then arrives exactly once
+        scene_capture_delay_ms=30;
+        XrAsyncRequestIdFB req; XrEventDataBuffer cev;
+        CHECK(emu_request_scene_capture(SESSION,NULL,&req)==XR_SUCCESS && !pop_event(&cev));
+        CHECK(emu_request_scene_capture(SESSION,NULL,&req)==XR_ERROR_LIMIT_REACHED);  // one capture at a time
+        struct timespec nap={0,60*1000000}; nanosleep(&nap,NULL);
+        CHECK(pop_event(&cev) && cev.type==XR_TYPE_EVENT_DATA_SCENE_CAPTURE_COMPLETE_FB && !pop_event(&cev));
+        return 0;
     }
     if(!strcmp(mode,"room")) { CHECK(argc==4); CHECK(!check_room(atoi(argv[2]),atoi(argv[3]))); }
     else if(!strcmp(mode,"derived")) {

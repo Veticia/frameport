@@ -201,7 +201,24 @@ static void push_event(const void *event, size_t size) {
     memcpy(&scene_events[event_tail], event, size);
     event_tail = (event_tail + 1) % MAX_EVENTS;
 }
+// A real scan takes a while; an answer in the same frame may be missed by a game's prompt logic (Pinball FX asked
+// again at once). The completion waits this long in its own slot. Caller of both holds scene_lock.
+static int scene_capture_delay_ms = 1500;
+static XrEventDataSceneCaptureCompleteFB pending_capture;
+static uint64_t pending_capture_at;  // CLOCK_MONOTONIC ns, 0 = none
+static uint64_t scene_now_ns(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
 static int pop_event(XrEventDataBuffer *out) {  // caller holds scene_lock
+    if (pending_capture_at && scene_now_ns() >= pending_capture_at) {
+        memset(out, 0, sizeof(*out));
+        memcpy(out, &pending_capture, sizeof(pending_capture));
+        pending_capture_at = 0;
+        LOG("scene: capture complete delivered (request %llu)", (unsigned long long)pending_capture.requestId);
+        return 1;
+    }
     if (event_head == event_tail) return 0;
     memcpy(out, &scene_events[event_head], sizeof(XrEventDataBuffer));
     event_head = (event_head + 1) % MAX_EVENTS;
@@ -530,6 +547,16 @@ static XRAPI_ATTR XrResult XRAPI_CALL scene_get_semantic_labels(XrSession sessio
     if (labels->bufferCapacityInput < n) return XR_ERROR_SIZE_INSUFFICIENT;
     if (!labels->buffer) return XR_ERROR_VALIDATION_FAILURE;
     memcpy(labels->buffer, text, n);
+    static unsigned char logged[MAX_ENTITIES];  // diagnostics: what each entity is called for this app, once
+    if (!logged[i]) {
+        logged[i] = 1;
+        const XrSemanticLabelsSupportInfoFB *support = NULL;
+        for (const XrBaseInStructure *s = labels->next; s; s = s->next)
+            if (s->type == XR_TYPE_SEMANTIC_LABELS_SUPPORT_INFO_FB) support = (const XrSemanticLabelsSupportInfoFB *)s;
+        LOG("scene: labels of entity %d: %s -> \"%s\" (app's labels: %s, flags 0x%llx)", i, entities[i].label, text,
+            support && support->recognizedLabels ? support->recognizedLabels : "none sent, legacy set",
+            support ? (unsigned long long)support->flags : 0ULL);
+    }
     return XR_SUCCESS;
 }
 
@@ -540,11 +567,17 @@ static XRAPI_ATTR XrResult XRAPI_CALL emu_request_scene_capture(XrSession sessio
     pthread_mutex_lock(&scene_lock);
     scene_session = session;
     build_room();
-    if (!event_free()) { pthread_mutex_unlock(&scene_lock); return XR_ERROR_LIMIT_REACHED; }
+    if (!event_free() || pending_capture_at) { pthread_mutex_unlock(&scene_lock); return XR_ERROR_LIMIT_REACHED; }
     *request = next_request++;
     XrEventDataSceneCaptureCompleteFB e = {XR_TYPE_EVENT_DATA_SCENE_CAPTURE_COMPLETE_FB, NULL, *request, XR_SUCCESS};
-    push_event(&e, sizeof(e));
-    LOG("scene: capture requested -> %s", room_from_file ? "scanned room" : "guardian box");
+    if (scene_capture_delay_ms > 0) {
+        pending_capture = e;
+        pending_capture_at = scene_now_ns() + (uint64_t)scene_capture_delay_ms * 1000000ull;
+    } else {
+        push_event(&e, sizeof(e));
+    }
+    LOG("scene: capture requested -> %s (complete in %d ms)", room_from_file ? "scanned room" : "guardian box",
+        scene_capture_delay_ms);
     pthread_mutex_unlock(&scene_lock);
     return XR_SUCCESS;
 }
@@ -625,39 +658,57 @@ static XRAPI_ATTR XrResult XRAPI_CALL emu_get_component_status(XrSpace space, Xr
     pthread_mutex_unlock(&scene_lock);
     return r;
 }
+// Diagnostics for MR games that reject the room (Pinball FX asks for a scan again and again): every kind of room
+// query is logged once per entity with its result. Caller holds scene_lock.
+enum { TR_CONTAINER, TR_LAYOUT, TR_BOX2D, TR_BOX3D, TR_BOUNDARY, TR_MESH, TR_COUNT };
+static void trace_call(XrSpace space, int kind, XrResult r) {
+    static const char *const names[TR_COUNT] = {"container", "room layout", "2D box", "3D box", "2D outline", "mesh"};
+    static unsigned char seen[MAX_ENTITIES];
+    int i = fake_space_index(space);
+    if (i < 0 || (seen[i] & (1u << kind))) return;
+    seen[i] |= (unsigned char)(1u << kind);
+    LOG("scene: %s of entity %d (%s): result %d", names[kind], i,
+        entities[i].is_room ? "ROOM" : entities[i].label[0] ? entities[i].label : "anchor", r);
+}
 static XRAPI_ATTR XrResult XRAPI_CALL emu_get_container(XrSession session, XrSpace space, XrSpaceContainerFB *container) {
     pthread_mutex_lock(&scene_lock);
     XrResult r = scene_get_container(session, space, container);
+    trace_call(space, TR_CONTAINER, r);
     pthread_mutex_unlock(&scene_lock);
     return r;
 }
 static XRAPI_ATTR XrResult XRAPI_CALL emu_get_room_layout(XrSession session, XrSpace space, XrRoomLayoutFB *layout) {
     pthread_mutex_lock(&scene_lock);
     XrResult r = scene_get_room_layout(session, space, layout);
+    trace_call(space, TR_LAYOUT, r);
     pthread_mutex_unlock(&scene_lock);
     return r;
 }
 static XRAPI_ATTR XrResult XRAPI_CALL emu_get_bounding_box_2d(XrSession session, XrSpace space, XrRect2Df *rect) {
     pthread_mutex_lock(&scene_lock);
     XrResult r = scene_get_bounding_box_2d(session, space, rect);
+    trace_call(space, TR_BOX2D, r);
     pthread_mutex_unlock(&scene_lock);
     return r;
 }
 static XRAPI_ATTR XrResult XRAPI_CALL emu_get_bounding_box_3d(XrSession session, XrSpace space, XrRect3DfFB *box) {
     pthread_mutex_lock(&scene_lock);
     XrResult r = scene_get_bounding_box_3d(session, space, box);
+    trace_call(space, TR_BOX3D, r);
     pthread_mutex_unlock(&scene_lock);
     return r;
 }
 static XRAPI_ATTR XrResult XRAPI_CALL emu_get_boundary_2d(XrSession session, XrSpace space, XrBoundary2DFB *boundary) {
     pthread_mutex_lock(&scene_lock);
     XrResult r = scene_get_boundary_2d(session, space, boundary);
+    trace_call(space, TR_BOUNDARY, r);
     pthread_mutex_unlock(&scene_lock);
     return r;
 }
 static XRAPI_ATTR XrResult XRAPI_CALL emu_get_triangle_mesh(XrSpace space, const XrSpaceTriangleMeshGetInfoMETA *info, XrSpaceTriangleMeshMETA *mesh) {
     pthread_mutex_lock(&scene_lock);
     XrResult r = scene_get_triangle_mesh(space, info, mesh);
+    trace_call(space, TR_MESH, r);
     pthread_mutex_unlock(&scene_lock);
     return r;
 }
