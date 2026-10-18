@@ -292,7 +292,7 @@ def test_scan_finds_games_in_download_manager_layouts(tmp_path, monkeypatch):
     apk(root / "Manager/data/downloads/Game B v2/com.b.game.apk")  # 4 levels down
     (root / "PC Game/Binaries").mkdir(parents=True)
     (root / "PC Game/game.exe").write_bytes(b"MZ")
-    (root / "PC Game/Binaries/never.dll").write_bytes(b"MZ")  # PC program folders aren't searched
+    apk(root / "PC Game/Binaries/never.apk")  # PC program folders aren't searched
     found = {g.apk.name: g for g in quest_dump.scan(root)}
     assert set(found) == {"stray.app.apk", "com.a.game.apk", "com.b.game.apk"}
     assert found["com.a.game.apk"].data_dir == root / "Manager/Game A v1/com.a.game"
@@ -506,6 +506,7 @@ def test_il2cpp_patch_says_when_cpp2il_couldnt_read_the_game(monkeypatch):
 
 def test_meta_depth_occlusion_patch_neutralises_keywords(tmp_path):
     import zipfile
+
     from frameport.apk.workspace import ApkWorkspace
     from frameport.core.events import Reporter
     from frameport.patches.frame.meta_depth_occlusion import MetaDepthOcclusion
@@ -514,7 +515,8 @@ def test_meta_depth_occlusion_patch_neutralises_keywords(tmp_path):
     with zipfile.ZipFile(apk_path, "w") as z:
         z.writestr("AndroidManifest.xml", b"<manifest/>")
         z.writestr("assets/bin/Data/sharedassets0.assets.split56", b"foo HARD_OCCLUSION bar SOFT_OCCLUSION baz")
-        z.writestr("assets/bin/Data/Managed/Metadata/global-metadata.dat", b"prefix HARD_OCCLUSION middle SOFT_OCCLUSION end")
+        z.writestr("assets/bin/Data/Managed/Metadata/global-metadata.dat",
+                   b"prefix HARD_OCCLUSION middle SOFT_OCCLUSION end")
         z.writestr("assets/bin/Data/other.txt", b"HARD_OCCLUSION")
 
     p = MetaDepthOcclusion()
