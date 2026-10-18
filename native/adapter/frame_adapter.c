@@ -1048,8 +1048,20 @@ XRAPI_ATTR XrResult XRAPI_CALL xrLocateSpace(XrSpace space, XrSpace baseSpace, X
         XrPosef pose; XrSpaceLocationFlags flags;
         pthread_mutex_lock(&scene_lock);
         int fake = locate_fake(space, baseSpace, time, &pose, &flags);
+        int entity = fake ? fake_space_index(space) : -1, base_entity = fake ? fake_space_index(baseSpace) : -1;
         pthread_mutex_unlock(&scene_lock);
         if (fake) {
+            // MRUK keeps an anchor pending (no load Success, ever) unless both valid bits are set (Pinball FX)
+            static int logged, logged_invalid;
+            const XrSpaceLocationFlags need = XR_SPACE_LOCATION_ORIENTATION_VALID_BIT | XR_SPACE_LOCATION_POSITION_VALID_BIT;
+            int invalid = (flags & need) != need;
+            if (logged < 30 || (invalid && logged_invalid < 60)) {
+                LOG("scene: locate entity %d in %s %d (space 0x%llx) at %lld: flags 0x%llx%s", entity,
+                    base_entity >= 0 ? "entity" : "real space", base_entity, (unsigned long long)(uintptr_t)baseSpace,
+                    (long long)time, (unsigned long long)flags, invalid ? " NOT VALID" : "");
+                ++logged;
+                if (invalid) ++logged_invalid;
+            }
             location->pose = pose;
             location->locationFlags = flags;
             return XR_SUCCESS;
