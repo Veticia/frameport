@@ -143,6 +143,7 @@ Generated from [catalog/games](../catalog/games) by `scripts/compat_list.py`.
 | Table Troopers | Quest | ✅ Works |  |
 | Taskmaster | Quest | ✅ Works |  |
 | Tea For God | Quest | ✅ Works |  |
+| Test Quest Controllers | Quest | ✅ Works |  |
 | TetrisEffect | Quest | ✅ Works |  |
 | The Boys VR | Quest | ✅ Works |  |
 | The Climb | Quest | ✅ Works |  |
