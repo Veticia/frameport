@@ -150,7 +150,10 @@ def test_box_fallback_unchanged(harness, tmp_path, text):
 
 
 def test_box_size_settings(harness, tmp_path):
-    assert "scene: room 3.00 x 4.00 x 2.70 m" in run(harness, tmp_path, "override")
+    log = run(harness, tmp_path, "override")
+    assert "scene: room 3.00 x 4.00 x 2.70 m" in log
+    # MRUK's "current room" needs the head inside the floor outline: discovery logs where it is (head at the origin)
+    assert "floor-local 0.00,0.00: inside the floor outline (4 points)" in log
 
 
 def test_fb_and_meta_anchors_persist_across_sessions_and_processes(harness, tmp_path):

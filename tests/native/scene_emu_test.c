@@ -13,6 +13,7 @@
 static XrInstance active_instance = (XrInstance)(uintptr_t)1;
 static float scene_width, scene_depth, scene_height = 2.5f;
 static int scene_hide_bounds;
+static XrTime last_predicted_time = 1;  // frame_adapter.c: the last xrWaitFrame display time
 #define STAGE ((XrSpace)(uintptr_t)42)
 #define LOCAL ((XrSpace)(uintptr_t)43)
 #define SESSION ((XrSession)(uintptr_t)1)
