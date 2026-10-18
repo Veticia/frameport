@@ -171,6 +171,14 @@ def test_tbxr_fdm_crash_is_identified_as_vr_teardown():
 def test_ovrplugin_extension_probe_is_not_a_scene_game():
     probe = LOG_OK + "09-28 17:39:02.200  1147  1174 I OVRPlugin: Unavailable OpenXR extension: XR_FB_scene\n"
     assert "scene-missing" not in {f.id for f in triage(probe, "RUNNING", "com.example.game").findings}
+    # extension listings (GitHub #404): OVRPlugin's enumeration, OVRPort's dispatcher, Unity's Meta XR feature
+    for listing in ("I OVRPlugin:  Name=XR_FB_scene SpecVersion=1", "I overportOXR: - XR_FB_scene 1",
+                    'I Unity   : Meta XR Feature: Extensions="XR_FB_passthrough XR_FB_scene XR_META_boundary"',
+                    "I overportOXR: - XR_FB_scene_capture 1"):
+        log = LOG_OK + f"09-28 17:39:02.200  1147  1174 {listing}\n"
+        assert "scene-missing" not in {f.id for f in triage(log, "RUNNING", "com.example.game").findings}, listing
+    wants = LOG_OK + "09-28 17:39:02.200  1147  1174 E Unity   : Required extension XR_FB_scene not available\n"
+    assert "scene-missing" in {f.id for f in triage(wants, "RUNNING", "com.example.game").findings}
     used = LOG_OK + "09-28 17:39:04.000  1147  1174 E Unity   : xrQuerySpacesFB failed: -12\n"
     assert "scene-missing" in {f.id for f in triage(used, "RUNNING", "com.example.game").findings}
 
