@@ -44,6 +44,7 @@ static int foveation_eye_enabled, foveation_eye, foveation_fix, surface_emul, ru
 static int no_equirect, no_equirect2, no_cylinder, no_cube, fb_color_space, emulate_color_space;
 static void *android_vm;
 static void mx_audio_initialize(void) {}
+static void mx_batman_geometry_initialize(void) {}
 static int is_scene_extension(const char *name) { (void)name; return 0; }
 #include "hide_fb_foveation.h"
 #include "quest_buttons.c"
