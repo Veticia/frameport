@@ -121,6 +121,7 @@ class FramePortApp:
     def __init__(self, page: ft.Page):
         from .views.library import load_filters
 
+        pop_dialog_skips_toasts()
         self.page = page
         self.target = None  # FrameLeptonTarget when connected
         self.frame_info: dict | None = None
@@ -3176,6 +3177,38 @@ def serialize_flet_updates() -> None:
             Prop.__set__ = set_prop
     except (ImportError, AttributeError) as exc:
         applog.log.warning("Flet's property writes couldn't be serialized (another Flet version?): %s", exc)
+
+
+def pop_dialog_skips_toasts() -> None:
+    """Make page.pop_dialog() close the topmost open pop-up, never a toast.
+
+    Flet 1.0 keeps toasts (SnackBars) in the same stack as dialogs and pop_dialog() closes the topmost open entry, so
+    a toast that appeared while a pop-up was open was closed instead of the pop-up: an install link's question stayed
+    on screen after "Download and install" (its job's "waiting for your answer" toast came just after it) while the
+    download ran. Toasts close themselves or with their X. Hooks Flet internals like serialize_flet_updates: skipped
+    (logged) if a Flet version moves them."""
+    try:
+        from flet.controls.base_page import BasePage
+
+        original_pop = BasePage.pop_dialog
+        if getattr(original_pop, "_skips_toasts", False):
+            return
+
+        def pop_dialog(self):
+            try:
+                shown = self._dialogs.controls  # noqa: SLF001
+            except AttributeError:
+                return original_pop(self)
+            dialog = next((d for d in reversed(shown) if d.open and not isinstance(d, ft.SnackBar)), None)
+            if dialog is None:
+                return None
+            dialog.open = False
+            dialog.update()
+            return dialog
+        pop_dialog._skips_toasts = True
+        BasePage.pop_dialog = pop_dialog
+    except (ImportError, AttributeError) as exc:
+        applog.log.warning("pop_dialog() couldn't be kept off toasts (another Flet version?): %s", exc)
 
 
 def main(argv=None):

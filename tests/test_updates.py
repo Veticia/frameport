@@ -424,7 +424,7 @@ def test_relaunch_environment_drops_the_running_apps_own_variables():
 
 
 def test_source_restart_keeps_a_hidden_console_on_windows(monkeypatch):
-    """2026-10-17: DETACHED_PROCESS gave every console child (ssh) of a restarted dev install its own visible terminal."""
+    """DETACHED_PROCESS gave every console child (ssh) of a restarted dev install its own visible terminal."""
     from frameport.ui import updater
 
     calls = []

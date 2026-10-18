@@ -582,6 +582,34 @@ def test_serialize_survives_moved_flet_internals(monkeypatch, caplog):
         Session.patch_control, value_types.Prop.__set__ = original, original_set
 
 
+def test_pop_dialog_closes_the_dialog_not_a_toast(monkeypatch):
+    """An install link's question stayed open after "Download and install": its job's toast had appeared above it and
+    page.pop_dialog() closed the toast instead."""
+    from types import SimpleNamespace
+
+    import flet as ft
+    from flet.controls.base_page import BasePage
+
+    from frameport.ui import app
+
+    monkeypatch.setattr(BasePage, "pop_dialog", BasePage.pop_dialog)  # restored after the test
+    app.pop_dialog_skips_toasts()
+    app.pop_dialog_skips_toasts()  # idempotent
+
+    class Dialog(ft.AlertDialog):
+        def update(self):  # (not on a page)
+            pass
+
+    class Toast(ft.SnackBar):
+        def update(self):
+            pass
+    dialog, toast = Dialog(open=True), Toast(ft.Text("waiting for your answer"), open=True)
+    page = SimpleNamespace(_dialogs=SimpleNamespace(controls=[dialog, toast]))
+    assert BasePage.pop_dialog(page) is dialog
+    assert not dialog.open and toast.open
+    assert BasePage.pop_dialog(page) is None  # only a toast left: nothing to close
+
+
 def test_property_writes_wait_for_a_patch_being_packed():
     """A property set on a background thread (the live Frame card, job progress) while the event loop packs a patch
     changed the control's _values mid-iteration: "dictionary changed size during iteration" killed the update (a
