@@ -107,3 +107,25 @@ def test_cli_room_commands(tmp_path, monkeypatch):
     assert (tmp_path / "preview.svg").exists()
     result = runner.invoke(cli.app, ["frame", "room", "export", str(tmp_path / "out")])
     assert result.exit_code == 0, result.exception
+
+
+def test_installing_a_scene_game_syncs_the_scanner_and_prompts(monkeypatch):
+    # in-game scan requests run the scanner already on the Frame: installs of scene games bring it (and its prompts)
+    from frameport.install import installer, rooms
+
+    calls, logs = [], []
+    monkeypatch.setattr(rooms, "ensure_scanner", lambda frame: calls.append("scanner"))
+    monkeypatch.setattr(rooms, "ensure_prompts", lambda frame: calls.append("prompts"))
+    reporter = type("R", (), {"log": lambda self, m: logs.append(m)})()
+    installer.sync_room_scanner(object(), {"scene_emul": 1}, reporter)
+    assert calls == ["scanner", "prompts"]
+    calls.clear()
+    installer.sync_room_scanner(object(), {"scene_emul": 1, "scene_scan_request": 0}, reporter)
+    installer.sync_room_scanner(object(), {}, reporter)
+    assert calls == []
+
+    def broken(frame):
+        raise OSError("no space left")
+    monkeypatch.setattr(rooms, "ensure_scanner", broken)
+    installer.sync_room_scanner(object(), {"scene_emul": 1}, reporter)  # never fails the install
+    assert "room scanner not synced (no space left)" in logs[-1]
