@@ -12,6 +12,7 @@
 #define NEAR(a,b) (fabsf((a)-(b)) < 0.0001f)
 static XrInstance active_instance = (XrInstance)(uintptr_t)1;
 static float scene_width, scene_depth, scene_height = 2.5f;
+static int scene_scan_request;
 static int scene_hide_bounds;
 static XrTime last_predicted_time = 1;  // frame_adapter.c: the last xrWaitFrame display time
 #define STAGE ((XrSpace)(uintptr_t)42)
@@ -290,6 +291,70 @@ static int check_persistence(const char *mode) {
     } else CHECK(entity_count==ENT_FIXED_COUNT);
     return 0;
 }
+static int scan_reply(const char *kind, const char *status, XrAsyncRequestIdFB id) {
+    char path[4096]; CHECK(scan_path(path,sizeof(path),kind));
+    FILE *f=fopen(path,"w"); CHECK(f);
+    CHECK(fprintf(f,"%s %llu scanner-error\n",status,(unsigned long long)id)>0);
+    CHECK(!fclose(f)); return 0;
+}
+static int check_scan(const char *mode) {
+    scene_scan_request=1;
+    XrSpace old=entities[0].handle;
+    int old_count=entity_count;
+    XrAsyncRequestIdFB req,second;
+    XrEventDataBuffer ev;
+    CHECK(emu_request_scene_capture(SESSION,NULL,&req)==XR_SUCCESS);
+    CHECK(emu_request_scene_capture(SESSION,NULL,&second)==XR_ERROR_LIMIT_REACHED);
+    char path[4096],line[256]; CHECK(scan_path(path,sizeof(path),"request"));
+    FILE *f=fopen(path,"r"); CHECK(f && fgets(line,sizeof(line),f)); fclose(f);
+    unsigned long long id,stamp; CHECK(sscanf(line,"request %llu %llu",&id,&stamp)==2 && id==req && stamp>0);
+    CHECK(!pop_event(&ev));
+    if(!strcmp(mode,"scan-fallback")) {
+        scene_capture_delay_ms=10000;
+        pending_capture_at=scene_now_ns()+1000000000ull;
+        scan_started_at=scene_now_ns()-5000000001ull; scan_poll_at=0;
+        CHECK(!pop_event(&ev) && !scan_waiting);  // preserve the configured fallback delay
+        pending_capture_at=1;
+    } else {
+        CHECK(!scan_reply("ack","ack",req+1));
+        CHECK(!scan_reply("result","ok",req+1));
+        scan_poll_at=0; CHECK(!pop_event(&ev) && !scan_acked && scan_waiting);
+        CHECK(!scan_reply("ack","ack",req));
+        scan_poll_at=0; CHECK(!pop_event(&ev) && scan_acked);
+        // Files arriving inside the poll interval are not read yet.
+        CHECK(!scan_reply("result","failed",req));
+        CHECK(!pop_event(&ev) && scan_waiting);
+        if(!strcmp(mode,"scan-ok")) {
+            char replacement[4096],roomfile[4096];
+            CHECK(room_path(roomfile,sizeof(roomfile),"room.txt"));
+            CHECK(room_path(replacement,sizeof(replacement),"replacement.txt"));
+            CHECK(!rename(replacement,roomfile));
+            CHECK(!scan_reply("result","ok",req));
+        } else if(!strcmp(mode,"scan-invalid")) {
+            char roomfile[4096]; CHECK(room_path(roomfile,sizeof(roomfile),"room.txt"));
+            CHECK(!unlink(roomfile));
+            CHECK(!scan_reply("result","ok",req));
+        } else if(!strcmp(mode,"scan-timeout")) {
+            CHECK(scan_path(path,sizeof(path),"result") && !unlink(path));
+            scan_started_at=scene_now_ns()-360000000001ull;
+        }
+        scan_poll_at=0;
+    }
+    CHECK(pop_event(&ev) && ev.type==XR_TYPE_EVENT_DATA_SCENE_CAPTURE_COMPLETE_FB);
+    XrEventDataSceneCaptureCompleteFB *done=(void *)&ev;
+    CHECK(done->requestId==req);
+    int success=!strcmp(mode,"scan-ok") || !strcmp(mode,"scan-fallback");
+    CHECK(done->result==(success?XR_SUCCESS:XR_ERROR_RUNTIME_FAILURE));
+    CHECK(!pop_event(&ev));
+    if(!strcmp(mode,"scan-ok")) {
+        CHECK(room_from_file && entity_count!=old_count && fake_space_index(old)<0);
+        XrUuidEXT uuid; CHECK(emu_get_uuid(old,&uuid)==XR_ERROR_HANDLE_INVALID);
+        CHECK(!check_discovery());
+    } else CHECK(entity_count==old_count && entities[0].handle==old && fake_space_index(old)==0);
+    const char *kinds[]={"request","ack","result"};
+    for(int i=0;i<3;++i) CHECK(scan_path(path,sizeof(path),kinds[i]) && access(path,F_OK)!=0);
+    return 0;
+}
 int main(int argc,char **argv) {
     CHECK(argc>=2);
     const char *mode=argv[1];
@@ -311,6 +376,7 @@ int main(int argc,char **argv) {
         CHECK(vis(SESSION,XR_BOUNDARY_VISIBILITY_SUPPRESSED_META)==XR_SUCCESS && !pop_event(&bev));  // unchanged: no event
         CHECK(vis(SESSION,(XrBoundaryVisibilityMETA)7)==XR_ERROR_VALIDATION_FAILURE);
     }
+    if(!strncmp(mode,"scan-",5)) return check_scan(mode);
     if(!strcmp(mode,"capture_delay")) {  // the completion waits, then arrives exactly once
         scene_capture_delay_ms=30;
         XrAsyncRequestIdFB req; XrEventDataBuffer cev;

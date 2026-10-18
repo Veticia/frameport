@@ -171,6 +171,9 @@ SETTINGS = [
      "the Steam Frame controllers instead of Quest Touch controllers. The models come from the Frame's own SteamVR and "
      "are converted on the Frame at install time. Games that ship their own controller meshes aren't affected. Turning "
      "it on needs a rebuild (it adds a small library in front of OVRPort's loader)."),
+    ("scene_scan_request", "int", 1, "Scan when the game asks for a room",
+     "With scene_emul, let FramePort scan your room in the headset when the game requests a scan. "
+     "If no scanner answers, use the saved room. Turn off to always use the saved room."),
     ("scene_hide_bounds", "int", 0, "Hide the play-area size from the game",
      "With scene_emul, the game's play-area (STAGE bounds) query answers \"no play area\". The Frame reports a 1x1 m "
      "area whose outline OVRPlugin can't give, and some Unity MR games then fail their guardian check (for example "
@@ -425,6 +428,8 @@ UI: dict[str, dict] = {
     "scene_emul": dict(group="room", level="common", label="Use room layout",
                        help="Scene games get your saved room. Without one, they get a simple room from the play area.",
                        control=("switch",)),
+    "scene_scan_request": dict(group="room", level="advanced", label="Scan when requested", depends="scene_emul",
+                               help="Scan your room in the headset when the game asks for a room scan.", control=("switch",)),
     "scene_hide_bounds": dict(group="room", level="advanced", label="Hide play-area size", depends="scene_emul",
                               help="For games that reject the room because of the play area.", control=("switch",)),
     "scene_height": dict(group="room", level="advanced", label="Room height", depends="scene_emul",
@@ -634,6 +639,7 @@ class AdapterSetting(Patch):
         rules = {
             "scene_emul": lambda a: ap.uses_scene(a) or a.extra.get("mr_only"),
             "scene_height": lambda a: ap.uses_scene(a) or a.extra.get("mr_only"),
+            "scene_scan_request": lambda a: ap.uses_scene(a) or a.extra.get("mr_only"),
             "scene_hide_bounds": lambda a: ap.uses_scene(a) or a.extra.get("mr_only"),
             "scene_width": lambda a: ap.uses_scene(a) or a.extra.get("mr_only"),
             "scene_depth": lambda a: ap.uses_scene(a) or a.extra.get("mr_only"),

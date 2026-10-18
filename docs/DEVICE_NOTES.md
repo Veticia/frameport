@@ -756,6 +756,11 @@ with the default Quest 3 choice for regressions. No device access was used durin
 
 ## Mixed reality: scanned rooms
 
+When an MR game asks for a room scan, FramePort scans in the headset and FrameBridge loads the new room before
+answering the game. If no scanner answers within five seconds, the game gets the stored room. Set
+`scene_scan_request=0` to always use the stored room. A scan that starts but fails keeps the old room and reports
+a capture failure to the game.
+
 **Mixed reality: scanned rooms (agent v92, 2026-10-16, branch mr-scene; docs/mr/):** Quest MR games read the room
 through Meta's scene APIs; the Frame offers none, and Valve's chaperone is no room (2D outline raised to 2.43 m, often
 the default 1 m circle -> the Android runtime's STAGE rect falls back to 1x1 m; XRService's plane detection is
