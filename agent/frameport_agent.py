@@ -47,7 +47,7 @@ try:
 except ImportError:  # Windows: pc_revive loads this file for its VDF code only (GitHub #131)
     fcntl = None
 
-AGENT_VERSION = 104
+AGENT_VERSION = 105
 HOME = os.path.expanduser("~")
 STEAM = os.path.join(HOME, ".local/share/Steam")
 ANCHORS = os.path.join(HOME, "Applications/quest-frame")
@@ -5062,10 +5062,14 @@ ROOMVIEW_STREAM_WINDOW = 2.0
 ROOM_SCAN_MIN_FRAMES = 30      # fewer recorded frames is no room: refused instead of replacing the saved one
 
 
-def _prompt_for(started, yaw_bins, pitch, streaming=True):
+def _prompt_for(started, yaw_bins, pitch, streaming=True, now=None):
     """Which prompt image the headset shows: "start" (turn on passthrough) whenever no meshes stream, also mid-scan."""
     if started is None or not streaming:
         return "start"
+    if (now is not None and len(yaw_bins) >= 12 and pitch["up"] >= ROOM_SCAN_LOOK_FRAMES
+            and pitch["down"] >= ROOM_SCAN_LOOK_FRAMES):
+        # everything seen before ROOM_SCAN_MIN_SECONDS: say so and show the time left (owner: "stuck on 12/12")
+        return f"finish_{min(12, int((now - started) / ROOM_SCAN_MIN_SECONDS * 12)):02d}"
     if len(yaw_bins) >= 10 and pitch["up"] < ROOM_SCAN_LOOK_FRAMES:
         return "ceiling"
     if len(yaw_bins) >= 10 and pitch["down"] < ROOM_SCAN_LOOK_FRAMES:
@@ -5117,7 +5121,7 @@ def capture_roomview(seconds, out_path, wait=0.0, max_hz=3.0, progress=None, pro
                     break  # every direction, the ceiling and the floor seen: "Room scanned" at once
                 if now >= next_progress:
                     if prompt:
-                        prompt.show(_prompt_for(started, yaw_bins, pitch, streaming))
+                        prompt.show(_prompt_for(started, yaw_bins, pitch, streaming, now))
                     if progress:
                         progress({"recording": started is not None, "frames": len(offsets),
                                   "seconds": round(now - started - paused_total, 1) if started else 0,
