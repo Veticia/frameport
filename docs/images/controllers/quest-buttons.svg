@@ -10,17 +10,17 @@
 <text x="20" y="31" fill="#EDEEF2" font-size="20" font-weight="600" text-anchor="start">Quest Touch reference</text>
 <text x="20" y="55" fill="#A7ABB7" font-size="13" font-weight="400" text-anchor="start">Two face buttons per hand, plus Menu on the left</text>
 <text x="140" y="84" fill="#A7ABB7" font-size="13" font-weight="400" text-anchor="middle">Left</text>
-<circle cx="163" cy="206" r="25" fill="#1D1F27" stroke="#3AA8FF" stroke-width="1.5"/>
-<text x="163" y="212.84" fill="#3AA8FF" font-size="19" font-weight="700" text-anchor="middle">X</text>
-<circle cx="117" cy="151" r="25" fill="#1D1F27" stroke="#FF8A1F" stroke-width="1.5"/>
-<text x="117" y="157.84" fill="#FF8A1F" font-size="19" font-weight="700" text-anchor="middle">Y</text>
+<circle cx="117" cy="206" r="25" fill="#1D1F27" stroke="#3AA8FF" stroke-width="1.5"/>
+<text x="117" y="212.84" fill="#3AA8FF" font-size="19" font-weight="700" text-anchor="middle">X</text>
+<circle cx="163" cy="151" r="25" fill="#1D1F27" stroke="#FF8A1F" stroke-width="1.5"/>
+<text x="163" y="157.84" fill="#FF8A1F" font-size="19" font-weight="700" text-anchor="middle">Y</text>
 <rect x="83" y="251" width="114" height="32" rx="8" fill="#1D1F27"/>
 <text x="140" y="272" fill="#A7ABB7" font-size="12" font-weight="400" text-anchor="middle">Menu</text>
 <text x="380" y="84" fill="#A7ABB7" font-size="13" font-weight="400" text-anchor="middle">Right</text>
-<circle cx="357" cy="206" r="25" fill="#1D1F27" stroke="#3AA8FF" stroke-width="1.5"/>
-<text x="357" y="212.84" fill="#3AA8FF" font-size="19" font-weight="700" text-anchor="middle">A</text>
-<circle cx="403" cy="151" r="25" fill="#1D1F27" stroke="#FF8A1F" stroke-width="1.5"/>
-<text x="403" y="157.84" fill="#FF8A1F" font-size="19" font-weight="700" text-anchor="middle">B</text>
+<circle cx="403" cy="206" r="25" fill="#1D1F27" stroke="#3AA8FF" stroke-width="1.5"/>
+<text x="403" y="212.84" fill="#3AA8FF" font-size="19" font-weight="700" text-anchor="middle">A</text>
+<circle cx="357" cy="151" r="25" fill="#1D1F27" stroke="#FF8A1F" stroke-width="1.5"/>
+<text x="357" y="157.84" fill="#FF8A1F" font-size="19" font-weight="700" text-anchor="middle">B</text>
 <text x="260.0" y="366" fill="#A7ABB7" font-size="12" font-weight="400" text-anchor="middle">Lower: X / A · Upper: Y / B</text>
 </g>
 <g transform="translate(544 72)">
@@ -79,8 +79,8 @@
 <text x="144" y="130" fill="#FF8A1F" font-size="10" font-weight="600" text-anchor="middle">View: Menu</text>
 <path d="M84,144 h28 v30 h30 v28 h-30 v30 h-28 v-30 h-30 v-28 h30 Z" fill="#1D1F27" stroke="#2A2D37"/>
 <text x="98" y="164.04" fill="#FF8A1F" font-size="14" font-weight="700" text-anchor="middle">Y</text>
-<text x="69" y="193.04" fill="#FF8A1F" font-size="14" font-weight="700" text-anchor="middle">Y</text>
-<text x="127" y="193.04" fill="#3AA8FF" font-size="14" font-weight="700" text-anchor="middle">X</text>
+<text x="69" y="193.04" fill="#3AA8FF" font-size="14" font-weight="700" text-anchor="middle">X</text>
+<text x="127" y="193.04" fill="#FF8A1F" font-size="14" font-weight="700" text-anchor="middle">Y</text>
 <text x="98" y="222.04" fill="#3AA8FF" font-size="14" font-weight="700" text-anchor="middle">X</text>
 <text x="380" y="78" fill="#A7ABB7" font-size="13" font-weight="400" text-anchor="middle">Right</text>
 <path d="M326,256 C328,314 338,334 360,338 C382,342 402,326 418,256 Z" fill="#0D0E12" stroke="#2A2D37" stroke-width="2"/>
@@ -94,11 +94,11 @@
 <circle cx="422" cy="159" r="14" fill="#1D1F27" stroke="#FF8A1F" stroke-width="1.5"/>
 <text x="422" y="164.04" fill="#FF8A1F" font-size="14" font-weight="700" text-anchor="middle">B</text>
 <text x="437" y="149" fill="#868A96" font-size="9" font-weight="400" text-anchor="middle">Y</text>
-<circle cx="393" cy="188" r="14" fill="#1D1F27" stroke="#3AA8FF" stroke-width="1.5"/>
-<text x="393" y="193.04" fill="#3AA8FF" font-size="14" font-weight="700" text-anchor="middle">A</text>
+<circle cx="393" cy="188" r="14" fill="#1D1F27" stroke="#FF8A1F" stroke-width="1.5"/>
+<text x="393" y="193.04" fill="#FF8A1F" font-size="14" font-weight="700" text-anchor="middle">B</text>
 <text x="408" y="178" fill="#868A96" font-size="9" font-weight="400" text-anchor="middle">X</text>
-<circle cx="451" cy="188" r="14" fill="#1D1F27" stroke="#FF8A1F" stroke-width="1.5"/>
-<text x="451" y="193.04" fill="#FF8A1F" font-size="14" font-weight="700" text-anchor="middle">B</text>
+<circle cx="451" cy="188" r="14" fill="#1D1F27" stroke="#3AA8FF" stroke-width="1.5"/>
+<text x="451" y="193.04" fill="#3AA8FF" font-size="14" font-weight="700" text-anchor="middle">A</text>
 <text x="466" y="178" fill="#868A96" font-size="9" font-weight="400" text-anchor="middle">B</text>
 <circle cx="422" cy="217" r="14" fill="#1D1F27" stroke="#3AA8FF" stroke-width="1.5"/>
 <text x="422" y="222.04" fill="#3AA8FF" font-size="14" font-weight="700" text-anchor="middle">A</text>
@@ -120,8 +120,8 @@
 <text x="144" y="130" fill="#FF8A1F" font-size="10" font-weight="600" text-anchor="middle">View: Menu</text>
 <path d="M84,144 h28 v30 h30 v28 h-30 v30 h-28 v-30 h-30 v-28 h30 Z" fill="#1D1F27" stroke="#2A2D37"/>
 <text x="98" y="164.04" fill="#868A96" font-size="14" font-weight="700" text-anchor="middle">—</text>
-<text x="69" y="193.04" fill="#FF8A1F" font-size="14" font-weight="700" text-anchor="middle">Y</text>
-<text x="127" y="193.04" fill="#868A96" font-size="14" font-weight="700" text-anchor="middle">—</text>
+<text x="69" y="193.04" fill="#868A96" font-size="14" font-weight="700" text-anchor="middle">—</text>
+<text x="127" y="193.04" fill="#FF8A1F" font-size="14" font-weight="700" text-anchor="middle">Y</text>
 <text x="98" y="222.04" fill="#3AA8FF" font-size="14" font-weight="700" text-anchor="middle">X</text>
 <text x="380" y="78" fill="#A7ABB7" font-size="13" font-weight="400" text-anchor="middle">Right</text>
 <path d="M326,256 C328,314 338,334 360,338 C382,342 402,326 418,256 Z" fill="#0D0E12" stroke="#2A2D37" stroke-width="2"/>
@@ -135,11 +135,11 @@
 <circle cx="422" cy="159" r="14" fill="#1D1F27" stroke="#868A96" stroke-width="1.5"/>
 <text x="422" y="164.04" fill="#868A96" font-size="14" font-weight="700" text-anchor="middle">—</text>
 <text x="437" y="149" fill="#868A96" font-size="9" font-weight="400" text-anchor="middle">Y</text>
-<circle cx="393" cy="188" r="14" fill="#1D1F27" stroke="#868A96" stroke-width="1.5"/>
-<text x="393" y="193.04" fill="#868A96" font-size="14" font-weight="700" text-anchor="middle">—</text>
+<circle cx="393" cy="188" r="14" fill="#1D1F27" stroke="#FF8A1F" stroke-width="1.5"/>
+<text x="393" y="193.04" fill="#FF8A1F" font-size="14" font-weight="700" text-anchor="middle">B</text>
 <text x="408" y="178" fill="#868A96" font-size="9" font-weight="400" text-anchor="middle">X</text>
-<circle cx="451" cy="188" r="14" fill="#1D1F27" stroke="#FF8A1F" stroke-width="1.5"/>
-<text x="451" y="193.04" fill="#FF8A1F" font-size="14" font-weight="700" text-anchor="middle">B</text>
+<circle cx="451" cy="188" r="14" fill="#1D1F27" stroke="#868A96" stroke-width="1.5"/>
+<text x="451" y="193.04" fill="#868A96" font-size="14" font-weight="700" text-anchor="middle">—</text>
 <text x="466" y="178" fill="#868A96" font-size="9" font-weight="400" text-anchor="middle">B</text>
 <circle cx="422" cy="217" r="14" fill="#1D1F27" stroke="#3AA8FF" stroke-width="1.5"/>
 <text x="422" y="222.04" fill="#3AA8FF" font-size="14" font-weight="700" text-anchor="middle">A</text>

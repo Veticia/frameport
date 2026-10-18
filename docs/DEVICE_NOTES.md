@@ -769,10 +769,19 @@ accepted Touch set (SteamVR uses a Frame binding before its own Touch remap: Tou
 Headless check on the device (I Am Cat, Unity + OVRPlugin, mode 2, `input_diag=1`): the runtime offers and enables the
 extension in a Lepton app, and accepts the generated Frame suggestion (`quest_buttons: frame_controller bindings
 (mode 2, 27 bindings, 7 dropped): 0`); the game's Touch (34 paths) and hand-interaction suggestions were accepted as
-before; 72 fps, no new errors. Translations as in the JSON: left `x/*` -> `dpad_down/*`, `y/*` -> `dpad_left/*`,
+before; 72 fps, no new errors. Translations as in the JSON at the time: left `x/*` -> `dpad_down/*`, `y/*` -> `dpad_left/*`,
 `menu/click` -> `view/click`. Not provable headless (tracking needs the headset worn): that SteamVR then reads the
 buttons from the Frame binding; one launch in the headset settles it.
 
 Pitfall seen during the test: OVRPort runs from two sessions on the same data folder share
 `overport-workspace/dec/working.apk` and fail at once (`OVRPort failed (exit 1)`, `FileAlreadyExistsException` in
 OVRPort's own output, which the CLI doesn't print without a verbose reporter). Build one game at a time per data folder.
+
+Headset round 2026-10-18 (owner, TestQuestControllers): the button mapping works. Owner's corrections, now in the JSON:
+Quest's second button sits up and toward the other hand, so Quest pair = left Y on d-pad right, right B on X (Mirror
+follows: X/A = bottom + outer, Y/B = top + inner). The d-pad has one capacitive sensor: a thumb on it touches every
+direction, so X and Y touch light together (left as is, hardware limit); the right face buttons sense touch singly.
+SteamVR's own Touch remap (`/opt/steamvr/drivers/frame_controller/resources/input/frame_controller_remapping.json`,
+layout `oculus_touch`) is the diagram's "SteamVR default": X -> d-pad down, Y -> d-pad left/right/up, A -> A,
+B -> B/X/Y, Menu -> View, plus trigger click -> bumper. Games with their own Valve binding file in that folder
+(Beat Saber, Batman, Accounting+, In Death, ...) use that file instead.

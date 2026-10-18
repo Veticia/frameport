@@ -35,15 +35,15 @@
     },
     "1": {
       "name": "Mirror",
-      "note": "Every face button works; the left controller mirrors the right: bottom + inner = X/A, top + outer = Y/B.",
-      "left": {"x": ["dpad_down", "dpad_right"], "y": ["dpad_up", "dpad_left"], "menu": ["view"]},
-      "right": {"a": ["a", "x"], "b": ["b", "y"]}
+      "note": "Every face button works; the left controller mirrors the right: bottom + outer = X/A, top + inner = Y/B, as on Quest controllers.",
+      "left": {"x": ["dpad_down", "dpad_left"], "y": ["dpad_up", "dpad_right"], "menu": ["view"]},
+      "right": {"a": ["a", "b"], "b": ["x", "y"]}
     },
     "2": {
       "name": "Quest pair",
-      "note": "Two buttons per controller, placed diagonally like Quest Touch; the other face buttons do nothing.",
-      "left": {"x": ["dpad_down"], "y": ["dpad_left"], "menu": ["view"]},
-      "right": {"a": ["a"], "b": ["b"]}
+      "note": "Two buttons per controller, placed like Quest Touch's (the second one up and toward the other hand); the other face buttons do nothing.",
+      "left": {"x": ["dpad_down"], "y": ["dpad_right"], "menu": ["view"]},
+      "right": {"a": ["a"], "b": ["x"]}
     }
   }
 }

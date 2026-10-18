@@ -12,9 +12,9 @@ send Touch B, rather than the left-hand X and Y of a Quest controller.
 **Controller buttons** chooses an alternative for Quest games running through FrameBridge:
 
 - **SteamVR default (0)** leaves SteamVR's Touch remapping in place. This is the initial default.
-- **Mirror (1)** uses every face button. On each controller, bottom and inner send X/A; top and outer send Y/B.
-- **Quest pair (2)** uses two face buttons per controller, diagonally placed like Touch. The other face buttons
-  send no Touch input.
+- **Mirror (1)** uses every face button. On each controller, bottom and outer send X/A; top and inner send Y/B, as on Quest controllers, whose second button sits up and toward the other hand.
+- **Quest pair (2)** uses two face buttons per controller, placed like Touch's: left X = d-pad down, Y = d-pad
+  right; right A = A, B = X. The other face buttons send no Touch input.
 
 ![Quest Touch reference and the three Steam Frame button mappings](images/controllers/quest-buttons.svg)
 
@@ -26,12 +26,12 @@ X/A, orange is Y/B or Menu, and a dash means no Touch input. Left and right refe
 |---|---|---|---|
 | Left d-pad ↑ | Y | Y | — |
 | Left d-pad ↓ | X | X | X |
-| Left d-pad ← | Y | Y | Y |
-| Left d-pad → | Y | X | — |
+| Left d-pad ← | Y | X | — |
+| Left d-pad → | Y | Y | Y |
 | Left View | Menu | Menu | Menu |
 | Right A (bottom) | A | A | A |
-| Right B (right) | B | B | B |
-| Right X (left) | B | A | — |
+| Right B (right) | B | A | — |
+| Right X (left) | B | B | B |
 | Right Y (top) | B | B | — |
 | Right Menu | — | — | — |
 | Left bumper | — | — | — |
@@ -73,6 +73,8 @@ frameport recipe <pkg> --set quest_buttons=2
 
 - SteamVR's binding UI can still override these suggested bindings. Check custom bindings if the result differs
   from the diagram.
+- The d-pad has a single touch sensor: a thumb resting on it touches X and Y together. The right controller's
+  face buttons sense touch one by one.
 - Bumpers have no Touch counterpart and are unbound. Thumbrest touch is dropped; the Frame profile has no
   corresponding input. System buttons keep their runtime role.
 - Mirror and Quest pair require the Frame runtime's `XR_VALVE_frame_controller_interaction` extension. If it is

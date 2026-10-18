@@ -131,9 +131,9 @@ def illustration(data: dict, colors: dict, mode: str | None = None) -> str:
             text(hx, 84 if key is None else 78, hand.capitalize(), 13, colors["TEXT_2"], "middle")
             if key is None:
                 low, high = ("X", "Y") if hand == "left" else ("A", "B")
-                inner = 23 if hand == "left" else -23
-                touch_button(hx + inner, 206, low)
-                touch_button(hx - inner, 151, high)
+                inner = 23 if hand == "left" else -23  # Quest's second button sits up and toward the other hand
+                touch_button(hx - inner, 206, low)
+                touch_button(hx + inner, 151, high)
                 if hand == "left":
                     parts.append(f'<rect x="{hx - 57}" y="{251}" width="114" height="32" rx="8" '
                                  f'fill="{colors["SURFACE_2"]}"/>')

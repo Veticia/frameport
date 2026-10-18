@@ -434,11 +434,12 @@ static const struct {
     const char *hand, *touch;
     const char *targets[2][2];  // Mirror, Quest pair
 } FRAME_BUTTONS[] = {
-    {"left", "x", {{"dpad_down", "dpad_right"}, {"dpad_down", NULL}}},
-    {"left", "y", {{"dpad_up", "dpad_left"}, {"dpad_left", NULL}}},
+    // Quest's second button sits up and toward the other hand: left Y on d-pad right, right B on X
+    {"left", "x", {{"dpad_down", "dpad_left"}, {"dpad_down", NULL}}},
+    {"left", "y", {{"dpad_up", "dpad_right"}, {"dpad_right", NULL}}},
     {"left", "menu", {{"view", NULL}, {"view", NULL}}},
-    {"right", "a", {{"a", "x"}, {"a", NULL}}},
-    {"right", "b", {{"b", "y"}, {"b", NULL}}},
+    {"right", "a", {{"a", "b"}, {"a", NULL}}},
+    {"right", "b", {{"x", "y"}, {"x", NULL}}},
 };
 
 static void suggest_frame(XrInstance instance, PFN_xrSuggestInteractionProfileBindings fn,
