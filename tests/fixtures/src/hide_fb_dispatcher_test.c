@@ -5,8 +5,15 @@
 #include <string.h>
 #include <openxr/openxr.h>
 static int enabled, requested;
+static XrResult XRAPI_CALL recommended(XrSession session, const XrRecommendedLayerResolutionGetInfoMETA *info,
+        XrRecommendedLayerResolutionMETA *out) {
+    (void)session; (void)info;
+    out->recommendedImageDimensions = (XrExtent2Di){2768,2768}; out->isValid = XR_TRUE;
+    return XR_SUCCESS;
+}
 static int query(void) { return enabled; }
 static PFN_xrVoidFunction extension(const char *name) {
+    if (enabled && !strcmp(name,"xrGetRecommendedLayerResolutionMETA")) return (PFN_xrVoidFunction)recommended;
     return !strcmp(name,"framebridge_hide_fb_foveation") ? (PFN_xrVoidFunction)query : NULL;
 }
 static XrResult XRAPI_CALL enumerate(const char *layer,uint32_t capacity,uint32_t *count,XrExtensionProperties *out) {
@@ -57,5 +64,13 @@ int main(void) {
         assert(((PFN_xrCreateInstance)fn)(&ci,NULL)==XR_SUCCESS);
         assert(requested==(enabled ? 1 : 2) && ci.enabledExtensionCount==2);
     }
+    enabled=0;
+    assert(xrGetInstanceProcAddr((XrInstance)(uintptr_t)1,"xrGetRecommendedLayerResolutionMETA",&fn)
+           == XR_ERROR_FUNCTION_UNSUPPORTED);
+    enabled=1;
+    assert(xrGetInstanceProcAddr((XrInstance)(uintptr_t)1,"xrGetRecommendedLayerResolutionMETA",&fn)==XR_SUCCESS);
+    XrRecommendedLayerResolutionMETA out={XR_TYPE_RECOMMENDED_LAYER_RESOLUTION_META};
+    assert(((PFN_xrGetRecommendedLayerResolutionMETA)fn)(XR_NULL_HANDLE,NULL,&out)==XR_SUCCESS);
+    assert(out.isValid && out.recommendedImageDimensions.width==2768);
     return 0;
 }

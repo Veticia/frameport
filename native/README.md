@@ -31,3 +31,9 @@ missing symbols (no compiler needed).
 
 After changing anything here: `python native/build.py`, commit artifacts + SHA256SUMS, then run `frameport parity`
 (the report marks updated binaries as "expected") and a device launch test.
+
+`adapter.fixed_resolution` (off by default, #406/#394) keeps META recommended layer
+resolution at tracked full swapchain size. Both adapter GIPA and xrshim's existing
+extension entry point serve it; the setting adds OVRPlugin shim routing. The extension
+stays visible, avoiding dependence on a plugin fallback. No adapter revision bump for
+this opt-in fix. See DEVICE_NOTES "Fixed layer resolution / Batman" for verification.

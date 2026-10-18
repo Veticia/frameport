@@ -6,6 +6,13 @@
 # with diagnostics. Launch tests and real play sessions (agent session_log, `frameport session`) are both matched.
 # Sources: every failure we hit porting 34 games to the Steam Frame (see docs/PLAYBOOK.md).
 signatures:
+  - id: dynamic-resolution-foveation
+    pattern: 'projection view [01](?: rect change)?:[^\r\n]*rect=(?:[1-9]\d*,\d+|0,[1-9]\d*) '
+    unless: 'fixed_resolution: recommended'
+    severity: info
+    diagnosis: The game submits an offset projection viewport. With Valve foveation, dynamic resolution can move the sharp centre or expose a white edge. Keeping full resolution may help; it increases GPU load and needs the updated adapter and OVRPlugin shim in a rebuilt APK.
+    question: With foveated rendering enabled, was the sharp centre misplaced or was there a white line at the picture edge?
+    suggest: [adapter.fixed_resolution]
   - id: quest2-headset-identity
     pattern: 'venderId[^\r\n]*systemName Oculus Quest2'
     severity: info

@@ -94,6 +94,11 @@
   "title": "Colour space support",
   "group": "Game settings"
  },
+ "adapter.fixed_resolution": {
+  "anchor": "adapter-fixed_resolution",
+  "title": "Keep full resolution (no dynamic resolution)",
+  "group": "Game settings"
+ },
  "adapter.flip_dump": {
   "anchor": "adapter-flip_dump",
   "title": "Upside-down panel images (diagnostics)",

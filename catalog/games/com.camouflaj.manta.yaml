@@ -16,6 +16,7 @@ frame:
 - frame.hw_video_decode
 - frame.unity_text_input
 adapter:
+  fixed_resolution: 1
   sync_guard: 1
   surface_native: 1
   fade_quad: 1
@@ -26,6 +27,6 @@ verified:
   overport_cli: 1.2.3
   overport_runtime: 3.4.3-23204ea
   known_good_sha256: 796d1cab08f614d72c50d9702974c719c0908f5de91183cfe02d1fd5eb09551a
-updated: '2026-10-15'
-min_app: 1.1.0
+updated: '2026-10-18'
+min_app: 1.2.2
 source_hint: Batman- Arkham Shadow
