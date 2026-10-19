@@ -596,7 +596,7 @@ const char *make_model(Scan *s)
     return error;
 }
 
-static int number(char **cursor, float *value)
+int parse_number(char **cursor, float *value)
 {
     char *p=*cursor;while (*p==' ' || *p=='\t' || *p=='\r') p++;
     int sign=1,digits=0;if (*p=='-' || *p=='+') { if (*p=='-') sign=-1;p++; }
@@ -631,7 +631,7 @@ static const char *hint(Scan *s)
         while (*p==' ' || *p=='\t' || *p=='\r' || *p=='\n') p++;
         if (!*p) break;
         if (*p=='#') { while (*p && *p!='\n') p++;continue; }
-        if (n==MAX_OUTLINE || !number(&p,&pts[n].x) || !number(&p,&pts[n].z)) return "invalid outline hint";
+        if (n==MAX_OUTLINE || !parse_number(&p,&pts[n].x) || !parse_number(&p,&pts[n].z)) return "invalid outline hint";
         n++;while (*p==' ' || *p=='\t' || *p=='\r') p++;
         if (*p && *p!='\n' && *p!='#') return "invalid outline hint";
         if (*p=='#') while (*p && *p!='\n') p++;

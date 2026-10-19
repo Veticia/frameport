@@ -13,6 +13,8 @@
 #define MAX_VOLUMES 128
 #define MAX_TRIANGLES 200000
 #define MAX_MESH_VERTICES 600000
+#define MAX_HEADS 2000
+#define MAX_ERASE 64
 #define PI 3.14159265358979323846f
 
 typedef struct { float x, y, z; } Vec;
@@ -29,8 +31,17 @@ typedef struct {
     int used;
 } Plane;
 typedef struct { Vec p; float yaw, w, d, h; const char *label; } Volume;
+typedef struct { float x, y, z, r; } Sphere;
+/* Refinement + label rules (refine.c, rules.c); defaults = the owner's tuned settings (2026-10-18). */
 typedef struct {
-    const char *input, *out, *hint;
+    int refine, walls, protect, label_rules, smooth, nerase;  /* walls: 0 off, 1 snap, 2 panels */
+    float band, facing_deg, band_in, floor_in, ceil_in, top_strip, near, clip, clip_open, island, tops;
+    float tubes, tube_thick, walked;
+    Sphere erase[MAX_ERASE];
+} Refine;
+typedef struct {
+    const char *input, *out, *hint, *refine_only;
+    Refine rf;
     u64 universe;
     float voxel, ceiling_default, truncation, max_edge, grazing, range, depth_jump, depth_ratio, min_views;
     float patch_residual;
@@ -56,10 +67,13 @@ typedef struct {
     const char *warnings[24];
     int nwarnings, hint_used;
     u32 rng;
+    Vec heads[MAX_HEADS];   /* head path of tracked frames; the stride doubles whenever the buffer is full */
+    int nheads;
+    unsigned head_stride, head_frames;
     Vec *vertices;
     u32 *indices;
     int nv, ni;
-    i64 t0, tread, tfuse, tmodel, tmesh;
+    i64 t0, tread, tfuse, tmodel, tmesh, trefine;
 } Scan;
 
 static inline float ab(float x) { return x < 0 ? -x : x; }
@@ -89,5 +103,6 @@ void finish_fusion(Scan *s);
 const char *make_model(Scan *s);
 const char *make_mesh(Scan *s);
 int same(const char *a, const char *b);
+int parse_number(char **cursor, float *value);
 
 #endif
