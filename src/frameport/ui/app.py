@@ -41,6 +41,7 @@ NAV = [("library", tr("Library"), ft.Icons.GRID_VIEW_OUTLINED),
        ("live", tr("Live view"), G.LIVE),
        ("keyboard", tr("Type on Frame"), G.KEYS),
        ("monitor", tr("Monitor"), ft.Icons.MONITOR_HEART_OUTLINED),
+       ("room", tr("Room"), ft.Icons.VIEW_IN_AR_ROUNDED),
        ("settings", tr("Settings"), ft.Icons.TUNE_ROUNDED)]
 POLL_SECONDS = 30
 _link_state = {"owner": None, "thread": None, "closing": False}  # install links go to the newest window session
@@ -141,6 +142,7 @@ class FramePortApp:
         self.live_view = None  # likewise (views/live.LiveView): owns the running stream, which outlives the tab
         self.keyboard_view = None  # likewise (views/keyboard.KeyboardView): its keyboard exists only while it's shown
         self.monitor_view = None  # likewise (views/monitor.MonitorView): its stream runs only while it's shown
+        self.room_view = None  # likewise (views/room.RoomView): owns the browser 3D view's server until disconnect
         self._typing_on_frame = False
         self.exe_queue: list[str] = []  # games whose executable the user should confirm (after a scan)
         self._failures: list[Job] = []  # failed installs/tests, shown together when the queue is done
@@ -165,7 +167,8 @@ class FramePortApp:
         self._card_push = C.LoopUpdater(page)  # the card's updates from the stream's thread
         page.on_close = lambda e: (self.jobs.unsubscribe(self._on_job),  # session gone: stop drawing into it
                                    self.stop_live(),  # and stop a live view (it would keep the Frame encoding)
-                                   self.stop_keyboard(), self.stop_monitor(), self.monitor_hub.close(),
+                                   self.stop_keyboard(), self.stop_monitor(), self.stop_room(),
+                                   self.monitor_hub.close(),
                                    _link_state.update(owner=None) if _link_state["owner"] is self else None)
         from .announcer import Announcer
         from .updater import Updater
@@ -287,7 +290,8 @@ class FramePortApp:
         if hasattr(self, "_nav"):
             del self._nav  # _refresh_sidebar builds the sidebar's controls again
         self.stop_monitor()  # its stream runs only while the tab is shown (a theme switch happens in Settings)
-        self.library_view = self.files_view = self.screenshots_view = self.monitor_view = None
+        self.stop_room()  # (its browser page's server; a new one starts with the next "Open full 3D view")
+        self.library_view = self.files_view = self.screenshots_view = self.monitor_view = self.room_view = None
         if self.keyboard_view is not None and self.keyboard_view.stopped:
             self.keyboard_view = None
         for view in (self.live_view, self.keyboard_view):
@@ -701,6 +705,12 @@ class FramePortApp:
                 if self.monitor_view is None:
                     self.monitor_view = MonitorView(self)
                 view = self.monitor_view.mount()
+            elif kind == "room":
+                from .views.room import RoomView
+
+                if self.room_view is None:
+                    self.room_view = RoomView(self)
+                view = self.room_view.mount()
             elif kind == "settings":
                 self.settings_view = SettingsView(self)
                 view = self.settings_view.build()
@@ -792,6 +802,11 @@ class FramePortApp:
             if self.frame_state != "connected":
                 self.stop_monitor()
             self.render()
+        elif self.route[0] == "room":
+            if self.room_view is None or self.room_view.root is None or self.frame_state != "connected":
+                self.render()
+            else:
+                self.room_view.refresh()  # (scan progress, the room loading: properties only)
         else:
             self._refresh_sidebar()
 
@@ -806,6 +821,10 @@ class FramePortApp:
     def stop_monitor(self) -> None:
         if self.monitor_view is not None:
             self.monitor_view.stop()
+
+    def stop_room(self) -> None:
+        if self.room_view is not None:
+            self.room_view.stop()
 
     def open_game(self, package: str, advanced: bool = False, show_all: bool = False) -> None:
         self.go("game", package, advanced, show_all)
@@ -2966,6 +2985,7 @@ class FramePortApp:
         self.stop_live()
         self.stop_keyboard()
         self.stop_monitor()
+        self.stop_room()
         if self.target:
             try:
                 self.target.close()

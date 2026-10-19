@@ -19,43 +19,10 @@ if TYPE_CHECKING:
     from ..app import FramePortApp
 
 
-def room_state(app, force: bool = False) -> dict:
-    """Cache per connected Frame; all SSH and preview writes happen on the background worker."""
-    target = app.target if app.frame_state == "connected" else None
-    cached = getattr(app, "_room_state", None)
-    if cached is None or cached["target"] is not target:
-        cached = app._room_state = dict(target=target, status=None, preview=None, error=None, loading=False, time=0)
-    if target is None or cached["loading"] or (not force and time.monotonic() - cached["time"] < 30):
-        return cached
-    cached["loading"] = True
+def room_state(app, force: bool = False) -> dict:  # (older callers: the cache lives in ui/room_state.py)
+    from ..room_state import state
 
-    def fetch():
-        import hashlib
-
-        from ...core.paths import user_data_dir
-        from ...install import rooms
-        from ...mr.room import parse, preview_svg
-
-        try:
-            status = rooms.status(target.frame)
-            preview = None
-            if status.get("room_text"):
-                svg = preview_svg(parse(status["room_text"]))
-                name = hashlib.sha256(svg.encode()).hexdigest()[:24] + ".svg"
-                path = user_data_dir() / "room-previews" / name
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(svg, encoding="utf-8")
-                preview = "room-previews/" + name
-            cached.update(status=status, preview=preview, error=None)
-        except Exception as exc:  # noqa: BLE001 - a failed room query must not hide the rest of the Frame page
-            cached.update(status=None, preview=None, error=explain(exc))
-        finally:
-            cached.update(loading=False, time=time.monotonic())
-        if app.target is target and app.frame_state == "connected":
-            app.refresh_view()
-
-    app.run_bg(fetch)
-    return cached
+    return state(app, force)
 
 
 class FrameView:
@@ -221,91 +188,49 @@ class FrameView:
                          help="install_drive")
 
     def room_card(self) -> ft.Control:
+        """A short summary of the saved room; scanning and the 3D view are on the Room tab."""
+        from ..room_state import scan_line
+
         app = self.app
         cached = room_state(app)
         status = cached["status"] or {}
         room = status.get("room")
-        busy = cached["loading"] or bool(cached.get("working"))
+        checking = cached["loading"] and not status
         scanned = bool(room and room.get("source") == "scan")
-        detail = (tr("Room scan saved") if scanned else tr("Using your play area; furniture is not included") if room
-                  else tr("No room saved yet"))
-        rows = [C.Check(None if cached["loading"] and not status else True if scanned else "warn",
-                        tr("Room scanned"), detail, "mr_room"),
-                C.Check(None if cached["loading"] and not status else True if status.get("aligned") else "warn",
-                        tr("Lines up with the current play area"),
-                        tr("Same play area") if status.get("aligned")
-                        else tr("Set up a room in your current play area"),
-                        "mr_alignment"),
-                C.Check(None if cached["loading"] and not status else bool(status.get("scanner_installed")),
-                        tr("Scanner installed"), tr("Ready") if status.get("scanner_installed")
-                        else tr("Installed when you build a recorded scan"), "mr_scanner")]
-        contents = [C.checklist(rows)]
-        scan = cached.get("scan")
-        if scan:
-            line = {"waiting": tr("Put on the headset and turn on passthrough. The scan starts by itself."),
-                    "recording": tr("Scanning: {directions} of 12 directions seen{up}").format(
-                        directions=scan.get("directions", 0),
-                        up=tr(", ceiling seen") if scan.get("looked_up", 0) >= 5 else ""),
-                    "building": tr("Building the room…")}.get(scan.get("state"), "")
-            if line:
-                contents.append(C.callout(line, "info"))
-        if cached.get("error"):
-            contents.append(C.callout(tr("Couldn't check room data: {error}").format(error=cached["error"]), "warn"))
-        if cached.get("preview"):
-            contents.append(ft.Image(src=cached["preview"], width=T.px(300), height=T.px(240),
-                                     fit=ft.BoxFit.CONTAIN, semantics_label=tr("Room floor plan")))
+        if checking:
+            mark, text = None, tr("Checking the room…")
+        elif scanned:
+            mark, text = True, tr("Room scan saved")
+        elif room:
+            mark, text = "warn", tr("Using your play area; furniture is not included")
+        else:
+            mark, text = "warn", tr("No room saved yet")
+        lines = []
         if room:
             counts = room.get("summary") or {}
-            contents.append(C.meta(tr("{walls} walls · {area:.1f} m² · {height:.1f} m high").format(
-                walls=counts.get("walls", 0), area=counts.get("floor_area", 0),
-                height=counts.get("ceiling_height", 0))))
-        default = status.get("default_circle")
-        boundary_hint = tr("Use your SteamVR play area as walls, without furniture.") if default is False else tr(
-            "Set up a play area in SteamVR first. Valve's default circle does not describe your room.")
-
-        def operate(action):
-            if cached["loading"] or cached.get("working"):
-                return
-            cached["working"] = True
-            app.refresh_view()
-            target = app.target
-            def scan_progress(st):  # every agent status while the player scans in the headset
-                cached["scan"] = st
-                if app.target is target:
-                    app.refresh_view()
-
-            def work():
-                from ...install import rooms
-                try:
-                    if action == "capture":
-                        rooms.scan(target.frame, progress=scan_progress)
-                        app.toast(tr("Room scanned"))
-                    else:
-                        {"boundary": rooms.from_boundary, "delete": rooms.delete}[action](target.frame)
-                except Exception as exc:  # noqa: BLE001
-                    app.toast(explain(exc), error=True)
-                finally:
-                    cached["working"] = False
-                    cached["scan"] = None
-                if app.target is target:
-                    room_state(app, force=True)
-                    app.refresh_view()
-            app.run_bg(work)
-
-        def remove(e):
-            C.confirm(app.page, tr("Delete room?"), tr("Games will use a simple room until you save another room."),
-                      tr("Delete room"), lambda: operate("delete"), danger=True)
-
-        contents.append(ft.Row([
-            C.secondary(tr("Use my play area"), ft.Icons.CROP_FREE_ROUNDED, lambda e: operate("boundary"),
-                        disabled=busy or default is not False, tooltip=C.tip(boundary_hint)),
-            C.secondary(tr("Scan room in the headset"), ft.Icons.VIEW_IN_AR_ROUNDED, lambda e: operate("capture"),
-                        disabled=busy),
-            C.ghost(tr("Delete room"), ft.Icons.DELETE_OUTLINE_ROUNDED, remove, disabled=busy or not room),
-        ], spacing=T.S2, wrap=True))
-        return C.section(tr("Room"), C.card(ft.Column(contents, spacing=T.S3), padding=T.S4), help="mr_room",
-                         action=C.ghost(tr("Refresh room"), ft.Icons.REFRESH_ROUNDED,
-                                        lambda e: room_state(app, force=True), disabled=busy))
+            furniture = sum((counts.get("volumes") or {}).values())
+            lines.append(tr("{walls} walls · {area:.1f} m² · {height:.1f} m high · {furniture} pieces of furniture")
+                         .format(walls=counts.get("walls", 0), area=counts.get("floor_area", 0),
+                                 height=counts.get("ceiling_height", 0), furniture=furniture))
+        if room and not status.get("aligned"):
+            lines.append(tr("Made in another play area: scan again or use your play area."))
+        rows = [C.Check(mark, text, " · ".join(lines), "mr_room")]
+        contents = [C.checklist(rows)]
+        line = scan_line(cached.get("scan"))
+        if line:
+            contents.append(C.callout(line, "info"))
+        if cached.get("error"):
+            contents.append(C.callout(tr("Couldn't check room data: {error}").format(error=cached["error"]), "warn"))
+        body = ft.Column(contents, spacing=T.S3, expand=True)
+        row = [body]
+        if cached.get("preview"):
+            row.insert(0, ft.Image(src=cached["preview"], width=T.px(120), height=T.px(96), fit=ft.BoxFit.CONTAIN,
+                                   semantics_label=tr("Room floor plan")))
+        return C.section(tr("Room"), C.card(ft.Row(row, spacing=T.S4,
+                                                   vertical_alignment=ft.CrossAxisAlignment.CENTER), padding=T.S4),
+                         help="mr_room",
+                         action=C.secondary(tr("Open Room"), ft.Icons.VIEW_IN_AR_ROUNDED, lambda e: app.go("room"),
+                                            tooltip=C.tip(tr("Scan your room and look at it in 3D."))))
 
     def installed(self, info: dict) -> ft.Control:
         """The list fills in the background (icon thumbnails may need creating the first time)."""
