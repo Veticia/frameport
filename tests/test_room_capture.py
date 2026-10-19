@@ -318,3 +318,37 @@ def test_capture_preview_switch_reaches_agent(monkeypatch):
     frame = ScanFrame([{'state': 'done'}])
     rooms.scan(frame, preview=False)
     assert frame.calls[0][1]['preview'] is False
+
+
+def test_capture_stop_ends_the_job_and_marks_it_cancelled(monkeypatch, tmp_path):
+    a = load_agent(monkeypatch, tmp_path)
+    calls = []
+
+    def run(cmd, **kw):
+        calls.append(cmd)
+        out = "frameport-room-scan-1700000000.service loaded active running x\n" if "list-units" in cmd else ""
+        return SimpleNamespace(returncode=0, stdout=out, stderr="")
+    monkeypatch.setattr(a, "run", run)
+    a.os.makedirs(a.ROOMS_DIR, exist_ok=True)
+    a._write_json(a.ROOM_SCAN_STATUS, {"state": "recording", "directions": 5})
+    res = a.cmd_room_capture_stop({})
+    assert res["stopped"] == ["frameport-room-scan-1700000000.service"]
+    assert ["systemctl", "--user", "stop", "frameport-room-scan-1700000000.service"] in calls
+    st = a.cmd_room_capture_status({})
+    assert st["state"] == "failed" and st["error"] == "cancelled" and st["directions"] == 5
+    # nothing running: a finished scan's result stays
+    a._write_json(a.ROOM_SCAN_STATUS, {"state": "done"})
+    monkeypatch.setattr(a, "run", lambda cmd, **kw: SimpleNamespace(returncode=0, stdout="", stderr=""))
+    assert a.cmd_room_capture_stop({}) == {"stopped": [], "state": "done"}
+    assert a.cmd_room_capture_status({})["state"] == "done"
+
+
+def test_scan_reports_a_cancel(monkeypatch):
+    monkeypatch.setattr(rooms, "ensure_scanner", lambda frame: None)
+    monkeypatch.setattr(rooms, "ensure_prompts", lambda frame: None)
+    frame = ScanFrame([{"state": "failed", "error": "cancelled", "cancelled": True}])
+    with pytest.raises(rooms.ScanCancelled):
+        rooms.scan(frame, sleep=lambda s: None)
+    frame = ScanFrame([])
+    rooms.cancel_scan(frame)
+    assert frame.calls == [("room_capture_stop", {})]
