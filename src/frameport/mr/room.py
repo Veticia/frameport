@@ -284,8 +284,8 @@ def preview_svg(room: Room) -> str:
     xmin, xmax = min(x for x, _ in points), max(x for x, _ in points)
     zmin, zmax = min(z for _, z in points), max(z for _, z in points)
     scale = 440 / max(xmax-xmin, zmax-zmin, .1)
-    def point(x, z):
-        return f"{30+(x-xmin)*scale:.2f},{30+(zmax-z)*scale:.2f}"
+    def point(x, z):  # seen from above: +X right, forward (-Z) at the top (+Z at the top would mirror the room)
+        return f"{30+(x-xmin)*scale:.2f},{30+(z-zmin)*scale:.2f}"
     def polygon(poly):
         return " ".join(point(x, z) for x, z in poly)
     out = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" role="img">',
