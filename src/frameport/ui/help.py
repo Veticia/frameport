@@ -33,7 +33,39 @@ HELP: dict[str, str] = _Translated({
                    "to check a scan before you try it in a game.",
     "room_view": "Drag to turn the room, scroll or pinch to zoom, right-drag to move it, double-click to see all of "
                  "it again. The walls nearest to you are left out so you can look inside. The full 3D view in your "
-                 "browser shows every detail of the scan.",
+                 "browser shows every detail of the scan. Click a box or a door to edit it.",
+    # ---- room scan clean-up (install/rooms.REFINE_DEFAULTS)
+    "room_cleanup": "The Frame tidies up every scan: flat walls, floor and ceiling, no scan behind walls or where you "
+                    "walked, no small or floating bits. Apply runs it again on your saved scan with these settings.",
+    "room_labels": "The scanner names each box it finds. These rules check the names against the box's size and "
+                   "place: boxes behind walls go, desks stop being couches, a screen has to look like one.",
+    "room_boxes": "Furniture games see. Pick a box here or click it in the view, then fix its type, place or size. "
+                  "Your boxes stay when you clean up the scan again.",
+    "room_doors": "The scanner can't see doors or windows. Add them on a wall: games that ask for a door get it.",
+    "refine_refine": "Off keeps the scanner's mesh exactly as recorded; the room's walls and boxes stay.",
+    "refine_walls": "Keep scan leaves walls as scanned. Snap moves scan near a wall onto it. Flat panels replace the "
+                    "scanned walls, floor and ceiling with flat surfaces.",
+    "refine_walked": "You walked through this space while scanning, so nothing stands there: scan this far below your "
+                     "head's path is your own body or controllers. Furniture boxes are kept.",
+    "refine_smooth": "Evens out bumps in the scan without shrinking shapes (Taubin smoothing). More passes, smoother.",
+    "refine_island": "Loose bits of scan smaller than this area are removed.",
+    "refine_clip": "Scan further than this behind a seen wall is removed. At the maximum nothing is removed.",
+    "refine_clip_open": "Extra room past edges the scanner closed without seeing a wall: they may be open space.",
+    "refine_band": "Scan this far behind a wall, under the floor or above the ceiling counts as that surface.",
+    "refine_band_in": "Only this thin layer on the room side counts as wall, so wardrobes and shelves against it stay.",
+    "refine_floor_in": "Scan this close above the floor counts as floor.",
+    "refine_ceil_in": "Scan this close below the ceiling counts as ceiling.",
+    "refine_top_strip": "Furniture rarely reaches this close to the ceiling: here the whole band counts as wall.",
+    "refine_facing_deg": "Scan only counts as a wall when it faces the room within this angle of the wall's direction.",
+    "refine_near": "Flat panels only: other scan this close to a wall, floor or ceiling is removed. Furniture boxes "
+                   "are kept.",
+    "refine_tubes": "Long, thin pieces hanging in the air (depth streaks), at least this many times longer than wide, "
+                    "are removed. Never furniture.",
+    "refine_tube_thick": "Only thin floating pieces up to this thickness are removed.",
+    "refine_tops": "Scan near the top of a table, bed or other box, facing up, goes onto the box's top.",
+    "refine_protect": "Scan inside a furniture box is never removed by the other steps.",
+    "refine_label_rules": "Checks every box the scanner found against size and place rules (see Labels). Off keeps the "
+                          "scanner's own names.",
     "steam_library":"Now waits until Steam can restart safely. Later saves shortcuts for the next Steam start. "
                      "Off uses FramePort Play without Steam per-game integration; existing shortcuts stay.",
     # ---- game status / library

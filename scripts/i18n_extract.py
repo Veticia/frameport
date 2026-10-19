@@ -61,6 +61,14 @@ def from_data() -> dict:
                 texts[label] = ""
     for _, title in GROUPS:  # the Game settings dialog
         texts[title] = ""
+    from frameport.install.rooms import REFINE_DEFAULTS, REFINE_GROUPS
+
+    for meta in REFINE_DEFAULTS.values():  # the Room tab's scan clean-up settings
+        texts[meta["label"]] = ""
+        for _, label in meta.get("choices", ()):
+            texts[label] = ""
+    for _, title in REFINE_GROUPS:
+        texts[title] = ""
     for ui in [*UI.values(), *FOVEATION_UI.values()]:
         for t in (ui.get("label"), ui.get("help")):
             if t:

@@ -628,21 +628,11 @@ def segmented(options: list[tuple[str, str]], value: str | None, on_change: Call
     Clicking restyles in place, then calls on_change(value)."""
     items: dict[str, ft.Container] = {}
 
-    def paint(current):
-        for v, box in items.items():
-            on = v == current
-            box.content.color = T.TEXT if on else T.TEXT_2
-            if T.DUAL:
-                box.bgcolor, box.gradient = None, portal_gradient(opacity=0.22) if on else None
-            else:
-                box.bgcolor, box.gradient = T.SURFACE_3 if on else None, None
-
     def click(v):
         def handler(e):
             if track.data == v:
                 return
-            track.data = v
-            paint(v)
+            set_segmented(track, v)
             update(track)
             on_change(v)
         return handler
@@ -650,11 +640,31 @@ def segmented(options: list[tuple[str, str]], value: str | None, on_change: Call
     for v, label in options:
         items[v] = ft.Container(ft.Text(label, size=T.T_META, weight=ft.FontWeight.W_600),
                                 padding=ft.Padding(T.px(12), T.px(6), T.px(12), T.px(6)), border_radius=T.px(20),
-                                on_click=click(v), ink=True)
+                                on_click=click(v), ink=True, data=v)
     track = ft.Container(ft.Row(list(items.values()), spacing=T.px(2), tight=True), padding=T.px(3),
                          border_radius=T.px(22), border=ft.Border.all(1, T.BORDER), data=value)
-    paint(value)
+    set_segmented(track, value)
     return track
+
+
+def set_segmented(track: ft.Container, value: str | None) -> None:
+    """Select `value` in a segmented() track from code (no on_change; the caller updates the track)."""
+    track.data = value
+    for box in track.content.controls:
+        on = box.data == value
+        box.content.color = T.TEXT if on else T.TEXT_2
+        if T.DUAL:
+            box.bgcolor, box.gradient = None, portal_gradient(opacity=0.22) if on else None
+        else:
+            box.bgcolor, box.gradient = T.SURFACE_3 if on else None, None
+
+
+def set_switch(control: ft.Control, value: bool) -> None:
+    """Turn a switch() on or off from code (no on_change; the caller updates the control)."""
+    knob = control.controls[0] if getattr(control, "data", None) == "switch" else control
+    track, sw = knob.controls
+    sw.value = bool(value)
+    paint_switch_track(track, bool(value), bool(sw.disabled))
 
 
 def hoverable(box: ft.Container) -> ft.Container:

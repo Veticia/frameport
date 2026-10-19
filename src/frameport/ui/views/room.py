@@ -1,6 +1,8 @@
 """Room: the connected Frame's saved room for mixed-reality games. Scan it in the headset (with progress and Cancel),
 use the play area instead, delete it, and look at it in 3D: in the window (ui/room3d.RoomCanvas) and, with every
-detail, in the browser (mr/room_viewer.py, a local page stopped on disconnect / window close).
+detail, in the browser (mr/room_viewer.py, a local page stopped on disconnect / window close). Below it the editing
+cards of views/room_edit.py: the scan clean-up settings (Apply runs it again on the Frame), what the label rules
+decided (door / closet suggestions) and the furniture box + doors / windows editor (Save sends the room).
 
 Persistent like the Monitor (built once per connection, re-mounted on every visit): state changes (the room cache in
 ui/room_state.py, scan progress every 2 s) update properties of the controls built here; buttons are never rebuilt."""
@@ -143,10 +145,21 @@ class RoomView:
                              spacing=T.S2), padding=T.S4),
             self._tester(),
         ], spacing=T.S3, col={"xs": 12, "lg": 4}, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
+        # editing: the scan clean-up, what the label rules decided, furniture boxes + doors / windows
+        from .room_edit import CleanupCard, FurnitureEditor, LabelsCard
+
+        self.editor = FurnitureEditor(self)
+        self.cleanup = CleanupCard(self)
+        self.labels = LabelsCard(self)
+        self.canvas.on_pick = lambda hit: self.editor.select(hit) if self.editor.room is not None else None
         self.root = ft.Column([
             self._heading([self.refresh_btn, self.full_btn]),
             ft.ResponsiveRow([self.canvas_card, side], spacing=T.S4, run_spacing=T.S4,
                              vertical_alignment=ft.CrossAxisAlignment.START),
+            ft.Container(ft.ResponsiveRow([self.cleanup.control, self.editor.control, self.labels.control],
+                                          spacing=T.S4, run_spacing=T.S4,
+                                          vertical_alignment=ft.CrossAxisAlignment.START),
+                         key=ft.ScrollKey("room-edit")),
             ft.Container(height=T.S4),
         ], spacing=T.S4, scroll=ft.ScrollMode.AUTO, expand=True)
 
@@ -229,10 +242,17 @@ class RoomView:
         # the canvas, or what's in its place
         key = model.get("key") if model else None
         if key != self._shown_key:
+            first = self._shown_key in ("unset", None)
             self._shown_key = key
-            self.canvas.set_scene(model["scene"] if model else None)
+            self.editor.load(model)  # edits start again from the new room
+            self.canvas.set_scene(self.editor.scene(), fit=first or model is None)
+            changed += [self.editor.box_list, self.editor.plane_list, self.editor.box_panel,
+                        self.editor.plane_panel]
             if self.viewer is not None and model is not None:
                 self.viewer.set_room(model["room_text"], model["mesh"])  # the open page reloads by itself
+        changed += self.cleanup.refresh(cached, status, room)
+        changed += self.labels.refresh(cached, status, room)
+        changed += self.editor.refresh(cached, status, room)
         self._placeholder(cached, status, room, model)
         if update:
             self._push(*changed)
@@ -283,6 +303,11 @@ class RoomView:
     def _ask_delete(self, e) -> None:
         C.confirm(self.app.page, tr("Delete room?"), tr("Games will use a simple room until you save another room."),
                   tr("Delete room"), lambda: RS.operate(self.app, "delete"), danger=True)
+
+    async def show_editing(self) -> None:
+        """Scroll down to the editing cards (Clean-up, Furniture & screens, Labels)."""
+        if self.root is not None:
+            await self.root.scroll_to(scroll_key="room-edit", duration=0)
 
     def open_full(self, e=None) -> None:
         """The browser view: a local page with the whole mesh (started once, kept until disconnect / close)."""
