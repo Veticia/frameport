@@ -5,10 +5,22 @@
 import { coverVars, initials } from './cover';
 import { checkUrl, fileName as urlFileName } from './install-link';
 import type { VrScene } from './vrscene';
+import type { RoomData, RoomView } from './room3d';
+import { url } from '../data/site';
 
 export interface MockGame { title: string; engine: string; xr: string; status: 'works' | 'issues'; platform: string }
 
-export type Route = 'library' | 'game' | 'frame' | 'files' | 'shots' | 'live' | 'keys' | 'monitor' | 'settings';
+export type Route = 'library' | 'game' | 'frame' | 'files' | 'shots' | 'live' | 'keys' | 'monitor' | 'room' | 'settings';
+interface RoomS {
+  scanned: boolean;
+  /** a scan running in the headset: 0..1 */
+  scanning: number | null;
+  raw: boolean;
+  selected: number | null;
+  door: 'pending' | 'door' | 'closet' | 'dismissed';
+  /** types changed by the reader, by box */
+  labels: Record<number, string>;
+}
 interface FileRow { name: string; size: string; progress?: number }
 interface State {
   connected: boolean;
@@ -38,6 +50,7 @@ interface State {
   details: boolean;
   theme: string;
   processes: [string, string, string][];
+  room: RoomS;
 }
 
 const STAGES = ['scan', 'analyze', 'recipe', 'convert', 'patch', 'sign', 'check', 'upload', 'library', 'test'];
@@ -66,6 +79,11 @@ const size = (t: string) => `${(0.4 + (h32(t) % 38) / 10).toFixed(1)} GiB`;
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 const human = (b: number) => b >= 1 << 30 ? `${(b / (1 << 30)).toFixed(1)} GiB` : b >= 1 << 20 ? `${(b / (1 << 20)).toFixed(1)} MiB`
   : `${Math.max(1, Math.round(b / 1024))} KiB`;
+
+const ROOM_TYPES = ['BED', 'COUCH', 'TABLE', 'SCREEN', 'STORAGE', 'LAMP', 'PLANT', 'OTHER'];
+const roomName = (t: string) => t === 'STORAGE' ? 'Storage' : t.charAt(0) + t.slice(1).toLowerCase();
+const scanStage = (p: number) => p < 0.4 ? 'Look around the room slowly' : p < 0.7 ? 'Now up at the ceiling and down at the floor'
+  : p < 0.92 ? 'Walk around the furniture' : 'Building the room…';
 
 const PLAY = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg>';
 
@@ -112,8 +130,10 @@ export function initMock(root: HTMLElement, games: MockGame[], opts: MockOptions
     patches: { framebridge: true, haptics: true, focus: true, textinput: true, spacewarp: false },
     processes: [['Game', 'the game', '38%'], ['Steam', 'steamwebhelper', '6%'], ['SteamVR', 'vrcompositor', '11%'],
       ['Lepton', 'lepton-container', '4%'], ['System', 'kwin_wayland', '2%']],
+    room: { scanned: true, scanning: null, raw: false, selected: null, door: 'pending', labels: {} },
   });
-  const fresh = (): State => ({ ...demo(), connected: false, games: [], onFrame: new Set(), tested: new Set(), playing: null });
+  const fresh = (): State => ({ ...demo(), connected: false, games: [], onFrame: new Set(), tested: new Set(), playing: null,
+    room: { scanned: false, scanning: null, raw: false, selected: null, door: 'pending', labels: {} } });
   let s = demo();
   let timers: number[] = [];
   const later = (fn: () => void, ms: number) => { timers.push(window.setTimeout(fn, reduce ? Math.min(ms, 60) : ms)); };
@@ -140,8 +160,11 @@ export function initMock(root: HTMLElement, games: MockGame[], opts: MockOptions
     renderChrome();
     const keep = vr && s.route === 'live' && s.live && vr.title === liveTitle() ? vr : null;
     if (keep) keep.host.remove(); else dropVr();
+    const room3d = s.route === 'room' ? rv : null;
+    if (room3d) room3d.host.remove(); else dropRoom();
     view.innerHTML = VIEWS[s.route]();
     if (s.route === 'live' && s.live) mountLive(keep);
+    if (s.route === 'room') mountRoom3d(room3d);
     afterRender();
   }
 
@@ -177,6 +200,37 @@ export function initMock(root: HTMLElement, games: MockGame[], opts: MockOptions
         host.closest('.screen')?.classList.add('gl');
       })
       .catch(() => {});
+  }
+  // The Room tab's 3D view (room3d.ts) and its data load once and live across re-renders of the tab, none elsewhere.
+  let roomData: RoomData | null = null;
+  let roomFailed = false;
+  let rv: RoomView | null = null;
+  function dropRoom() { rv?.dispose(); rv?.host.remove(); rv = null; }
+  function syncRoom3d() {
+    if (!rv) return;
+    Object.assign(rv.state, { raw: s.room.raw, selected: s.room.selected, door: s.room.door,
+      reveal: s.room.scanning ?? (s.room.scanned ? 1 : 0) });
+    rv.redraw();
+  }
+  function mountRoom3d(keep: RoomView | null) {
+    const slot = view.querySelector<HTMLElement>('[data-room3d]');
+    if (!slot) return;
+    if (keep) { slot.replaceWith(keep.host); syncRoom3d(); return; }
+    import('./room3d').then(async ({ loadRoom, mountRoom }) => {
+      const first = !roomData;
+      roomData = await loadRoom(url('demo/room.json'));
+      if (s.route !== 'room') return;
+      if (first) { render(); return; }  // the lists need the data: render again, which mounts the view
+      const at = view.querySelector<HTMLElement>('[data-room3d]');
+      if (!at || rv) return;
+      const host = document.createElement('div');
+      host.className = 'r3d';
+      host.innerHTML = at.innerHTML;
+      at.replaceWith(host);
+      rv = mountRoom(host, roomData);
+      rv.onPick = (i) => { s.room.selected = i; render(); };
+      syncRoom3d();
+    }).catch(() => { roomFailed = true; if (s.route === 'room') render(); });
   }
   /** The sidebar only (the Frame card, the activity card): progress ticks must not rebuild the page you're on. */
   function renderChrome() {
@@ -340,6 +394,78 @@ export function initMock(root: HTMLElement, games: MockGame[], opts: MockOptions
           + `<td>${grp === 'System' ? '<span class="lock" title="FramePort never ends this one">protected</span>' : `<button class="btn-s sm" data-end="${i}">End</button>`}</td></tr>`).join('')
         + '</tbody></table>'
       : `<div class="empty"><div class="portal-ico"></div><h4>Nothing playing</h4><p>Start a game to see its frame rate, load and temperature.</p></div>`,
+    room: () => {
+      const r = s.room, d = roomData;
+      const head = `<header class="vh"><div><h3>Room <span class="xp">experimental</span></h3>`
+        + `<p>The room mixed-reality games see: walls, furniture and the scanned surfaces.</p></div></header>`;
+      if (!s.connected && !r.scanned) {
+        return head + `<div class="empty"><div class="portal-ico"></div><h4>No room yet</h4>`
+          + `<p>Connect your Frame, then scan your room in the headset. Mixed-reality games get its walls and furniture.</p></div>`;
+      }
+      const label = (i: number) => r.labels[i] ?? d!.boxes[i].label;
+      const legend = `<div class="r-legend"><span><i class="lg-wall"></i>Walls</span><span><i class="lg-mesh"></i>Scanned surfaces</span>`
+        + `<span><i class="lg-box"></i>Furniture</span><span><i class="lg-door"></i>Doors and windows</span>`
+        + `<span class="lg-raw"><i class="lg-junk"></i>Removed by the clean-up</span></div>`;
+      const scanCard = `<div class="rcard"><h4>Scan</h4>`
+        + (r.scanning !== null
+          ? `<p class="r-stage" data-rstage>${scanStage(r.scanning)}</p><span class="upbar"><i data-rbar style="width:${Math.round(r.scanning * 100)}%"></i></span>`
+            + `<p class="r-sub">The headset shows the same steps.</p><div class="row"><button class="btn-s" data-act="room-cancel">Cancel</button></div>`
+          : `<div class="row"><button class="btn-p" data-act="room-scan" ${s.connected ? '' : 'disabled title="Connect a Frame first"'}>`
+            + `${svg('<path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3"/>')}`
+            + `${r.scanned ? 'Scan again' : 'Scan room in the headset'}</button>`
+            + `<button class="btn-s" data-act="toast" data-msg="Games get a plain box room from your play area instead">Use my play area</button></div>`)
+        + '</div>';
+      if (!d) {
+        return head + `<div class="room"><div class="r3d" data-room3d><p class="r-load">${roomFailed ? "The demo room didn't load." : 'Loading the room…'}</p></div>`
+          + `<div class="rcol">${scanCard}</div></div>`;
+      }
+      const counts = new Map<string, number>();
+      d.boxes.forEach((_, i) => counts.set(label(i), (counts.get(label(i)) ?? 0) + 1));
+      if (r.door === 'closet') counts.set('STORAGE', (counts.get('STORAGE') ?? 0) + 1);
+      const area = d.outline.reduce((a, [x, z], i) => { const [x2, z2] = d.outline[(i + 1) % d.outline.length]; return a + x * z2 - x2 * z; }, 0) / 2;
+      const kept = d.mesh.raw_from, all = d.mesh.t.length / 3;
+      const junk = d.mesh.junk;
+      const info = `<div class="rcard"><p class="r-k">In this room</p>`
+        + (r.scanned
+          ? `<p class="r-big">${plural(d.walls.length, 'wall')} · ${Math.abs(area).toFixed(1)} m² · ${(d.ceiling - d.floor).toFixed(1)} m high</p>`
+            + `<p class="r-sub">Scanned in the headset · ${(r.raw ? all : kept).toLocaleString('en')} mesh triangles</p>`
+            + `<p class="r-chips">${[...counts].map(([k, n]) => `<span>${roomName(k)}${n > 1 ? ` × ${n}` : ''}</span>`).join('')}</p>`
+            + `<p class="r-tip">${svg('<path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z"/>', 13)}See what a game gets: `
+            + `<button class="lnk" data-act="toast" data-msg="Installs Test Quest MR, a small app that shows what games see">Get Test Quest MR</button></p>`
+          : '<p class="r-sub">Nothing scanned yet.</p>')
+        + '</div>';
+      const clean = `<div class="rcard"><h4>Clean-up</h4><span class="seg r-seg">`
+        + `<button data-rmode="raw" aria-pressed="${r.raw}">Raw scan</button><button data-rmode="clean" aria-pressed="${!r.raw}">Cleaned up</button></span>`
+        + `<ul class="r-res">`
+        + `<li><span>Floating pieces</span><b>${junk.speck?.[0] ?? 0}</b></li>`
+        + `<li><span>An arm swept through the view</span><b>${junk.arm?.[0] ?? 0}</b></li>`
+        + `<li><span>Seen through the walls</span><b>${junk.outside?.[0] ?? 0}</b></li>`
+        + `<li><span>Boxes removed</span><b>${d.removed.length}</b></li>`
+        + `<li><span>Boxes renamed</span><b>${d.boxes.filter((b) => b.from && b.from !== b.label).length}</b></li></ul>`
+        + `<p class="r-sub">${r.raw ? 'Red: what the clean-up takes out.' : 'Switch to the raw scan to see what it took out.'}</p></div>`;
+      const sz = (b: { w: number; d: number; h: number }) => [b.w, b.d, b.h].map((v) => v < 0.1 ? v.toFixed(2) : v.toFixed(1)).join('×') + ' m';
+      const sug = d.suggestion;
+      const sel = r.selected;
+      const rows = d.boxes.map((b, i) => {
+        const now = label(i), changed = now !== (b.from ?? now);
+        return `<li><button class="rl" data-rbox="${i}" aria-pressed="${sel === i}"><b>${roomName(b.from ?? now)}</b>`
+          + `<span class="${changed ? 'to' : 'kept'}">${changed ? `→ ${roomName(now)}` : 'kept'}</span><span class="dim">${sz(b)}</span>`
+          + `<small>${esc(r.labels[i] ? 'changed by you' : b.reason)}</small></button>`
+          + (sel === i ? `<label class="r-type">Type <select data-rlabel="${i}">${ROOM_TYPES.map((t) =>
+            `<option value="${t}" ${t === now ? 'selected' : ''}>${roomName(t)}</option>`).join('')}</select></label>` : '')
+          + '</li>';
+      }).join('') + d.removed.map((b) => `<li><div class="rl gone"><b>${roomName(b.label)}</b><span>removed</span><span class="dim">${sz(b)}</span>`
+        + `<small>${esc(b.reason)}</small></div></li>`).join('');
+      const labels = `<div class="rcard r-labels"><h4>Labels</h4>`
+        + `<p class="r-sub">What the label rules decided for each box. Click one here or in the view to change its type.</p>`
+        + (r.door === 'pending' ? `<div class="r-sug"><div class="r-sug-h"><b>A door?</b><span class="dim">${sz(sug)}</span></div><p>${esc(sug.reason)}</p>`
+          + `<div class="row"><button class="btn-s" data-act="room-door" data-as="door">Add as door</button>`
+          + `<button class="btn-s" data-act="room-door" data-as="closet">Add as closet</button>`
+          + `<button class="lnk" data-act="room-door" data-as="dismissed">Not a door</button></div></div>` : '')
+        + `<ul class="r-list">${rows}</ul></div>`;
+      return head + `<div class="room ${r.raw ? 'raw' : ''}"><div class="r3d" data-room3d>${legend}<span class="r-hint">Drag to turn · click a box</span></div>`
+        + `<div class="rcol">${scanCard}${info}${clean}</div></div>${labels}`;
+    },
     settings: () => `<header class="vh"><div><h3>Settings</h3><p>Appearance, updates, this PC.</p></div></header>`
       + `<h4 class="sh">Appearance</h4><div class="themes">${Object.entries(THEMES).map(([k, t]) =>
         `<button class="theme" data-theme="${k}" aria-pressed="${s.theme === k}" style="--a:${t.c.accent};--b:${t.c.secondary};--g:${t.c.bg};--s:${t.c.surface}">`
@@ -373,6 +499,34 @@ export function initMock(root: HTMLElement, games: MockGame[], opts: MockOptions
   }, reduce ? 1500 : 500);
 
   function afterRender() { coachUpdate(); }
+
+  // ------------------------------------------------------------------ the Room tab's pretend scan
+  let roomCancel = () => {};
+  function roomScan() {
+    const before = s.room.scanned;
+    s.room.scanning = 0;
+    s.room.selected = null;
+    render();
+    const step = () => {
+      if (s.room.scanning === null) return;
+      s.room.scanning = Math.min(1, s.room.scanning + 0.035);
+      if (s.room.scanning >= 1) {
+        s.room = { ...s.room, scanning: null, scanned: true, door: 'pending', labels: {} };
+        render();
+        toast(roomData ? `Room scanned: ${plural(roomData.walls.length, 'wall')}, ${plural(roomData.boxes.length, 'box', 'boxes')}` : 'Room scanned');
+        return;
+      }
+      if (s.route === 'room') {
+        const st = view.querySelector('[data-rstage]'), bar = view.querySelector<HTMLElement>('[data-rbar]');
+        if (st) st.textContent = scanStage(s.room.scanning);
+        if (bar) bar.style.width = `${Math.round(s.room.scanning * 100)}%`;
+        syncRoom3d();
+      }
+      later(step, 140);
+    };
+    roomCancel = () => { s.room.scanning = null; s.room.scanned = before; render(); toast('Scan cancelled. The room is as it was.', 'info'); };
+    later(step, 300);
+  }
 
   // ------------------------------------------------------------------ actions
   function go(route: Route, current: string | null = s.current) {
@@ -561,7 +715,7 @@ export function initMock(root: HTMLElement, games: MockGame[], opts: MockOptions
         case 'uninstall': s.onFrame.delete(title); toast(`${title} removed from the Frame (saves kept)`, 'info'); return render();
       }
     }
-    const el = t.closest<HTMLElement>('[data-route],[data-game],[data-act],[data-filter],[data-loc],[data-link],[data-theme],[data-end],[data-del],[data-shot]');
+    const el = t.closest<HTMLElement>('[data-route],[data-game],[data-act],[data-filter],[data-loc],[data-link],[data-theme],[data-end],[data-del],[data-shot],[data-rmode],[data-rbox]');
     if (!t.closest('.menu, [data-ctx]')) { if (!el || !['add', 'more'].includes(el.dataset.act ?? '')) closeMenus(); }
     if (!el || !root.contains(el)) return;
     if (el.dataset.route) return go(el.dataset.route as Route, el.dataset.route === 'game' ? s.current : null);
@@ -578,6 +732,8 @@ export function initMock(root: HTMLElement, games: MockGame[], opts: MockOptions
     }
     if (el.dataset.del) { const [f] = s.files[s.location].splice(Number(el.dataset.del), 1); toast(`Deleted ${f.name}`, 'info'); return render(); }
     if (el.dataset.shot) return viewShot(el);
+    if (el.dataset.rmode) { s.room.raw = el.dataset.rmode === 'raw'; return render(); }
+    if (el.dataset.rbox) { const i = Number(el.dataset.rbox); s.room.selected = s.room.selected === i ? null : i; return render(); }
     const act = el.dataset.act;
     if (act === 'quickplay') { ev.stopPropagation(); s.current = el.dataset.title!; return play(el.dataset.title!); }
     if (el.dataset.game) {
@@ -617,6 +773,13 @@ export function initMock(root: HTMLElement, games: MockGame[], opts: MockOptions
       case 'toast': toast(el.dataset.msg!, 'info'); closeMenus(); break;
       case 'tour': startTour(); break;
       case 'explore': exploreMode(); break;
+      case 'room-scan': roomScan(); break;
+      case 'room-cancel': roomCancel(); break;
+      case 'room-door':
+        s.room.door = el.dataset.as as RoomS['door'];
+        render();
+        toast(s.room.door === 'door' ? 'Saved: games that ask for a door get this one' : s.room.door === 'closet' ? 'Saved as a closet (storage)' : 'Left out', 'info');
+        break;
       case 'tour-next': advance(); break;
       case 'tour-skip': endTour(); break;
     }
@@ -658,6 +821,11 @@ export function initMock(root: HTMLElement, games: MockGame[], opts: MockOptions
     if (t instanceof HTMLInputElement && t.matches('[data-details]')) { s.details = t.checked; render(); }
     if (t instanceof HTMLInputElement && t.matches('[data-pick]') && t.files) addFiles(t.files);
     if (t instanceof HTMLSelectElement && t.matches('[data-quality]')) { s.quality = t.value; render(); }
+    if (t instanceof HTMLSelectElement && t.dataset.rlabel) {
+      s.room.labels[Number(t.dataset.rlabel)] = t.value;
+      toast(`Saved: games see ${t.value === 'OTHER' ? 'an unnamed box' : `a ${roomName(t.value).toLowerCase()}`} here`, 'info');
+      render();
+    }
   });
   root.addEventListener('input', (ev) => {
     const t = ev.target as HTMLInputElement;
@@ -721,7 +889,7 @@ export function initMock(root: HTMLElement, games: MockGame[], opts: MockOptions
       target: '[data-act="install"]', wait: 'installed' },
     { title: 'Play', text: "It's in the Frame's Steam library now. Play it from here or in the headset.",
       target: '[data-act="play"]', wait: 'played' },
-    { title: "That's it", text: 'Now try Monitor, Live view, Screenshots, Files, Type on Frame and Settings.',
+    { title: "That's it", text: 'Now try Monitor, Room, Live view, Screenshots, Files, Type on Frame and Settings.',
       place: 'center', next: 'Explore' },
   ];
   let step = -1;
