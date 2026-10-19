@@ -22,6 +22,7 @@ from . import theme as T
 
 FPS = 18           # most redraws a second while the view moves
 SETTLE = 0.25      # seconds without movement before the full detail is drawn
+MAX_DRAG_BOX_FACES = 120  # more furniture sides than this: only their outlines while the view moves
 
 
 class RoomCanvas:
@@ -181,6 +182,8 @@ class RoomCanvas:
         data = {"grid": f.grid, "floor": [f.floor] if f.floor else [], "hidden": f.hidden_walls, "walls": f.walls,
                 "mesh": f.mesh, "wall_lines": f.wall_lines, "boxes": f.boxes, "box_lines": f.box_lines,
                 "marker": [f.marker] if f.marker else []}
+        if lod == "drag" and len(f.boxes) > MAX_DRAG_BOX_FACES:  # a room full of furniture: outlines while moving
+            data["boxes"] = []
         shapes = []
         for name, (kind, paint) in self.layers.items():
             if not data[name]:
