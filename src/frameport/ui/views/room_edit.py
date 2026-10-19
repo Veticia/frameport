@@ -61,13 +61,29 @@ def setting_text(key: str, value) -> str:
 
 # what the clean-up report's counts are called (scan.json "report"; unknown keys read as their name)
 def report_label(key: str) -> str:
-    return {"triangles": tr("Scan triangles"), "kept": tr("Kept"), "struct": tr("Wall, floor and ceiling surfaces"),
-            "near": tr("Cleared near walls"), "clip": tr("Outside the room"), "outside": tr("Outside the room"),
-            "island": tr("Small pieces"), "islands": tr("Small pieces"), "tubes": tr("Thin floating pieces"),
-            "erase": tr("Erased"), "erased": tr("Erased"), "walked": tr("Where you walked"),
-            "tops": tr("Flattened onto furniture tops"), "panels": tr("Flat panel triangles"),
-            "boxes": tr("Furniture boxes"), "removed_boxes": tr("Boxes removed"), "relabeled": tr("Boxes renamed"),
-            "ms": tr("Computed in (ms)")}.get(key, key.replace("_", " ").capitalize())
+    return {"triangles": tr("Scan triangles"), "kept": tr("Kept"), "structural": tr("Wall, floor and ceiling surfaces"),
+            "near_walls": tr("Cleared near walls"), "outside": tr("Outside the room"),
+            "small_pieces": tr("Small pieces"), "thin_pieces": tr("Thin floating pieces"), "erased": tr("Erased"),
+            "walked": tr("Where you walked"), "tops": tr("Flattened onto furniture tops"),
+            "panel_triangles": tr("Flat panel triangles"), "boxes": tr("Furniture boxes"),
+            "removed_boxes": tr("Boxes removed"), "relabelled": tr("Boxes renamed"),
+            "suggestions": tr("Door or closet suggestions"), "output_triangles": tr("Triangles in the room"),
+            "output_volumes": tr("Furniture boxes in the room")}.get(key, key.replace("_", " ").capitalize())
+
+
+# scan.json report keys that aren't counts (heights, flags: see report_notes) - docs/mr/ROOM_FORMAT.md
+REPORT_NOT_COUNTS = ("floor_y", "ceiling_y", "walked_skipped", "truncated", "version")
+
+
+def report_notes(report: dict | None) -> tuple[list[str], str]:
+    """(notes, warning) about a clean-up: the walked pass skipped (no head path), triangles cut off (the room's
+    triangle limit)."""
+    report = report or {}
+    notes = [tr("Where you walked: skipped, this scan has no head path")] if report.get("walked_skipped") else []
+    cut = report.get("truncated")
+    warning = tr("The cleaned-up scan had more triangles than a room can hold: {n} were left out.").format(
+        n=f"{cut:,}" if isinstance(cut, int) else cut) if cut else ""
+    return notes, warning
 
 
 def report_rows(report: dict | None) -> list[tuple[str, str]]:
@@ -76,6 +92,8 @@ def report_rows(report: dict | None) -> list[tuple[str, str]]:
 
     def walk(d, prefix=""):
         for k, v in d.items():
+            if k in REPORT_NOT_COUNTS:
+                continue
             if isinstance(v, dict):
                 walk(v, prefix)
             elif isinstance(v, bool) or v is None or isinstance(v, (list, str)):
@@ -88,8 +106,20 @@ def report_rows(report: dict | None) -> list[tuple[str, str]]:
 
 def _slider(lo, hi, step, value, on_change, width=None) -> ft.Slider:
     return ft.Slider(min=lo, max=hi, divisions=max(1, round((hi - lo) / step)), value=min(max(value, lo), hi),
-                     active_color=T.ACCENT, on_change=on_change, width=width,
-                     height=T.px(28))
+                     active_color=T.ACCENT, on_change=on_change, width=width, height=T.px(28),
+                     padding=ft.Padding(0, 0, 0, 0))  # the track spans the row: its ends under the label and value
+
+
+
+def _full(control: ft.Control) -> ft.Row:
+    """`control` across the whole content width (a full segmented() track)."""
+    return ft.Row([ft.Container(control, expand=True)])
+
+
+def _even(button: ft.Control) -> ft.Control:
+    """A button sharing its row equally with the others (same width and height)."""
+    button.expand = True
+    return button
 
 
 def _labelled(title: str, readout: ft.Text, control: ft.Control, help_key: str | None = None) -> ft.Column:
@@ -114,12 +144,12 @@ class CleanupCard:
         self.readouts: dict[str, ft.Text] = {}
         self.switches: dict[str, ft.Control] = {}
         self.preset = C.segmented([("recommended", tr("Recommended")), ("mine", tr("Your settings"))], "recommended",
-                                  self._preset)
+                                  self._preset, full=True)
         walls = rooms.REFINE_DEFAULTS["walls"]
         self.walls = C.segmented([(v, tr(label)) for v, label in walls["choices"]], self.values["walls"],
-                                 lambda v: self.set("walls", v))
+                                 lambda v: self.set("walls", v), full=True)
         keys = [k for k, m in rooms.REFINE_DEFAULTS.items() if m["key"] and m["kind"] == "number"]
-        visible = [_labelled(tr("Walls"), C.meta(""), ft.Row([self.walls]), "refine_walls")]
+        visible = [_labelled(tr("Walls"), C.meta(""), _full(self.walls), "refine_walls")]
         visible += [self._row(k) for k in keys]
         groups = []
         for group, title in rooms.REFINE_GROUPS:
@@ -137,10 +167,14 @@ class CleanupCard:
         self.progress.visible = False
         self.result_title = C.meta(tr("Last clean-up"))
         self.result = ft.Column([], spacing=T.px(2), tight=True)
-        self.result_box = ft.Container(ft.Column([self.result_title, self.result], spacing=T.S2, tight=True),
-                                       bgcolor=T.SURFACE_2, border_radius=T.RADIUS_SM, padding=T.S3, visible=False)
+        # (no inset: the counts end at the same edge as the slider values above)
+        self.result_notes = ft.Column([], spacing=T.px(2), tight=True)
+        self.result_warn = C.callout("", "warn")
+        self.result_warn.visible = False
+        self.result_box = ft.Column([ft.Divider(height=1, color=T.BORDER), self.result_title, self.result,
+                                     self.result_notes, self.result_warn], spacing=T.S2, tight=True, visible=False)
         self.control = C.card(ft.Column([
-            C.section(tr("Clean-up"), self.preset, *visible, self.more_btn, self.more,
+            C.section(tr("Clean-up"), _full(self.preset), *visible, self.more_btn, self.more,
                       ft.Row([self.apply_btn, ft.Container(self.state_text, expand=True)], spacing=T.S3,
                              vertical_alignment=ft.CrossAxisAlignment.CENTER),
                       self.progress, self.result_box, help="room_cleanup"),
@@ -238,11 +272,18 @@ class CleanupCard:
             rows = report_rows(report)
             self.result.controls = [ft.Row([ft.Container(C.meta(a), expand=True), C.body(b, T.TEXT)],
                                            spacing=T.S2) for a, b in rows]
-            self.result_box.visible = bool(rows)
+            notes, warning = report_notes(report)
+            self.result_notes.controls = [C.meta(n) for n in notes]
+            self.result_warn.visible = bool(warning)
+            if warning:  # (callout: icon, then the text's container)
+                self.result_warn.content.controls[1].content.value = warning
+            self.result_box.visible = bool(rows or notes or warning)
         return changed
 
 
 # ===================================================================================================== Labels
+LABEL_NAME_W = 72  # the Labels rows' first column (T.px)
+
 class LabelsCard:
     """What the label rules decided for each box the scanner found (scanner label -> label, and why), and door /
     closet suggestions with Add as door / Add as closet (into the box editor, saved with Save)."""
@@ -290,16 +331,20 @@ class LabelsCard:
 
     def _label_row(self, x: dict) -> ft.Control:
         src, dst = str(x.get("from") or ""), x.get("to")
-        if dst is None:
+        if x.get("suggest") in ("door", "closet"):  # a tall thin slab: see the suggestions above
+            change, color = (tr("→ door?") if x["suggest"] == "door" else tr("→ closet?")), T.OK
+        elif dst is None:
             change, color = tr("removed"), T.TEXT_3
         elif dst == src:
             change, color = tr("kept"), T.TEXT_2
         else:
             change, color = "→ " + _furniture_name(str(dst)), T.ACCENT
-        head = ft.Row([ft.Text(_furniture_name(src), color=T.TEXT if dst is not None else T.TEXT_3,
-                               weight=ft.FontWeight.W_600, size=T.T_BODY),
-                       ft.Text(change, color=color, size=T.T_BODY),
-                       ft.Container(expand=True), C.meta(self._size(x.get("box") or {}))],
+        # columns: the scanner's name (fixed width), what it became, the size at the right edge
+        head = ft.Row([ft.Container(ft.Text(_furniture_name(src), color=T.TEXT if dst is not None else T.TEXT_3,
+                                            weight=ft.FontWeight.W_600, size=T.T_BODY, no_wrap=True),
+                                    width=T.px(LABEL_NAME_W)),
+                       ft.Container(ft.Text(change, color=color, size=T.T_BODY), expand=True),
+                       C.meta(self._size(x.get("box") or {}))],
                       spacing=T.S2, vertical_alignment=ft.CrossAxisAlignment.CENTER)
         reason = str(x.get("reason") or "")
         return ft.Column([head] + ([C.meta(reason)] if reason else []), spacing=T.px(2), tight=True)
@@ -314,11 +359,11 @@ class LabelsCard:
                     C.body(text, T.TEXT, weight=ft.FontWeight.W_600), ft.Container(expand=True),
                     C.meta(self._size(x.get("box") or {}))], spacing=T.S2,
                    vertical_alignment=ft.CrossAxisAlignment.CENTER),
-            C.meta(tr("A tall, thin box by a wall: the scanner can't tell a door from a closet.")),
-            ft.Row([C.secondary(tr("Add as door"), ft.Icons.DOOR_FRONT_DOOR_ROUNDED,
-                                lambda e, s=x: editor.accept(s, "door")),
-                    C.secondary(tr("Add as closet"), ft.Icons.SHELVES,
-                                lambda e, s=x: editor.accept(s, "closet"))], spacing=T.S2, wrap=True),
+            C.meta(str(x.get("reason") or "") or
+                   tr("A tall, thin box by a wall: the scanner can't tell a door from a closet.")),
+            ft.Row([_even(C.secondary(tr("Add as door"), None, lambda e, s=x: editor.accept(s, "door"))),
+                    _even(C.secondary(tr("Add as closet"), None, lambda e, s=x: editor.accept(s, "closet")))],
+                   spacing=T.S2),
         ], spacing=T.S2, tight=True), bgcolor=T.soft(T.OK, 0.07), border=ft.Border.all(1, T.soft(T.OK, 0.3)),
             border_radius=T.RADIUS_SM, padding=T.S3)
 
@@ -330,6 +375,29 @@ BOX_FIELDS = (  # attribute, label, min, max, step, unit ("" = metres, "deg")
     ("w", "Width", 0.05, 4.0, 0.01, ""), ("d", "Depth", 0.05, 4.0, 0.01, ""), ("h", "Height", 0.02, 3.0, 0.01, ""))
 PLANE_FIELDS = (("along", "Along the wall", 0.0, 1.0, 0.01, "%"), ("bottom", "Bottom edge", 0.0, 2.0, 0.01, ""),
                 ("w", "Width", 0.3, 3.0, 0.01, ""), ("h", "Height", 0.2, 2.6, 0.01, ""))
+
+
+CONTROL_H = 44  # the editors' dropdowns and their Delete button share this height (T.px)
+
+
+def _picker(options, on_select) -> ft.Dropdown:
+    """A dropdown filling its row, as tall as the Delete button next to it."""
+    return C.dropdown(options=options, on_select=on_select, dense=True, expand=True,
+                      content_padding=ft.Padding(T.px(12), 0, T.px(8), 0))
+
+
+def _delete_button(on_click) -> ft.OutlinedButton:
+    btn = C.secondary(tr("Delete"), ft.Icons.DELETE_OUTLINE_ROUNDED, on_click)
+    btn.style.padding = ft.Padding(T.px(14), 0, T.px(14), 0)
+    btn.height = T.px(CONTROL_H)
+    return btn
+
+
+def _panel(rows: list[ft.Control]) -> ft.Container:
+    """The selected box's / door's editor: its rows across the whole width."""
+    return ft.Container(ft.Column(rows, spacing=T.S3, tight=True,
+                                  horizontal_alignment=ft.CrossAxisAlignment.STRETCH),
+                        bgcolor=T.SURFACE_2, border_radius=T.RADIUS_SM, padding=T.S3, visible=False)
 
 
 def field_label(name: str) -> str:
@@ -359,31 +427,25 @@ class FurnitureEditor:
         self.dirty = False
         # boxes
         self.box_list = ft.Column([], spacing=T.px(2), tight=True)
-        self.box_type = C.dropdown(options=[ft.DropdownOption(key=k, text=_furniture_name(k)) for k in R.VOLUME_LABELS],
-                                   on_select=lambda e: self._box_label(e.control.value), width=T.px(180))
+        self.box_type = _picker([ft.DropdownOption(key=k, text=_furniture_name(k)) for k in R.VOLUME_LABELS],
+                                lambda e: self._box_label(e.control.value))
         self.box_sliders: dict[str, ft.Slider] = {}
         self.box_readouts: dict[str, ft.Text] = {}
         rows = []
-        for attr, label, lo, hi, step, _unit in BOX_FIELDS:
+        for attr, label, lo, hi, step, _unit in BOX_FIELDS:  # one slider per row, the whole width
             self.box_readouts[attr] = C.body("", T.TEXT, weight=ft.FontWeight.W_600)
             self.box_sliders[attr] = _slider(lo if lo is not None else -5, hi if hi is not None else 5, step, 0,
                                              lambda e, a=attr: self._box_value(a, e.control.value))
-            rows.append(ft.Container(_labelled(field_label(label), self.box_readouts[attr], self.box_sliders[attr]),
-                                     col=12))
-        self.box_delete = C.ghost(tr("Delete"), ft.Icons.DELETE_OUTLINE_ROUNDED, self._delete)
-        self.box_panel = ft.Container(ft.Column([
-            ft.Row([self.box_type, ft.Container(expand=True), self.box_delete],
-                   vertical_alignment=ft.CrossAxisAlignment.CENTER),
-            ft.ResponsiveRow(rows, spacing=T.S3, run_spacing=T.S2)], spacing=T.S3, tight=True),
-            bgcolor=T.SURFACE_2, border_radius=T.RADIUS_SM, padding=T.S3, visible=False)
+            rows.append(_labelled(field_label(label), self.box_readouts[attr], self.box_sliders[attr]))
+        self.box_delete = _delete_button(self._delete)
+        self.box_panel = _panel([ft.Row([ft.Container(self.box_type, expand=True), self.box_delete],
+                                        spacing=T.S2, vertical_alignment=ft.CrossAxisAlignment.CENTER), *rows])
         self.add_box = C.secondary(tr("Add box"), ft.Icons.ADD_BOX_ROUNDED, self._add_box)
         # doors / windows
         self.plane_list = ft.Column([], spacing=T.px(2), tight=True)
-        self.plane_type = C.dropdown(options=[ft.DropdownOption(key=k, text=_furniture_name(k))
-                                              for k in R.PLANE_LABELS],
-                                     on_select=lambda e: self._plane_label(e.control.value), width=T.px(140))
-        self.plane_wall = C.dropdown(options=[], on_select=lambda e: self._plane_wall(e.control.value),
-                                     width=T.px(240))
+        self.plane_type = _picker([ft.DropdownOption(key=k, text=_furniture_name(k)) for k in R.PLANE_LABELS],
+                                  lambda e: self._plane_label(e.control.value))
+        self.plane_wall = _picker([], lambda e: self._plane_wall(e.control.value))
         self.plane_sliders: dict[str, ft.Slider] = {}
         self.plane_readouts: dict[str, ft.Text] = {}
         rows = []
@@ -391,14 +453,11 @@ class FurnitureEditor:
             self.plane_readouts[attr] = C.body("", T.TEXT, weight=ft.FontWeight.W_600)
             self.plane_sliders[attr] = _slider(lo, hi, step, lo,
                                                lambda e, a=attr: self._plane_value(a, e.control.value))
-            rows.append(ft.Container(_labelled(field_label(label), self.plane_readouts[attr],
-                                               self.plane_sliders[attr]), col=12))
-        self.plane_delete = C.ghost(tr("Delete"), ft.Icons.DELETE_OUTLINE_ROUNDED, self._delete)
-        self.plane_panel = ft.Container(ft.Column([
-            ft.Row([self.plane_type, self.plane_wall, self.plane_delete], wrap=True,
-                   spacing=T.S2, vertical_alignment=ft.CrossAxisAlignment.CENTER),
-            ft.ResponsiveRow(rows, spacing=T.S3, run_spacing=T.S2)], spacing=T.S3, tight=True),
-            bgcolor=T.SURFACE_2, border_radius=T.RADIUS_SM, padding=T.S3, visible=False)
+            rows.append(_labelled(field_label(label), self.plane_readouts[attr], self.plane_sliders[attr]))
+        self.plane_delete = _delete_button(self._delete)
+        self.plane_panel = _panel([ft.Row([ft.Container(self.plane_type, expand=True), self.plane_delete],
+                                          spacing=T.S2, vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                                   self.plane_wall, *rows])
         self.add_door = C.secondary(tr("Add door"), ft.Icons.DOOR_FRONT_DOOR_ROUNDED,
                                     lambda e: self._add_plane("DOOR_FRAME"))
         self.add_window = C.secondary(tr("Add window"), ft.Icons.WINDOW_ROUNDED,
@@ -658,7 +717,7 @@ class FurnitureEditor:
         self.save_btn.disabled = not self.dirty or bool(working)
         self.discard_btn.visible = self.dirty
         self.save_text.value = (tr("Saving…") if working == "save" else
-                                tr("Not saved yet") if self.dirty else "")
+                                tr("Not saved yet") if self.dirty else tr("No changes to save"))
         return [self.save_btn, self.discard_btn, self.save_text]
 
     def refresh(self, cached: dict, status: dict, room: dict | None) -> list[ft.Control]:
