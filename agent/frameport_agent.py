@@ -46,7 +46,7 @@ try:
 except ImportError:  # Windows: pc_revive loads this file for its VDF code only (GitHub #131)
     fcntl = None
 
-AGENT_VERSION = 103
+AGENT_VERSION = 108
 HOME = os.path.expanduser("~")
 STEAM = os.path.join(HOME, ".local/share/Steam")
 ANCHORS = os.path.join(HOME, "Applications/quest-frame")
@@ -4526,7 +4526,8 @@ def configure_install(args, prep, moved):
     if gamepad:
         ensure_podman_wrapper()
     config_sync = args.get("config_sync") if isinstance(args.get("config_sync"), dict) else {}
-    write_launcher(anchor, base, pkg, title, appid, lepton, args.get("env"), hw_video, gamepad, bool(config_sync), static_openxr)
+    write_launcher(anchor, base, pkg, title, appid, lepton, args.get("env"), hw_video, gamepad, bool(config_sync),
+                   static_openxr)
     art_in = os.path.join(base, "incoming-artwork")
     art_moved = False
     if args.get("consume_artwork") and os.path.isdir(art_in):

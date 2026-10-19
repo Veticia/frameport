@@ -863,7 +863,7 @@ need analysis/rewrite support before they can be patched.
 
 Both broker authorities become `org.fp_null.openxr.*`, causing provider lookup to
 fail and the loader to fall back to files even if a broker is later installed.
-Only the game's copy is changed. Agent v103 writes both manifest spellings into
+Only the game's copy is changed. Agent v108 writes both manifest spellings into
 `<base>/lepton-data/external` (the game's private `/sdcard`), records
 `static_openxr_loader` in deployment.json, and repairs them before every launch.
 Launcher upgrades preserve that repair. A configuration-only finalize also writes

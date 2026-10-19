@@ -6,9 +6,10 @@ from pathlib import Path
 
 import pytest
 from test_patches import _analysis
+
 from frameport.patches import base
 from frameport.patches.frame.adapter import needs_xrshim
-from frameport.patches.settings import adapter_settings, UI
+from frameport.patches.settings import UI, adapter_settings
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -54,8 +55,9 @@ def test_triage_only_offers_fix_for_offset_rects():
 
 
 def test_catalog_requires_app_with_the_fix(monkeypatch):
-    import frameport
     import yaml
+
+    import frameport
     from frameport.recommend.catalog import unusable_reason
     entry = yaml.safe_load((ROOT / "catalog/games/com.camouflaj.manta.yaml").read_text())
     assert entry["adapter"]["fixed_resolution"] == 1
