@@ -31,7 +31,7 @@ def test_box_corners_match_preview_svg():
     points = re.findall(r'<polygon points="([^"]+)" fill="#275772"', svg)[0].split()
     xs, zs = [x for x, _ in room.outline], [z for _, z in room.outline]
     scale = 440 / max(max(xs) - min(xs), max(zs) - min(zs))
-    back = [(min(xs) + (float(p.split(",")[0]) - 30) / scale, max(zs) - (float(p.split(",")[1]) - 30) / scale)
+    back = [(min(xs) + (float(p.split(",")[0]) - 30) / scale, min(zs) + (float(p.split(",")[1]) - 30) / scale)
             for p in points]
     ours = V.box_corners(0.5, -0.4, 30.0, 1.2, 0.6)
     assert ours == [pytest.approx(p, abs=0.01) for p in back]
