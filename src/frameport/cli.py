@@ -886,6 +886,42 @@ def room_scan(frame: Optional[str] = typer.Option(None, help=FRAME_HELP),
     typer.echo(json.dumps(rooms.scan(_target(frame).frame, seconds, wait, progress=progress, preview=preview), indent=2))
 
 
+@room_app.command("refine")
+def room_refine(frame: Optional[str] = typer.Option(None, help=FRAME_HELP),
+                set_: list[str] = typer.Option([], "--set", metavar="KEY=VALUE",
+                                                         help="a clean-up setting (repeatable), e.g. walls=snap; "
+                                                              "the others keep their saved value"),
+                reset: bool = typer.Option(False, "--reset", help="back to the recommended settings first"),
+                keep_edits: bool = typer.Option(True, "--keep-edits/--scan-boxes",
+                                                help="keep your own furniture and doors, or use the scan's boxes"),
+                list_: bool = typer.Option(False, "--list", help="print the settings and their ranges, then stop")):
+    """Clean up the saved room's scan again on the Frame (and keep the settings for the next scans)."""
+    from .install import rooms
+
+    if list_:
+        for key, meta in rooms.REFINE_DEFAULTS.items():
+            span = ("/".join(c for c, _ in meta["choices"]) if meta["kind"] == "choice" else "0/1"
+                    if meta["kind"] == "bool" else f"{meta['min']:g}..{meta['max']:g} step {meta['step']:g}")
+            typer.echo(f"{key:<12} default {meta['default']!s:<7} {span:<24} {meta['label']}")
+        return
+    target = _target(frame)
+    settings = None
+    if reset or set_:
+        saved = {} if reset else rooms.normalize_refine(rooms.status(target.frame).get("refine") or {})
+        for item in set_ or []:
+            key, sep, value = item.partition("=")
+            if not sep:
+                raise typer.BadParameter(f"expected KEY=VALUE, got {item!r}", param_hint="--set")
+            saved[key.strip()] = value.strip()
+        try:
+            settings = rooms.normalize_refine(saved)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc), param_hint="--set") from exc
+    result = rooms.refine(target.frame, settings, keep_edits=keep_edits)
+    typer.echo(json.dumps({k: result.get(k) for k in ("refine", "summary", "report", "labels", "suggestions",
+                                                      "room")}, indent=2))
+
+
 @room_app.command("show")
 def room_show(frame: Optional[str] = typer.Option(None, help=FRAME_HELP),
               output: Optional[Path] = typer.Option(None, help="SVG preview path")):

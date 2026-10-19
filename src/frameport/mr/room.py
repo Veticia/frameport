@@ -278,6 +278,113 @@ def summary(room: Room) -> dict:
             "ceiling_height": room.ceiling - room.floor}
 
 
+# ------------------------------------------------------------------------------------------ editing helpers
+VOLUME_LABELS = ("TABLE", "COUCH", "BED", "STORAGE", "SCREEN", "LAMP", "PLANT", "OTHER")
+PLANE_LABELS = ("DOOR_FRAME", "WINDOW_FRAME", "WALL_ART")
+PLANE_INSET = 0.01  # doors/windows sit this far in front of their wall (into the room)
+
+
+def new_id() -> str:
+    return _id()
+
+
+def nearest_wall(room: Room, x: float, z: float) -> dict | None:
+    """The wall closest to (x, z): index i, distance d, t (0..1 along it), length L, direction (ux, uz) and the
+    closest point (px, pz)."""
+    best = None
+    for i, w in enumerate(room.walls):
+        abx, abz = w.x1 - w.x0, w.z1 - w.z0
+        length = math.hypot(abx, abz)
+        if length < 1e-9:
+            continue
+        t = max(0.0, min(1.0, ((x - w.x0) * abx + (z - w.z0) * abz) / (length * length)))
+        px, pz = w.x0 + t * abx, w.z0 + t * abz
+        d = math.hypot(x - px, z - pz)
+        if best is None or d < best["d"]:
+            best = dict(i=i, d=d, t=t, L=length, ux=abx / length, uz=abz / length, px=px, pz=pz)
+    return best
+
+
+def plane_on_wall(room: Room, wall: int, along: float, bottom: float, w: float, h: float,
+                  label: str = "DOOR_FRAME", uuid: str | None = None) -> Plane:
+    """A door / window / wall-art plane on a wall (the cleanup page's planeGeom): `along` = 0..1 of the wall's length
+    for its middle (kept fully on the wall), `bottom` = metres above the floor. Meta's convention: bounds in local XY,
+    local +Z = the normal into the room."""
+    wl = room.walls[wall]
+    dx, dz = wl.x1 - wl.x0, wl.z1 - wl.z0
+    length = math.hypot(dx, dz)
+    ux, uz = dx / length, dz / length
+    nx, nz = -uz, ux
+    a = max(min(w / 2, length / 2), min(length - w / 2, along * length))
+    th = math.atan2(-uz, ux)  # about +Y: +X becomes the wall's direction, +Z its inward normal
+    return Plane(uuid or _id(), label, wl.x0 + ux * a + nx * PLANE_INSET, room.floor + bottom + h / 2,
+                 wl.z0 + uz * a + nz * PLANE_INSET, 0.0, math.sin(th / 2), 0.0, math.cos(th / 2), w, h)
+
+
+def plane_place(room: Room, plane: Plane) -> dict:
+    """Where a plane sits for the editor: wall (index of the nearest wall), along (0..1), bottom (m above the floor)."""
+    near = nearest_wall(room, plane.px, plane.pz)
+    if near is None:
+        return dict(wall=0, along=0.5, bottom=max(0.0, plane.py - plane.h / 2 - room.floor))
+    return dict(wall=near["i"], along=near["t"], bottom=max(0.0, plane.py - plane.h / 2 - room.floor))
+
+
+def plane_corners(plane: Plane) -> list[tuple[float, float, float]]:
+    """A plane's four corners (bottom left, bottom right, top right, top left, seen from the room)."""
+    th = 2 * math.atan2(plane.qy, plane.qw)  # (planes are upright: a turn about +Y)
+    ux, uz = math.cos(th), -math.sin(th)
+    hw, hh = plane.w / 2, plane.h / 2
+    x, y, z = plane.px, plane.py, plane.pz
+    return [(x - ux * hw, y - hh, z - uz * hw), (x + ux * hw, y - hh, z + uz * hw),
+            (x + ux * hw, y + hh, z + uz * hw), (x - ux * hw, y + hh, z - uz * hw)]
+
+
+def default_plane(room: Room, label: str) -> Plane:
+    """A new door (0.9 x 2.05 m from the floor) or window (1.2 x 1.2 m, 0.9 m up) in the middle of the first wall
+    the scan saw."""
+    wall = next((i for i, w in enumerate(room.walls) if w.label != "INVISIBLE_WALL_FACE"), 0)
+    door = label == "DOOR_FRAME"
+    return plane_on_wall(room, wall, 0.5, 0 if door else 0.9, 0.9 if door else 1.2, 2.05 if door else 1.2, label)
+
+
+def default_volume(room: Room) -> Volume:
+    """A new box: a 1.2 x 0.6 m table in the middle of the room."""
+    xs = [x for x, _ in room.outline]
+    zs = [z for _, z in room.outline]
+    return Volume(_id(), "TABLE", (min(xs) + max(xs)) / 2, (min(zs) + max(zs)) / 2, room.floor + 0.75, 0.0,
+                  1.2, 0.6, 0.75)
+
+
+def accept_suggestion(room: Room, suggestion: dict, kind: str) -> Volume | Plane:
+    """A scanner suggestion (a tall thin slab by a wall) as a door on that wall or as a closet against it (the
+    cleanup page's acceptSuggestion). Added to the room and returned."""
+    box = suggestion.get("box") or {}
+    cx, cz = float(box.get("cx", 0)), float(box.get("cz", 0))
+    w, d = float(box.get("w", 0.9)), float(box.get("d", 0.1))
+    h = float(box.get("h", 2.0))
+    top = float(box.get("top_y", room.floor + h))
+    width = max(w, d)
+    near = nearest_wall(room, cx, cz)
+    wall, along = (near["i"], near["t"]) if near else (0, 0.5)
+    if isinstance(suggestion.get("wall"), int) and 0 <= suggestion["wall"] < len(room.walls):
+        wall = suggestion["wall"]
+        along = float(suggestion.get("along", along))
+    if kind == "door":
+        plane = plane_on_wall(room, wall, along, 0.0, min(max(width, 0.8), 1.2), min(max(h, 1.95), 2.2), "DOOR_FRAME")
+        room.planes.append(plane)
+        return plane
+    wl = room.walls[wall]
+    length = math.hypot(wl.x1 - wl.x0, wl.z1 - wl.z0)
+    ux, uz = (wl.x1 - wl.x0) / length, (wl.z1 - wl.z0) / length
+    px, pz = wl.x0 + ux * along * length, wl.z0 + uz * along * length
+    nx, nz, depth = -uz, ux, 0.6  # against the wall, inside the room
+    height = min(top - room.floor, 2.4)
+    vol = Volume(_id(), "STORAGE", px + nx * depth / 2, pz + nz * depth / 2, room.floor + height,
+                 math.degrees(math.atan2(-uz, ux)), max(width, 0.6), depth, height)
+    room.volumes.append(vol)
+    return vol
+
+
 def preview_svg(room: Room) -> str:
     """Self-contained top-down preview; text labels are escaped, never interpreted as markup."""
     points = room.outline + room.play_area
