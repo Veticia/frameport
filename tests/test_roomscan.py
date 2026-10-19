@@ -54,9 +54,9 @@ def run(scanner, dump, directory, *args, success=True):
     return report
 
 
-def room(directory):
+def room(directory, name="room.txt"):
     records = {}
-    lines = (directory / "room.txt").read_text().splitlines()
+    lines = (directory / name).read_text().splitlines()
     assert lines[0] == "frameport-room 1"
     for line in lines:
         if not line or line.startswith("#"):
@@ -95,8 +95,8 @@ def assert_walls(polygon, expected):
                             (a[1] + b[1]) / 2 + .04 * dx / length, polygon)
 
 
-def mesh(directory):
-    data = (directory / "room-mesh.bin").read_bytes()
+def mesh(directory, name="room-mesh.bin"):
+    data = (directory / name).read_bytes()
     magic, version, nv, ni = struct.unpack_from("<4sIII", data)
     assert (magic, version) == (b"FPRM", 1)
     assert 0 < ni // 3 <= 200_000 and ni % 3 == 0
@@ -115,7 +115,8 @@ def test_box_room_geometry_furniture_and_wire_format(scanner, dumps, tmp_path):
     assert report["coverage_percent"] == 100
     assert abs(report["floor_y"]) < .05
     assert abs(report["ceiling_y"] - 2.6) < .05
-    records = room(tmp_path)
+    # The scanner's own output is kept as the raw files; room.txt + room-mesh.bin are refined (tests further down).
+    records = room(tmp_path, "room-raw.txt")
     assert records["universe"] == [["18446744073709551615"]]
     assert records["source"] == [["scan"]]
     assert_walls(outline(records), synth.BOX_OUTLINE)
@@ -131,8 +132,12 @@ def test_box_room_geometry_furniture_and_wire_format(scanner, dumps, tmp_path):
     ids = [row[0] for kind in ("room", "floor", "ceiling", "wall", "volume", "mesh") for row in records[kind]]
     assert len(ids) == len(set(ids))
     assert all(re.fullmatch("[0-9a-f]{32}", value) for value in ids)
-    vertices, indices = mesh(tmp_path)
-    assert records["mesh"][0][1:] == ["room-mesh.bin", str(len(vertices)), str(len(indices))]
+    vertices, indices = mesh(tmp_path, "room-mesh-raw.bin")
+    assert records["mesh"][0][1:] == ["room-mesh-raw.bin", str(len(vertices)), str(len(indices))]
+    refined = room(tmp_path)
+    assert [row[0] for row in refined["room"] + refined["floor"] + refined["wall"]] == \
+        [row[0] for row in records["room"] + records["floor"] + records["wall"]]  # same anchors as the raw room
+    assert refined["mesh"][0][1:3] == ["room-mesh.bin", str(len(mesh(tmp_path)[0]))]
     # Normals on the structural surfaces must face the room interior.
     correct = checked = 0
     for i in range(0, len(indices), 3):
@@ -350,11 +355,14 @@ def test_roomview_style_scan_retains_room_and_furniture(scanner, roomview_dump, 
     assert report["far_vertices"] > 1000
     assert report["detected_walls"] == 4
     assert abs(report["floor_y"]) < .05 and abs(report["ceiling_y"] - 2.6) < .05
-    records = room(tmp_path)
+    records = room(tmp_path, "room-raw.txt")
     assert_walls(outline(records), synth.BOX_OUTLINE)
     assert any(row[1] == "TABLE" and abs(float(row[4]) - .75) < .05 for row in records["volume"])
     assert any(row[1] == "COUCH" for row in records["volume"])
+    mesh(tmp_path, "room-mesh-raw.bin")
     mesh(tmp_path)
+    assert report["heads"] == 28  # the tracked frames' head path, for the walked-volume pass
+    assert len(json.loads((tmp_path / "scan.json").read_text())["heads"]) == 28
 
 
 def test_depth_discontinuity_is_rejected_below_absolute_edge_limit(scanner, dumps, tmp_path):
@@ -388,3 +396,228 @@ def test_small_ceiling_patch_does_not_override_default(scanner, dumps, tmp_path)
     report = run(scanner, path, tmp_path / "out", "--ceiling-default", "2.7")
     assert "ceiling not seen" in report["warnings"]
     assert abs(report["ceiling_y"] - report["floor_y"] - 2.7) < .001
+
+
+# --- Refinement + label rules (docs/mr/scan.md "Refinement") ---------------------------------------------------------
+
+def refine_only(scanner, directory, *args, success=True):
+    proc = subprocess.run([str(scanner), "--refine-only", str(directory), "--json", *args],
+                          text=True, capture_output=True, timeout=15)
+    assert proc.returncode == (0 if success else 2), proc.stdout + proc.stderr
+    report = json.loads(proc.stdout)
+    assert report["ok"] is success
+    return report
+
+
+def centroids(directory, name="room-mesh.bin"):
+    vertices, indices = mesh(directory, name)
+    return [[sum(vertices[indices[i + k]][a] for k in range(3)) / 3 for a in range(3)]
+            for i in range(0, len(indices), 3)]
+
+
+def in_box(c, box, pad=.06):
+    (cx, bottom, cz), (w, h, d) = box
+    return abs(c[0] - cx) <= w / 2 + pad and bottom - pad <= c[1] <= bottom + h + pad and abs(c[2] - cz) <= d / 2 + pad
+
+
+def masked(text, mesh_name=None):
+    text = re.sub(r"(?m)^time \d+", "time T", re.sub(r"[0-9a-f]{32}", "U", text))
+    return text.replace(f" {mesh_name} ", " MESH ") if mesh_name else text
+
+
+@pytest.fixture(scope="module")
+def clutter_dump(tmp_path_factory):
+    path = tmp_path_factory.mktemp("clutter") / "clutter.fprs"
+    synth.render(path, profile="legacy", extra=[synth.TUBE, synth.GHOST])
+    return path
+
+
+@pytest.fixture(scope="module")
+def box_scan(scanner, dumps, tmp_path_factory):
+    out = tmp_path_factory.mktemp("box-scan") / "room"
+    return out, run(scanner, dumps["box"], out)
+
+
+def test_floating_tube_and_walked_through_ghost_are_removed(scanner, clutter_dump, tmp_path):
+    report = run(scanner, clutter_dump, tmp_path / "default")["refine"]
+    raw, refined = centroids(tmp_path / "default", "room-mesh-raw.bin"), centroids(tmp_path / "default")
+    for box in (synth.TUBE, synth.GHOST):
+        assert sum(in_box(c, box) for c in raw) > 100  # the scanner meshed both
+        assert not any(in_box(c, box) for c in refined)
+    assert report["thin_pieces"] > 100 and report["walked"] > 100
+    # Each piece goes for its own reason: without the walked volume the ghost stays, without tubes the pole stays.
+    run(scanner, clutter_dump, tmp_path / "unwalked", "--walked", "0")
+    assert sum(in_box(c, synth.GHOST) for c in centroids(tmp_path / "unwalked")) > 100
+    run(scanner, clutter_dump, tmp_path / "untubed", "--tubes", "0")
+    assert sum(in_box(c, synth.TUBE) for c in centroids(tmp_path / "untubed")) > 100
+    # Real furniture survives: the table top is flattened onto its box, not removed.
+    assert any(in_box(c, synth.TABLE) and abs(c[1] - .75) < .06 for c in refined)
+
+
+def test_panels_wind_into_the_room_on_the_reestimated_planes(box_scan):
+    out, report = box_scan
+    refine = report["refine"]
+    assert refine["panel_triangles"] == 12  # four seen walls + floor and ceiling (two ears each)
+    vertices, indices = mesh(out)
+    records = room(out)
+    ceiling = float(records["ceiling"][0][1])
+    assert abs(ceiling - refine["ceiling_y"]) < 1e-4 and abs(ceiling - 2.6) < .05
+    assert all(float(w[6]) == ceiling for w in records["wall"])  # wall tops follow the re-estimated ceiling
+    panels = len(indices) // 3 - refine["panel_triangles"]
+    for t in range(panels, len(indices) // 3):
+        a, b, c = (vertices[indices[3 * t + k]] for k in range(3))
+        u, v = [b[k] - a[k] for k in range(3)], [c[k] - a[k] for k in range(3)]
+        normal = (u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0])
+        centroid = [(a[k] + b[k] + c[k]) / 3 for k in range(3)]
+        assert sum(n * (o - p) for n, o, p in zip(normal, (0, 1.3, 0), centroid, strict=True)) > 0
+        ys = {round(p[1], 4) for p in (a, b, c)}
+        assert ys <= {round(refine["floor_y"], 4), round(ceiling, 4)}
+
+
+def test_refine_only_reproduces_the_scan_and_refine_zero_is_the_old_output(scanner, dumps, box_scan, tmp_path):
+    out, report = box_scan
+    copy = tmp_path / "copy"
+    shutil.copytree(out, copy)
+    for name in ("room.txt", "room-mesh.bin"):
+        (copy / name).unlink()
+    again = refine_only(scanner, copy)
+    assert again["refine"] == report["refine"]
+    for name in ("room.txt", "room-mesh.bin", "scan.json", "room-raw.txt", "room-mesh-raw.bin"):
+        assert (copy / name).read_bytes() == (out / name).read_bytes(), name
+    # --refine 0 writes what the scanner wrote before refinement existed: its raw output, byte for byte.
+    plain = tmp_path / "plain"
+    run(scanner, dumps["box"], plain, "--refine", "0")
+    assert (plain / "room-mesh.bin").read_bytes() == (out / "room-mesh-raw.bin").read_bytes()
+    assert masked((plain / "room.txt").read_text(), "room-mesh.bin") == \
+        masked((out / "room-raw.txt").read_text(), "room-mesh-raw.bin")
+    # ... and switching refinement back on later gives the default output again (same anchors as its own raw room).
+    refine_only(scanner, plain)
+    assert (plain / "room-mesh.bin").read_bytes() == (out / "room-mesh.bin").read_bytes()
+    assert masked((plain / "room.txt").read_text()) == masked((out / "room.txt").read_text())
+
+
+def test_scan_json_holds_settings_report_and_heads(box_scan):
+    out, report = box_scan
+    scan = json.loads((out / "scan.json").read_text())
+    assert scan["version"] == 1 and len(scan["heads"]) == report["heads"] > 0
+    assert all(len(h) == 3 for h in scan["heads"])
+    assert scan["refine"] == {"refine": 1, "walls": "panels", "band": .35, "facing_deg": 60, "band_in": .12,
+                              "floor_in": .08, "ceil_in": .25, "top_strip": .5, "near": .03, "clip": .05,
+                              "clip_open": .1, "island": .2, "smooth": 8, "tops": .1, "protect": 0, "tubes": 3,
+                              "tube_thick": .15, "walked": .4, "label_rules": 1, "erase": []}
+    summary = dict(report["refine"])
+    assert summary.pop("output_triangles") == len(mesh(out)[1]) // 3 and summary.pop("output_volumes") == 2
+    assert summary == scan["report"]
+    assert scan["report"]["kept"] + scan["report"]["panel_triangles"] == len(mesh(out)[1]) // 3
+    assert sorted((label["from"], label["to"]) for label in scan["labels"]) == [("COUCH", "TABLE"), ("TABLE", "TABLE")]
+    assert scan["suggestions"] == []
+
+
+def test_head_path_is_decimated_to_two_thousand_points(scanner, dumps, tmp_path):
+    data = dumps["one"].read_bytes()
+    empty = b"".join(struct.pack("<d7fII", i, i * .001, 1.6, 0, 0, 0, 0, 1, 0, 0) for i in range(2500))
+    dump = tmp_path / "long.fprs"
+    dump.write_bytes(data + empty)
+    report = run(scanner, dump, tmp_path / "out", "--min-views", "1")  # one frame with depth, 2500 without
+    heads = json.loads((tmp_path / "out" / "scan.json").read_text())["heads"]
+    assert 1000 <= report["heads"] == len(heads) <= 2000
+    assert heads[-1][0] > 2  # still spans the whole recording
+
+
+def test_erase_spheres_remove_the_scan_inside_them(scanner, box_scan, tmp_path):
+    copy = tmp_path / "copy"
+    shutil.copytree(box_scan[0], copy)
+    report = refine_only(scanner, copy, "--erase", "-0.6,0.75,-0.25,0.3;1.5,1.0,-1.0,0.2")["refine"]
+    assert report["erased"] > 0
+    assert not any((c[0] + .6) ** 2 + (c[1] - .75) ** 2 + (c[2] + .25) ** 2 <= .09 for c in centroids(copy))
+    assert json.loads((copy / "scan.json").read_text())["refine"]["erase"] == [[-.6, .75, -.25, .3], [1.5, 1, -1, .2]]
+
+
+ROOM_IDS = iter(f"{i:032x}" for i in range(1, 1000))
+
+
+def volume(label, cx, cz, top, yaw, w, d, h):
+    return f"volume {next(ROOM_IDS)} {label} {cx} {cz} {top} {yaw} {w} {d} {h}\n"
+
+
+def test_label_rules_on_an_older_room_folder(scanner, tmp_path):
+    """Merged and nested boxes and boxes behind a wall go, shapes are relabelled, a door slab becomes a suggestion.
+    The folder has no raw files (an older scan): its room.txt + mesh are taken as the unrefined scan."""
+    walls = [(-2, -1.5, 2, -1.5), (2, -1.5, 2, 1.5), (2, 1.5, -2, 1.5), (-2, 1.5, -2, -1.5)]
+    plane = f"plane {next(ROOM_IDS)} DOOR_FRAME 0.0000 1.0000 1.4900 0.0000 0.0000 0.0000 1.0000 0.9000 2.0000\n"
+    text = (f"frameport-room 1\nuniverse 7\nsource scan\ntime 1\nroom {next(ROOM_IDS)}\nfloor {next(ROOM_IDS)} 0\n"
+            f"ceiling {next(ROOM_IDS)} 2.6\noutline 4 -2 -1.5 2 -1.5 2 1.5 -2 1.5\n"
+            + "".join(f"wall {next(ROOM_IDS)} {a} {b} {c} {d} 0 2.6\n" for a, b, c, d in walls)
+            + volume("TABLE", -1.2, -.5, .75, 0, 1.0, .6, .75)
+            + volume("COUCH", .6, -.5, .5, 0, 1.6, .8, .5)
+            + volume("OTHER", -.3, -.5, .8, 0, 3.0, 1.0, .8)        # holds the table and the couch: merged
+            + volume("BED", .6, .85, .55, 0, 2.0, 1.1, .55)
+            + volume("OTHER", .6, .85, .45, 0, .5, .4, .45)          # inside the bed: part of it
+            + volume("OTHER", 1.85, -.8, 1.6, -90, 1.0, .06, .6)     # a flat panel along the x = 2 wall: a screen
+            + volume("SCREEN", -1.0, -1.45, 2.0, 0, .9, .1, 2.0)     # a tall slab by the z = -1.5 wall: a door?
+            + volume("STORAGE", 2.6, 0, 1.5, 0, .5, .5, 1.5)         # behind a wall
+            + plane)
+    vertices, indices = [], []
+
+    def quad(a, b, c, d):
+        base = len(vertices)
+        vertices.extend((a, b, c, d))
+        indices.extend((base, base + 1, base + 2, base, base + 2, base + 3))
+    for i in range(18):  # the screen: a flat 0.9 x 0.5 m grid at x = 1.85
+        for j in range(10):
+            z, y = -1.25 + i * .05, 1.05 + j * .05
+            quad((1.85, y, z), (1.85, y, z + .05), (1.85, y + .05, z + .05), (1.85, y + .05, z))
+    for i in range(38):  # some floor
+        for j in range(28):
+            x, z = -1.9 + i * .1, -1.4 + j * .1
+            quad((x, 0, z), (x, 0, z + .1), (x + .1, 0, z + .1), (x + .1, 0, z))
+    text += f"mesh {next(ROOM_IDS)} room-mesh.bin {len(vertices)} {len(indices)}\n"
+    mesh_bytes = (struct.pack("<4sIII", b"FPRM", 1, len(vertices), len(indices))
+                  + b"".join(struct.pack("<3f", *v) for v in vertices) + struct.pack(f"<{len(indices)}I", *indices))
+    folder = tmp_path / "room"
+    folder.mkdir()
+    (folder / "room.txt").write_text(text)
+    (folder / "room-mesh.bin").write_bytes(mesh_bytes)
+    report = refine_only(scanner, folder)
+    assert "no raw files; the current room was taken as the unrefined scan" in report["warnings"]
+    assert "no head path; walked volume skipped" in report["warnings"]
+    assert (folder / "room-mesh-raw.bin").read_bytes() == mesh_bytes
+    scan = json.loads((folder / "scan.json").read_text())
+    decisions = [(label["from"], label["to"], label["reason"]) for label in scan["labels"]]
+    assert decisions == [
+        ("TABLE", "TABLE", "top 0.75 m"),
+        ("COUCH", "COUCH", "seat-height top 0.50 m, 1.6 m long"),
+        ("OTHER", None, "holds a table and a couch 1.8 m apart: several things merged"),
+        ("BED", "BED", "2.2 m², 2.0 m long, top 0.55 m"),
+        ("OTHER", None, "100% inside the bigger bed box: part of it"),
+        ("OTHER", "SCREEN", "thin, raised, screen-shaped, flat (0 cm)"),
+        ("SCREEN", None, "tall thin slab from the floor (2.00 m): a door or closet door?"),
+        ("STORAGE", None, "centre 60 cm outside the room (behind a wall)"),
+    ]
+    assert scan["suggestions"] == [{"kind": "door", "box": {"cx": -1, "cz": -1.45, "top_y": 2, "yaw_deg": 0,
+                                                            "w": .9, "d": .1, "h": 2}, "wall": 0, "along": .25,
+                                    "reason": decisions[6][2]}]
+    raw = room(folder, "room-raw.txt")
+    assert raw["mesh"][0][1] == "room-mesh-raw.bin" and len(raw["volume"]) == 8
+    refined = room(folder)
+    assert [row[1] for row in refined["volume"]] == ["TABLE", "COUCH", "BED", "SCREEN"]
+    assert refined["universe"] == [["7"]] and refined["plane"] == [plane.split()[1:]]  # unknown records stay
+    assert report["refine"]["removed_boxes"] == 4 and report["refine"]["relabelled"] == 1
+    assert report["refine"]["suggestions"] == 1
+    first = {name: (folder / name).read_bytes() for name in ("room.txt", "room-mesh.bin", "scan.json")}
+    refine_only(scanner, folder)  # now from the raw files: the same result
+    assert first == {name: (folder / name).read_bytes() for name in first}
+    refine_only(scanner, folder, "--label-rules", "0")
+    assert [row[1] for row in room(folder)["volume"]] == [
+        "TABLE", "COUCH", "OTHER", "BED", "OTHER", "OTHER", "SCREEN", "STORAGE"]
+
+
+@pytest.mark.parametrize("args", [("--walls", "shell"), ("--smooth", "1.5"), ("--erase", "1,2,3"), ("--refine", "2"),
+                                  ("--band", "2"), ("--walked", ".01"), ("--erase", "0,0,0,-1")])
+def test_invalid_refinement_options_are_json_errors(scanner, dumps, tmp_path, args):
+    run(scanner, dumps["one"], tmp_path / "out", *args, success=False)
+
+
+def test_refine_only_needs_a_room(scanner, tmp_path):
+    report = refine_only(scanner, tmp_path, success=False)
+    assert "room-raw.txt" in report["error"]

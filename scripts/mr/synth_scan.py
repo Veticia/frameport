@@ -12,6 +12,10 @@ BOX_OUTLINE = [(-2, -1.5), (2, -1.5), (2, 1.5), (-2, 1.5)]
 L_OUTLINE = [(-2, -2), (2, -2), (2, 0), (0, 0), (0, 2), (-2, 2)]
 TABLE = ((-.6, 0, -.25), (1.2, .75, .7))
 COUCH = ((.6, 0, .95), (1.6, .65, .65))
+# Clutter for the refinement tests: a thin pole floating in the air (a stereo streak) and a column where the user
+# stood (a "ghost" of the user's own body or a passer-by in the depth stream).
+TUBE = ((1.3, 1.35, -.5), (.12, .12, 1.4))
+GHOST = ((.35, .45, 0), (.3, .9, .3))
 ROOMVIEW_WIDTH, ROOMVIEW_HEIGHT = 132, 128
 ROOMVIEW_NEAR, ROOMVIEW_FAR = .3, 4.0
 
@@ -104,7 +108,7 @@ def cast(eye, direction, polygon, ceiling, furniture, missing_wall):
 def render(path: Path, *, shape="box", frames=30, width=None, height=None, noise=.004,
            holes=.025, smear=.012, floor_bias=.008, no_ceiling=False, seed=7,
            yaw=0.0, offset=(0.0, 0.0, 0.0), missing_wall=-1, objects=True, profile="roomview",
-           invalid_start=None, smoothing=3):
+           invalid_start=None, smoothing=3, extra=()):
     """Each frame has its own moving pose; no ground-truth room data is put in the dump."""
     rng = random.Random(seed)
     roomview = profile == "roomview"
@@ -113,7 +117,7 @@ def render(path: Path, *, shape="box", frames=30, width=None, height=None, noise
     invalid_start = (2 if roomview else 0) if invalid_start is None else invalid_start
     polygon = BOX_OUTLINE if shape == "box" else L_OUTLINE
     ceiling = 2.6
-    furniture = [TABLE, COUCH] if objects and shape == "box" else []
+    furniture = ([TABLE, COUCH] if objects and shape == "box" else []) + list(extra)
     rotation = (0, math.sin(yaw / 2), 0, math.cos(yaw / 2))
     rays = list(fan(width, height, roomview))
     with path.open("wb") as out:
