@@ -623,9 +623,11 @@ def reveal(box: ft.Container, on: bool) -> bool:
     return True
 
 
-def segmented(options: list[tuple[str, str]], value: str | None, on_change: Callable[[str], None]) -> ft.Container:
+def segmented(options: list[tuple[str, str]], value: str | None, on_change: Callable[[str], None],
+              full: bool = False) -> ft.Container:
     """A pill track of choices (one selected): the selected one is the portal fade in dual themes, else SURFACE_3.
-    Clicking restyles in place, then calls on_change(value)."""
+    Clicking restyles in place, then calls on_change(value). full = the track takes the whole width it gets, the
+    choices sharing it equally (put it in a stretching Column or a Row as an expanding child)."""
     items: dict[str, ft.Container] = {}
 
     def click(v):
@@ -640,8 +642,9 @@ def segmented(options: list[tuple[str, str]], value: str | None, on_change: Call
     for v, label in options:
         items[v] = ft.Container(ft.Text(label, size=T.T_META, weight=ft.FontWeight.W_600),
                                 padding=ft.Padding(T.px(12), T.px(6), T.px(12), T.px(6)), border_radius=T.px(20),
-                                on_click=click(v), ink=True, data=v)
-    track = ft.Container(ft.Row(list(items.values()), spacing=T.px(2), tight=True), padding=T.px(3),
+                                on_click=click(v), ink=True, data=v,
+                                **(dict(expand=True, alignment=ft.Alignment.CENTER) if full else {}))
+    track = ft.Container(ft.Row(list(items.values()), spacing=T.px(2), tight=not full), padding=T.px(3),
                          border_radius=T.px(22), border=ft.Border.all(1, T.BORDER), data=value)
     set_segmented(track, value)
     return track

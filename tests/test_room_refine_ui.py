@@ -122,6 +122,25 @@ def test_cli_room_refine(monkeypatch):
     assert result.exit_code == 0 and "facing_deg" in result.output and "Where you walked" in result.output
 
 
+def test_report_follows_the_scanner_keys():
+    from frameport.ui.views.room_edit import report_notes, report_rows
+
+    report = {"triangles": 1000, "kept": 800, "structural": 300, "near_walls": 5, "outside": 40, "small_pieces": 30,
+              "thin_pieces": 2, "erased": 0, "walked": 20, "tops": 9, "panel_triangles": 12, "truncated": 0,
+              "walked_skipped": True, "floor_y": -0.01, "ceiling_y": 2.5, "boxes": 6, "relabelled": 2,
+              "removed_boxes": 1, "suggestions": 1, "plane_shifts": [{"kind": "wall", "wall": 0, "shift": 0.02}]}
+    rows = dict(report_rows(report))
+    assert rows["Wall, floor and ceiling surfaces"] == "300" and rows["Cleared near walls"] == "5"
+    assert rows["Small pieces"] == "30" and rows["Thin floating pieces"] == "2"
+    assert rows["Flat panel triangles"] == "12" and rows["Boxes renamed"] == "2" and rows["Kept"] == "800"
+    assert not {"Floor y", "Ceiling y", "Walked skipped", "Truncated", "Plane shifts"} & set(rows)
+    notes, warning = report_notes(report)
+    assert notes == ["Where you walked: skipped, this scan has no head path"] and warning == ""
+    assert "1,234" in report_notes({"truncated": 1234})[1]
+    summary = dict(report_rows({"triangles": 9, "refine": {"output_triangles": 7, "output_volumes": 3}}))
+    assert summary["Triangles in the room"] == "7" and summary["Furniture boxes in the room"] == "3"
+
+
 # ------------------------------------------------------------------------------------------------ editing helpers
 def test_planes_on_walls_follow_the_cleanup_page():
     room = box_room(4, 3)  # walls run counter-clockwise; their inward normal is (-uz, ux)
