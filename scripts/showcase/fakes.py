@@ -114,6 +114,9 @@ class FakeRoom:
             self.room.mesh = Mesh(filename="room-mesh.bin", vertex_count=len(m.vertices), index_count=len(m.indices))
             self.mesh = write_mesh(m)
         self.text = dumps(self.room)
+        self.refine: dict = {}  # the saved clean-up settings (non-defaults)
+        self.edited = False
+        self.last_report = self.report()
         self._write()
 
     def _folder(self):
@@ -127,15 +130,45 @@ class FakeRoom:
             with open(os.path.join(self._folder(), self.room.mesh.filename), "wb") as f:
                 f.write(self.mesh)
 
+    # the scan clean-up (scan.json): what the label rules decided for the scanner's boxes, door / closet suggestions
+    LABELS = [
+        {"from": "COUCH", "to": "COUCH", "reason": "seat top 0.85 m, 2.2 m long by a wall: a couch",
+         "box": {"w": 2.2, "d": 0.9, "h": 0.85}},
+        {"from": "COUCH", "to": "TABLE", "reason": "top at 0.45 m and only 1.1 m long: a low table, not a couch",
+         "box": {"w": 1.1, "d": 0.6, "h": 0.45}},
+        {"from": "TABLE", "to": "SCREEN", "reason": "thin, raised 0.7 m, parallel to the wall, flat (1 cm): a screen",
+         "box": {"w": 1.4, "d": 0.12, "h": 0.8}},
+        {"from": "STORAGE", "to": "STORAGE", "reason": "1.8 m high and 0.4 m deep by a wall: storage",
+         "box": {"w": 1.2, "d": 0.4, "h": 1.8}},
+        {"from": "TABLE", "to": "TABLE", "reason": "top at 0.75 m: a table", "box": {"w": 1.2, "d": 0.7, "h": 0.75}},
+        {"from": "OTHER", "to": None, "reason": "0.6 m behind the wall: outside the room",
+         "box": {"w": 0.5, "d": 0.4, "h": 0.9}},
+        {"from": "TABLE", "to": None, "reason": "holds a couch and a table 1.4 m apart: several things merged",
+         "box": {"w": 3.1, "d": 1.6, "h": 0.8}}]
+    SUGGESTIONS = [{"kind": "door", "box": {"cx": 2.45, "cz": 0.9, "top_y": 2.05, "yaw_deg": 90, "w": 0.95, "d": 0.12,
+                                            "h": 2.05}, "wall": 1, "along": 0.72}]
+
+    def report(self, settings: dict | None = None) -> dict:
+        s = {**{"walked": 0.4, "smooth": 8, "island": 0.2, "walls": "panels"}, **(settings or {})}
+        removed = int(5200 * s["walked"]) + int(9000 * s["island"]) + (2400 if s["walls"] == "panels" else 600)
+        return {"triangles": 48210, "kept": 48210 - removed, "struct": 21480 if s["walls"] != "off" else 0,
+                "near": 310, "clip": 1840, "island": int(9000 * s["island"]), "tubes": 212,
+                "walked": int(5200 * s["walked"]), "tops": 640, "panels": 96 if s["walls"] == "panels" else 0}
+
     def status(self) -> dict:
         from frameport.mr.room import summary
 
         if self.text is None:
             return {"rooms": [], "universe": self.room.universe, "room": None, "room_text": None, "aligned": False,
-                    "default_circle": False, "scanner_installed": True}
+                    "default_circle": False, "scanner_installed": True, "refine": self.refine, "labels": [],
+                    "suggestions": [], "report": None}
+        scanned = self.room.source == "scan"
         return {"rooms": [], "universe": self.room.universe, "aligned": True, "default_circle": False,
                 "scanner_installed": True, "room_text": self.text,
-                "room": {"universe": self.room.universe, "source": self.room.source, "summary": summary(self.room)}}
+                "room": {"universe": self.room.universe, "source": self.room.source, "summary": summary(self.room)},
+                "refine": dict(self.refine), "report": self.last_report if scanned else None,
+                "labels": self.LABELS if scanned else [], "suggestions": self.SUGGESTIONS if scanned else [],
+                "raw": scanned, "edited": self.edited}
 
     def agent(self, command, **args):
         if command == "room_status":
@@ -160,6 +193,31 @@ class FakeRoom:
                          {"state": "recording", "directions": 7, "looked_up": 6, "looked_down": 2}]
                 self.scan.update(steps[min(self.polls - 1, len(steps) - 1)])
             return dict(self.scan)
+        if command == "room_refine":  # a clean-up takes a moment; the room's mesh stays the made-up one
+            from frameport.mr.room import dumps
+
+            time.sleep(5)
+            if args.get("settings") is not None:
+                self.refine = dict(args["settings"])
+            if not args.get("keep_edits", True):
+                self.edited = False
+            self.last_report = self.report(self.refine)
+            self.room.time += 1
+            self.text = dumps(self.room)
+            self._write()
+            return {"summary": {"refine": self.last_report}, **self.status()}
+        if command == "room_put":  # the box editor's Save
+            from pathlib import Path
+
+            from frameport.mr.room import dumps, parse
+            path = Path(args["path"])
+            self.room = parse(path.read_text())
+            if self.room.mesh:
+                self.mesh = (path.parent / self.room.mesh.filename).read_bytes()
+            self.text = dumps(self.room)
+            self.edited = bool(args.get("edited"))
+            self._write()
+            return {"room": {"universe": self.room.universe}}
         if command == "room_capture_stop":
             if self.scan.get("state") in ("waiting", "recording", "building"):
                 self.scan.update(state="failed", error="cancelled", cancelled=True)
@@ -193,6 +251,29 @@ class FakeFS:
                 os.utime(os.path.join(root, name), (t, t))
         self.shots = self._screenshots()
         self.room = FakeRoom(self.home)
+
+    def run(self, cmd: str):
+        """Only the room uploads' folder (rooms._upload_dir: mkdir -p / rm -rf below the room store)."""
+        import shlex
+        import shutil
+
+        rooms_dir = os.path.join(self.home, ".local/share/frameport/rooms")
+        words = shlex.split(cmd)
+        path = words[-1] if words else ""
+        if words[:2] == ["mkdir", "-p"] and path.startswith(rooms_dir):
+            os.makedirs(path, exist_ok=True)
+            return 0, "", ""
+        if words[:3] == ["rm", "-rf", "--"] and path.startswith(rooms_dir + "/.incoming-"):
+            shutil.rmtree(path, ignore_errors=True)
+            return 0, "", ""
+        raise AttributeError(f"fake Frame: no shell for {cmd!r}")
+
+    def put(self, local, remote, **kwargs):
+        import shutil
+
+        if not str(remote).startswith(os.path.join(self.home, ".local/share/frameport/rooms/.incoming-")):
+            raise AttributeError("fake Frame: uploads only for rooms")
+        shutil.copyfile(local, remote)
 
     def _screenshots(self) -> list[dict]:
         """Sample Steam screenshots for the Screenshots tab, two days, a few games + SteamVR. They are the games' own
@@ -598,6 +679,8 @@ def start_fake_scan(app: FramePortApp) -> None:
     from frameport.ui import room_state
 
     app.go("room")
+    if app.room_view is not None and app.room_view.root is not None:  # (back to the top after the editing cards)
+        app.page.run_task(app.room_view.root.scroll_to, offset=0, duration=0)
     room_state.operate(app, "capture")
     time.sleep(5)  # rooms.scan polls every 2 s
 
@@ -607,6 +690,44 @@ def cancel_fake_scan(app: FramePortApp) -> None:
 
     room_state.operate(app, "cancel")
     time.sleep(3)
+
+
+def show_room_editing(app: FramePortApp, which: str) -> None:
+    """The Room tab's editing cards (scrolled into view): cleanup (Clean-up with the key settings), more (+ More
+    settings), box (a box selected in the editor), doors (a door added on a wall), suggestion (the Labels card's door
+    suggestion taken), applied (other settings applied: the job runs, then the new counts)."""
+    view = app.room_view
+    if view is None or view.root is None:
+        open_room(app)
+        view = app.room_view
+    if which == "cleanup":
+        if view.cleanup.more.visible:
+            view.cleanup.toggle_more()
+    elif which == "more":
+        if not view.cleanup.more.visible:
+            view.cleanup.toggle_more()
+    elif which == "box":
+        if view.cleanup.more.visible:
+            view.cleanup.toggle_more()
+        view.editor.select(("box", 1))
+    elif which == "doors":
+        view.editor._add_plane("DOOR_FRAME")
+        view.editor._plane_value("along", 0.3)
+    elif which == "suggestion":
+        view.editor.accept(app.target.frame.room.SUGGESTIONS[0], "door")
+    elif which == "applied":
+        view.editor.discard()
+        view.cleanup.set("walls", "snap")
+        view.cleanup._slid("smooth", 4)
+        view.cleanup.apply()
+        time.sleep(0.6)
+        app.page.run_task(view.show_editing)
+        time.sleep(0.6)
+        return  # (the running clean-up: the next step shows its result)
+    elif which == "result":
+        time.sleep(6)
+    app.page.run_task(view.show_editing)
+    time.sleep(1.5)
 
 
 def show_room_state(app: FramePortApp, which: str) -> None:
