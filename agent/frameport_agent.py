@@ -4379,6 +4379,24 @@ ROOMS_DIR = os.path.join(HOME, ".local/share/frameport/rooms")
 ROOM_SCANNER = os.path.join(HOME, ".local/share/frameport/bin/fp_roomscan")
 ROOM_SYNC_LINE = ('python3 {agent_q} _room_sync {pkg_q} >"$app_dir/room-sync.log" 2>&1 9>&- || true '
                   '# frameport-room-sync')
+# Scan clean-up (fp_roomscan's refinement + label rules): the owner's tuned defaults are compiled into the scanner;
+# refine.json holds only the settings that differ from them (PC: install/rooms.REFINE_DEFAULTS, same keys).
+ROOM_REFINE_FILE = os.path.join(ROOMS_DIR, "refine.json")
+ROOM_REFINE_DEFAULTS = {
+    "refine": 1, "walls": "panels", "band": 0.35, "facing_deg": 60, "band_in": 0.12, "floor_in": 0.08,
+    "ceil_in": 0.25, "top_strip": 0.5, "near": 0.03, "clip": 0.05, "clip_open": 0.10, "island": 0.20, "smooth": 8,
+    "tops": 0.10, "protect": 0, "tubes": 3.0, "tube_thick": 0.15, "walked": 0.40, "label_rules": 1,
+}
+ROOM_REFINE_LIMITS = {  # key -> (lowest, highest)
+    "refine": (0, 1), "band": (0, 2), "facing_deg": (1, 89), "band_in": (0, 2), "floor_in": (0, 2), "ceil_in": (0, 2),
+    "top_strip": (0, 3), "near": (0, 2), "clip": (0, 10), "clip_open": (0, 10), "island": (0, 10), "smooth": (0, 50),
+    "tops": (0, 1), "protect": (0, 1), "tubes": (0, 50), "tube_thick": (0, 2), "walked": (0, 3), "label_rules": (0, 1),
+}
+ROOM_REFINE_INTS = ("refine", "smooth", "protect", "label_rules")
+# besides room.txt + its mesh + scan.log: the scanner's unrefined output and its clean-up report, and the player's
+# own furniture / door edits (kept over a new clean-up)
+ROOM_EXTRA_FILES = {"room-raw.txt": 8 * 1024 * 1024, "room-mesh-raw.bin": 64 * 1024 * 1024,
+                    "scan.json": 8 * 1024 * 1024, "edits.txt": 1024 * 1024}
 
 
 def room_universe(value):
@@ -4599,10 +4617,12 @@ def cmd_room_status(args):
             continue
     active = None
     text = None
+    info = {}
     if selected:
         with open(os.path.join(selected, "room.txt")) as f:
             text = f.read()
         active = room_records(text)
+        info = room_scan_info(selected)
     try:
         _, points = room_boundary(room_chaperone(), current)
         circle = room_default_circle(points)
@@ -4611,11 +4631,119 @@ def cmd_room_status(args):
     return {"rooms": sorted(rooms, key=lambda r: r["time"], reverse=True), "universe": current,
             "room": active, "room_text": text,
             "aligned": bool(active and current and active["universe"] == current),
-            "default_circle": circle, "scanner_installed": os.access(ROOM_SCANNER, os.X_OK)}
+            "default_circle": circle, "scanner_installed": os.access(ROOM_SCANNER, os.X_OK),
+            # scan clean-up: the saved settings (non-defaults), what the last clean-up used, did and decided
+            "refine": room_refine_load(), "refine_used": info.get("refine"), "report": info.get("report"),
+            "labels": info.get("labels") or [], "suggestions": info.get("suggestions") or [],
+            "raw": bool(selected and os.path.isfile(os.path.join(selected, "room-raw.txt"))),
+            "edited": bool(selected and os.path.isfile(os.path.join(selected, "edits.txt")))}
 
 
-def room_store(text, mesh=None, scan_log=None):
+def room_refine_settings(settings):
+    """Validated clean-up settings, only the keys that differ from the defaults ({} = the defaults)."""
+    import math
+    if not isinstance(settings, dict):
+        raise AgentError("clean-up settings must be an object")
+    out = {}
+    for key, value in settings.items():
+        if key not in ROOM_REFINE_DEFAULTS:
+            raise AgentError(f"unknown clean-up setting: {key}")
+        if key == "walls":
+            if value not in ("off", "snap", "panels"):
+                raise AgentError("walls must be off, snap or panels")
+        else:
+            if isinstance(value, bool):
+                value = int(value)
+            if not isinstance(value, (int, float)) or not math.isfinite(value):
+                raise AgentError(f"invalid clean-up setting: {key}")
+            lo, hi = ROOM_REFINE_LIMITS[key]
+            if not lo <= value <= hi:
+                raise AgentError(f"clean-up setting out of range: {key}")
+            if key in ROOM_REFINE_INTS:
+                if value != int(value):
+                    raise AgentError(f"{key} must be a whole number")
+                value = int(value)
+            else:
+                value = float(value)
+        if value != ROOM_REFINE_DEFAULTS[key]:
+            out[key] = value
+    return out
+
+
+def room_refine_load():
+    try:
+        with open(ROOM_REFINE_FILE) as f:
+            return room_refine_settings(json.load(f))
+    except (OSError, ValueError, AgentError):
+        return {}
+
+
+def room_refine_args(settings, erase=None):
+    """fp_roomscan options for the stored settings (only non-defaults: with none, an older scanner without the
+    clean-up still runs) and optional erase spheres [[x, y, z, r], ...] (or {x, y, z, r})."""
+    import math
+    args = []
+    for key, value in settings.items():
+        args += ["--" + key.replace("_", "-"), value if isinstance(value, str) else format(value, "g")]
+    if erase:
+        spots = []
+        for spot in erase:
+            if isinstance(spot, dict):
+                spot = [spot.get(k) for k in ("x", "y", "z", "r")]
+            if (not isinstance(spot, (list, tuple)) or len(spot) != 4
+                    or not all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+                               for v in spot) or spot[3] <= 0):
+                raise AgentError("invalid erase spot")
+            spots.append(",".join(format(float(v), ".4g") for v in spot))
+        if len(spots) > 500:
+            raise AgentError("too many erase spots")
+        args += ["--erase", ";".join(spots)]
+    return args
+
+
+def room_extras(folder):
+    """The extra files of a room folder (ROOM_EXTRA_FILES) as name -> bytes."""
+    out = {}
+    for name, limit in ROOM_EXTRA_FILES.items():
+        path = os.path.join(folder, name)
+        if os.path.isfile(path) and not os.path.islink(path):
+            with open(path, "rb") as f:
+                data = f.read(limit + 1)
+            if len(data) <= limit:
+                out[name] = data
+    return out
+
+
+def room_scan_info(folder):
+    """scan.json's clean-up settings, report, label decisions and door/closet suggestions ({} when there's none)."""
+    try:
+        with open(os.path.join(folder, "scan.json")) as f:
+            info = json.load(f)
+    except (OSError, ValueError, TypeError):
+        return {}
+    if not isinstance(info, dict):
+        return {}
+    out = {}
+    for key, kind in (("refine", dict), ("report", dict), ("labels", list), ("suggestions", list)):
+        if isinstance(info.get(key), kind):
+            out[key] = info[key]
+    return out
+
+
+def room_merge_edits(text, edits):
+    """The player's own furniture and doors/windows (volume + plane records) instead of the scanner's."""
+    keep = [line for line in text.splitlines() if line.split()[:1] not in (["volume"], ["plane"])]
+    mine = [line for line in edits.splitlines() if line.split()[:1] in (["volume"], ["plane"])]
+    merged = "\n".join(keep + mine) + "\n"
+    room_records(merged)
+    return merged
+
+
+def room_store(text, mesh=None, scan_log=None, extras=None):
     record = room_records(text)
+    for name in extras or {}:
+        if name not in ROOM_EXTRA_FILES:
+            raise AgentError(f"unexpected room file: {name}")
     if record.get("mesh"):
         if mesh is None:
             raise AgentError("room mesh sidecar is missing")
@@ -4641,6 +4769,9 @@ def room_store(text, mesh=None, scan_log=None):
             if scan_log:
                 with open(os.path.join(stage, "scan.log"), "w") as f:
                     f.write(scan_log)
+            for name, data in (extras or {}).items():
+                with open(os.path.join(stage, name), "wb") as f:
+                    f.write(data)
             shutil.rmtree(previous, ignore_errors=True)
             if os.path.isdir(dest):
                 os.rename(dest, previous)
@@ -4676,7 +4807,15 @@ def cmd_room_put(args):
             raise AgentError("linked mesh outside upload folder")
         with open(mesh_path, "rb") as f:
             mesh = f.read(64*1024*1024)
-    return {"room": room_store(text, mesh)}
+    extras = None
+    if args.get("edited"):
+        # the Room tab's furniture / door editor: the same room with the player's boxes. Keep the scan's raw files
+        # (a new clean-up starts from them) and remember the edits, so a new clean-up keeps them.
+        folder = os.path.join(ROOMS_DIR, room_universe(record["universe"]))
+        extras = room_extras(folder) if os.path.isdir(folder) and not os.path.islink(folder) else {}
+        extras["edits.txt"] = "".join(line + "\n" for line in text.splitlines()
+                                      if line.split()[:1] in (["volume"], ["plane"])).encode()
+    return {"room": room_store(text, mesh, extras=extras)}
 
 
 def cmd_room_delete(args):
@@ -4725,7 +4864,8 @@ def cmd_room_build(args):
         raise AgentError("Room scanner is not installed")
     universe = room_universe(args.get("universe", room_current_universe()))
     with tempfile.TemporaryDirectory(prefix=".build-", dir=ROOMS_DIR) as out:
-        result = subprocess.run([ROOM_SCANNER, "--offline", dump, "--out", out, "--universe", universe, "--json"],
+        result = subprocess.run([ROOM_SCANNER, "--offline", dump, "--out", out, "--universe", universe, "--json",
+                                 *room_refine_args(room_refine_load())],
                                 capture_output=True, text=True, timeout=300)
         if result.returncode:
             raise AgentError("Room scan failed: " + result.stderr[-4000:])
@@ -4748,8 +4888,68 @@ def cmd_room_build(args):
                 scan_log += "\n" + log.read()
         except OSError:
             pass
-        room_store(text, mesh, scan_log)
-    return {"report": report, **cmd_room_status({})}
+        room_store(text, mesh, scan_log, room_extras(out))
+    return {**cmd_room_status({}), "report": report}  # (the scanner's summary, not scan.json's)
+
+
+def cmd_room_refine(args):
+    """Clean up the saved room's scan again (fp_roomscan --refine-only on a copy of the room folder, from its raw
+    files), then publish it like room_store (games pick it up through room_sync).
+    settings: the clean-up settings to save (null = keep the saved ones); erase: [[x, y, z, r], ...] spheres of scan
+    to remove; keep_edits (default true): the player's own furniture / doors stay (false = back to the scan's)."""
+    settings = args.get("settings")
+    if settings is not None:
+        settings = room_refine_settings(settings)
+    else:
+        settings = room_refine_load()
+    options = room_refine_args(settings, args.get("erase"))
+    if args.get("settings") is not None:
+        os.makedirs(ROOMS_DIR, exist_ok=True)
+        _write_json(ROOM_REFINE_FILE, settings)
+    if not os.access(ROOM_SCANNER, os.X_OK):
+        raise AgentError("Room scanner is not installed")
+    selected = room_selected()
+    if not selected:
+        raise AgentError("No room saved yet")
+    with open(os.path.join(ROOMS_DIR, ".scan.lock"), "a") as lock:  # not while a scan builds a room
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise AgentError("A room scan is running. Try again when it has finished.") from None
+        with tempfile.TemporaryDirectory(prefix=".refine-", dir=ROOMS_DIR) as stage:
+            for name in os.listdir(selected):
+                path = os.path.join(selected, name)
+                if os.path.isfile(path) and not os.path.islink(path):
+                    shutil.copy2(path, os.path.join(stage, name))
+            result = subprocess.run([ROOM_SCANNER, "--refine-only", stage, *options, "--json"],
+                                    capture_output=True, text=True, timeout=300)
+            if result.returncode:
+                raise AgentError("Room clean-up failed: " + (result.stderr or result.stdout or "")[-4000:])
+            try:
+                summary = json.loads(result.stdout or "{}")
+            except ValueError:
+                summary = {}
+            with open(os.path.join(stage, "room.txt")) as f:
+                text = f.read()
+            record = room_records(text)
+            if str(record["universe"]) != os.path.basename(selected):
+                raise AgentError("Room clean-up returned the wrong universe")
+            extras = room_extras(stage)
+            edits = extras.get("edits.txt")
+            if edits is not None and not args.get("keep_edits", True):
+                del extras["edits.txt"]
+            elif edits is not None:
+                text = room_merge_edits(text, edits.decode("utf-8", "replace"))
+            mesh = None
+            if record.get("mesh"):
+                with open(os.path.join(stage, record["mesh"]["filename"]), "rb") as f:
+                    mesh = f.read()
+            scan_log = None
+            if os.path.isfile(os.path.join(stage, "scan.log")):
+                with open(os.path.join(stage, "scan.log"), errors="replace") as f:
+                    scan_log = f.read()
+            room_store(text, mesh, scan_log, extras)
+    return {"summary": summary if isinstance(summary, dict) else {}, **cmd_room_status({})}
 
 
 # --- RoomView 3D capture (docs/mr/PHASE0.md) -------------------------------------------------------------------
