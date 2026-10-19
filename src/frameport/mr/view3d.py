@@ -9,7 +9,7 @@ right and down. Walls and mesh triangles face into the room, so the walls neares
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from .room import Mesh, Room
 
@@ -33,6 +33,7 @@ class Face:
     normal: tuple[float, float, float]  # facing direction; the face is drawn when the camera is on this side
     kind: str = "wall"                  # wall | hidden_wall | box
     label: str = ""
+    index: int = -1                     # a box side: the volume's index in the room
 
 
 @dataclass
@@ -56,6 +57,8 @@ class Scene:
     lo: tuple[float, float, float] = (-1.0, 0.0, -1.0)
     hi: tuple[float, float, float] = (1.0, 2.5, 1.0)
     triangles: int = 0                                         # of the full mesh
+    planes: list[list[tuple[float, float, float]]] = field(default_factory=list)  # doors / windows (corners)
+    selected: list[tuple[tuple[float, float, float], tuple[float, float, float]]] = field(default_factory=list)
 
 
 # ------------------------------------------------------------------------------------------------ vector helpers
@@ -183,19 +186,7 @@ def prepare(room: Room, mesh: Mesh | None = None, budget: int = REST_BUDGET,
         sc.faces.append(Face([(w.x0, w.y0, w.z0), (w.x1, w.y0, w.z1), (w.x1, w.y1, w.z1), (w.x0, w.y1, w.z0)], n,
                              "hidden_wall" if w.label == "INVISIBLE_WALL_FACE" else "wall", w.label))
     sc.floor = [(x, y0, z) for x, z in room.outline]
-    for v in room.volumes:
-        foot = box_corners(v.cx, v.cz, v.yaw_deg, v.w, v.d)
-        top, bottom = v.top_y, v.top_y - v.h
-        lo_pts = [(x, bottom, z) for x, z in foot]
-        hi_pts = [(x, top, z) for x, z in foot]
-        center = (v.cx, (top + bottom) / 2, v.cz)
-        sides = [[lo_pts[i], lo_pts[(i + 1) % 4], hi_pts[(i + 1) % 4], hi_pts[i]] for i in range(4)]
-        for quad in sides + [hi_pts, lo_pts]:
-            mid = tuple(sum(p[k] for p in quad) / 4 for k in range(3))
-            sc.faces.append(Face(quad, _norm(_sub(mid, center)), "box", v.label))  # outwards
-        for i in range(4):
-            j = (i + 1) % 4
-            sc.box_edges += [(lo_pts[i], lo_pts[j]), (hi_pts[i], hi_pts[j]), (lo_pts[i], hi_pts[i])]
+    _add_furniture(sc, room)
     xs = [x for x, _ in room.outline]
     zs = [z for _, z in room.outline]
     lo, hi = [min(xs), y0, min(zs)], [max(xs), y1, max(zs)]
@@ -214,6 +205,75 @@ def prepare(room: Room, mesh: Mesh | None = None, budget: int = REST_BUDGET,
     for gz in range(math.floor(lo[2]), math.ceil(hi[2]) + 1):
         sc.grid.append(((math.floor(lo[0]), y0, gz), (math.ceil(hi[0]), y0, gz)))
     return sc
+
+
+def _box_quads(v):
+    foot = box_corners(v.cx, v.cz, v.yaw_deg, v.w, v.d)
+    top, bottom = v.top_y, v.top_y - v.h
+    lo_pts = [(x, bottom, z) for x, z in foot]
+    hi_pts = [(x, top, z) for x, z in foot]
+    sides = [[lo_pts[i], lo_pts[(i + 1) % 4], hi_pts[(i + 1) % 4], hi_pts[i]] for i in range(4)]
+    edges = []
+    for i in range(4):
+        j = (i + 1) % 4
+        edges += [(lo_pts[i], lo_pts[j]), (hi_pts[i], hi_pts[j]), (lo_pts[i], hi_pts[i])]
+    return sides + [hi_pts, lo_pts], edges, (v.cx, (top + bottom) / 2, v.cz)
+
+
+def _add_furniture(sc: Scene, room: Room, selected: tuple[str, int] | None = None) -> None:
+    from .room import plane_corners
+
+    for n, v in enumerate(room.volumes):
+        quads, edges, center = _box_quads(v)
+        for quad in quads:
+            mid = tuple(sum(p[k] for p in quad) / 4 for k in range(3))
+            sc.faces.append(Face(quad, _norm(_sub(mid, center)), "box", v.label, n))  # outwards
+        sc.box_edges += edges
+        if selected == ("box", n):
+            sc.selected = list(edges)
+    sc.planes = [plane_corners(p) for p in room.planes]
+    if selected and selected[0] == "plane" and 0 <= selected[1] < len(sc.planes):
+        c = sc.planes[selected[1]]
+        sc.selected = [(c[i], c[(i + 1) % 4]) for i in range(4)]
+
+
+def with_furniture(scene: Scene, room: Room, selected: tuple[str, int] | None = None) -> Scene:
+    """A copy of a prepared scene with the room's furniture boxes and doors / windows drawn anew (the box editor:
+    cheap, the walls and the reduced mesh are shared); selected = ("box", i) / ("plane", i) is outlined."""
+    sc = replace(scene, faces=[f for f in scene.faces if f.kind != "box"], box_edges=[], planes=[], selected=[])
+    _add_furniture(sc, room, selected)
+    return sc
+
+
+def _inside(poly, x, y) -> bool:
+    hit = False
+    for i, (ax, ay) in enumerate(poly):
+        bx, by = poly[i - 1]
+        if (ay > y) != (by > y) and x < ax + (bx - ax) * (y - ay) / (by - ay):
+            hit = not hit
+    return hit
+
+
+def pick(scene: Scene, cam: Camera, x: float, y: float) -> tuple[str, int] | None:
+    """What's under a click at screen (x, y): ("box", volume index) / ("plane", plane index), the nearest to the
+    camera, or None."""
+    pr = cam.frame()
+    best = None
+    for face in scene.faces:
+        if face.kind != "box":
+            continue
+        poly = pr.polygon(face.points)
+        if poly and _inside(poly, x, y):
+            d = pr.depth(face.points)
+            if best is None or d < best[0]:
+                best = (d, ("box", face.index))
+    for n, corners in enumerate(scene.planes):
+        poly = pr.polygon(corners)
+        if poly and _inside(poly, x, y):
+            d = pr.depth(corners) - 0.05  # a door in front of the box it's on
+            if best is None or d < best[0]:
+                best = (d, ("plane", n))
+    return best[1] if best else None
 
 
 # ------------------------------------------------------------------------------------------------ camera
@@ -355,10 +415,12 @@ class Frame2D:
     mesh: list[tuple[tuple[float, float], tuple[float, float]]] = field(default_factory=list)
     grid: list[tuple[tuple[float, float], tuple[float, float]]] = field(default_factory=list)
     marker: list[tuple[float, float]] | None = None  # where the play area's centre is, pointing forward (-Z)
+    planes: list[list[tuple[float, float]]] = field(default_factory=list)  # doors / windows
+    selected: list[tuple[tuple[float, float], tuple[float, float]]] = field(default_factory=list)
 
     @property
     def segments(self) -> int:
-        return len(self.wall_lines) + len(self.box_lines) + len(self.mesh) + len(self.grid)
+        return len(self.wall_lines) + len(self.box_lines) + len(self.mesh) + len(self.grid) + len(self.selected)
 
 
 def render(scene: Scene, cam: Camera, lod: str = "rest") -> Frame2D:
@@ -414,6 +476,14 @@ def render(scene: Scene, cam: Camera, lod: str = "rest") -> Frame2D:
                 if face_on[t]:
                     out.mesh.append((pu, pv))
                     break
+    for corners in scene.planes:
+        poly = pr.polygon(corners)
+        if poly:
+            out.planes.append(poly)
+    for a, b in scene.selected:
+        s = pr.segment(a, b)
+        if s:
+            out.selected.append(s)
     y = scene.floor[0][1] if scene.floor else 0.0
     tri = [(0.0, y, -0.35), (0.2, y, 0.15), (-0.2, y, 0.15)]
     out.marker = pr.polygon(tri)
