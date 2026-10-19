@@ -8,6 +8,7 @@ Quest builds are "installed" (the 8 largest).
 from __future__ import annotations
 
 import json
+import math
 import os
 import random
 import threading
@@ -30,61 +31,98 @@ def frame_state() -> dict:
         return {}
 
 
-def fake_room_mesh(room, cell: float = 0.25, seed: int = 7):
+def fake_room_mesh(room, cell: float = 0.2, seed: int = 7):
     """A made-up scan of `room`: its floor, walls and furniture as noisy triangle grids, wound like a real scan's
-    (counter-clockwise seen from inside the room)."""
-    from frameport.mr.room import Mesh
+    (counter-clockwise seen from inside the room). Like a real scan it has holes where the headset sees nothing:
+    the floor under furniture that stands on it, and window glass."""
+    from frameport.mr.room import Mesh, plane_corners
     from frameport.mr.view3d import box_corners
 
     rnd = random.Random(seed)
     verts, idx = [], []
 
-    def surface(o, u, v):  # o + s*u + t*v, normal = u x v
+    def surface(o, u, v, noise=0.012, keep=None):  # o + s*u + t*v, normal = u x v; keep(point) False = a hole
         lu = max(1, round((sum(c * c for c in u) ** 0.5) / cell))
         lv = max(1, round((sum(c * c for c in v) ** 0.5) / cell))
         base = len(verts)
         for i in range(lv + 1):
             for j in range(lu + 1):
-                n = 0.015 if 0 < i < lv and 0 < j < lu else 0.0
+                n = noise if 0 < i < lv and 0 < j < lu else 0.0
                 verts.append(tuple(o[k] + u[k] * j / lu + v[k] * i / lv + rnd.uniform(-n, n) for k in range(3)))
         for i in range(lv):
             for j in range(lu):
+                mid = tuple(o[k] + u[k] * (j + 0.5) / lu + v[k] * (i + 0.5) / lv for k in range(3))
+                if keep is not None and not keep(mid):
+                    continue
                 a = base + i * (lu + 1) + j
                 b, c, d = a + 1, a + lu + 1, a + lu + 2
                 idx.extend((a, b, d, a, d, c))
 
+    def inside(vol, x, z):  # (x, z) on the box's footprint
+        a = math.radians(vol.yaw_deg)
+        dx, dz = x - vol.cx, z - vol.cz
+        lx, lz = math.cos(a) * dx - math.sin(a) * dz, math.sin(a) * dx + math.cos(a) * dz
+        return abs(lx) < vol.w / 2 and abs(lz) < vol.d / 2
+
     y0 = room.floor
-    pts = room.outline
-    xs, zs = [x for x, _ in pts], [z for _, z in pts]
-    surface((min(xs), y0, max(zs)), (max(xs) - min(xs), 0, 0), (0, 0, min(zs) - max(zs)))  # floor, facing up
+    standing = [v for v in room.volumes if v.top_y - v.h - y0 < 0.05 and v.h > 0.3]  # on the floor, no gap below
+    windows = [plane_corners(p) for p in room.planes if p.label == "WINDOW_FRAME"]
+
+    def floor_seen(p):
+        return not any(inside(v, p[0], p[2]) for v in standing)
+
+    def wall_seen(p):  # not through a window's glass
+        for c in windows:
+            xs, ys, zs = [q[0] for q in c], [q[1] for q in c], [q[2] for q in c]
+            if (min(ys) + 0.05 < p[1] < max(ys) - 0.05 and min(xs) - 0.05 <= p[0] <= max(xs) + 0.05
+                    and min(zs) - 0.05 <= p[2] <= max(zs) + 0.05):
+                return False
+        return True
+
+    xs, zs = [x for x, _ in room.outline], [z for _, z in room.outline]
+    surface((min(xs), y0, max(zs)), (max(xs) - min(xs), 0, 0), (0, 0, min(zs) - max(zs)), 0.008,
+            floor_seen)  # floor, facing up
     for w in room.walls:
         if w.label == "INVISIBLE_WALL_FACE":
             continue
-        surface((w.x0, w.y0, w.z0), (w.x1 - w.x0, 0, w.z1 - w.z0), (0, w.y1 - w.y0, 0))  # facing into the room
+        surface((w.x0, w.y0, w.z0), (w.x1 - w.x0, 0, w.z1 - w.z0), (0, w.y1 - w.y0, 0), 0.012,
+                wall_seen)  # facing into the room
     for vol in room.volumes:
         c = box_corners(vol.cx, vol.cz, vol.yaw_deg, vol.w, vol.d)
         top, bottom = vol.top_y, vol.top_y - vol.h
+        soft = 0.03 if vol.label in ("BED", "COUCH") else 0.015  # (a duvet isn't flat)
         surface((c[0][0], top, c[0][1]), (c[3][0] - c[0][0], 0, c[3][1] - c[0][1]),
-                (c[1][0] - c[0][0], 0, c[1][1] - c[0][1]))  # top, facing up
+                (c[1][0] - c[0][0], 0, c[1][1] - c[0][1]), soft)  # top, facing up
         for i in range(4):
             a, b = c[i], c[(i + 1) % 4]
-            surface((a[0], bottom, a[1]), (0, top - bottom, 0), (b[0] - a[0], 0, b[1] - a[1]))  # facing out
+            surface((a[0], bottom, a[1]), (0, top - bottom, 0), (b[0] - a[0], 0, b[1] - a[1]), 0.012)  # facing out
     return Mesh(vertices=verts, indices=idx)
 
 
 def fake_room():
-    """The pretend Frame's scanned room: a 5 x 4 m living room with a couch, a table, a TV and shelves."""
-    from frameport.mr.room import Volume, box_room
+    """The pretend Frame's scanned room, made up from scratch (no real scan): a 3.6 x 3.2 m bedroom with a bed and a
+    nightstand under a wall-mounted TV, a closet, a desk with two monitors under the window, a door, a lamp and a
+    plant. Walls: 0 = the bed's (-Z, forward), 1 = right (+X), 2 = behind (+Z), 3 = the desk's and the door's (-X);
+    the 3D view looks at walls 0 and 3."""
+    from frameport.mr.room import Volume, box_room, plane_on_wall
 
-    room = box_room(5, 4, 2.6)
+    room = box_room(3.6, 3.2, 2.5)
     room.source, room.universe, room.time = "scan", 7, int(SHOTS_AT)
-    room.walls[1].label = "INVISIBLE_WALL_FACE"  # an open side (a doorway the scan closed)
+    room.walls = [type(w)(f"{0xa0 + i:032x}", w.x0, w.z0, w.x1, w.z1, w.y0, w.y1, w.label)
+                  for i, w in enumerate(room.walls)]  # (fixed ids: the same room in every render)
+    room.uuid, room.floor_uuid, room.ceiling_uuid = (f"{0xf0 + i:032x}" for i in range(3))
     vid = iter(f"{i:032x}" for i in range(1, 99))
-    room.volumes = [Volume(next(vid), "COUCH", -1.2, 1.3, 0.85, 0, 2.2, 0.9, 0.85),
-                    Volume(next(vid), "TABLE", -0.9, 0.1, 0.45, 0, 1.1, 0.6, 0.45),
-                    Volume(next(vid), "SCREEN", -1.0, -1.85, 1.5, 0, 1.4, 0.12, 0.8),
-                    Volume(next(vid), "STORAGE", 1.9, -1.4, 1.8, 90, 1.2, 0.4, 1.8),
-                    Volume(next(vid), "TABLE", 1.6, 1.2, 0.75, 20, 1.2, 0.7, 0.75)]
+    room.volumes = [Volume(next(vid), "BED", 0.6, -0.58, 0.55, 0, 1.45, 2.05, 0.55),
+                    Volume(next(vid), "SCREEN", 0.6, -1.55, 1.78, 0, 1.12, 0.07, 0.66),      # TV above the bed
+                    Volume(next(vid), "TABLE", -1.44, -0.25, 0.75, 90, 1.4, 0.7, 0.75),      # desk
+                    Volume(next(vid), "SCREEN", -1.6, -0.56, 1.2, 82, 0.6, 0.06, 0.36),      # monitors on it
+                    Volume(next(vid), "SCREEN", -1.6, 0.06, 1.2, 98, 0.6, 0.06, 0.36),
+                    Volume(next(vid), "STORAGE", -1.25, -1.3, 2.1, 0, 1.0, 0.6, 2.1),        # closet
+                    Volume(next(vid), "TABLE", -0.42, -1.38, 0.52, 0, 0.45, 0.4, 0.52),      # nightstand
+                    Volume(next(vid), "LAMP", -0.42, -1.42, 0.9, 0, 0.2, 0.2, 0.38),
+                    Volume(next(vid), "PLANT", 1.56, -1.37, 0.95, 0, 0.36, 0.36, 0.95)]      # in the corner
+    room.planes = [plane_on_wall(room, 3, 0.17, 0.0, 0.85, 2.05, "DOOR_FRAME", f"{0xd0:032x}"),
+                   plane_on_wall(room, 3, 0.58, 1.22, 1.05, 1.05, "WINDOW_FRAME", f"{0xd1:032x}")]
     return room
 
 
@@ -99,6 +137,7 @@ class FakeRoom:
         self.home = home
         self.scan: dict = {"state": "none"}
         self.polls = 0
+        self.mesh_triangles = 0
         if ROOM_DIR:
             from pathlib import Path
 
@@ -106,13 +145,17 @@ class FakeRoom:
             src = Path(ROOM_DIR)
             self.room = parse((src / "room.txt").read_text())
             self.mesh = (src / self.room.mesh.filename).read_bytes() if self.room.mesh else None
+            if self.room.mesh:
+                self.mesh_triangles = self.room.mesh.index_count // 3
         else:
             from frameport.mr.room import Mesh
 
             self.room = fake_room()
             m = fake_room_mesh(self.room)
-            self.room.mesh = Mesh(filename="room-mesh.bin", vertex_count=len(m.vertices), index_count=len(m.indices))
+            self.room.mesh = Mesh(uuid=f"{0xe0:032x}", filename="room-mesh.bin", vertex_count=len(m.vertices),
+                                  index_count=len(m.indices))
             self.mesh = write_mesh(m)
+            self.mesh_triangles = len(m.indices) // 3
         self.text = dumps(self.room)
         self.refine: dict = {}  # the saved clean-up settings (non-defaults)
         self.edited = False
@@ -130,37 +173,57 @@ class FakeRoom:
             with open(os.path.join(self._folder(), self.room.mesh.filename), "wb") as f:
                 f.write(self.mesh)
 
-    # the scan clean-up (scan.json): what the label rules decided for the scanner's boxes, door / closet suggestions
+    # the scan clean-up (scan.json, docs/mr/ROOM_FORMAT.md): what the label rules decided for each of the scanner's
+    # boxes (in its order; to = None: removed), and the door / closet suggestions (never applied by the scanner)
     LABELS = [
-        {"from": "COUCH", "to": "COUCH", "reason": "seat top 0.85 m, 2.2 m long by a wall: a couch",
-         "box": {"w": 2.2, "d": 0.9, "h": 0.85}},
-        {"from": "COUCH", "to": "TABLE", "reason": "top at 0.45 m and only 1.1 m long: a low table, not a couch",
-         "box": {"w": 1.1, "d": 0.6, "h": 0.45}},
-        {"from": "TABLE", "to": "SCREEN", "reason": "thin, raised 0.7 m, parallel to the wall, flat (1 cm): a screen",
-         "box": {"w": 1.4, "d": 0.12, "h": 0.8}},
-        {"from": "STORAGE", "to": "STORAGE", "reason": "1.8 m high and 0.4 m deep by a wall: storage",
-         "box": {"w": 1.2, "d": 0.4, "h": 1.8}},
-        {"from": "TABLE", "to": "TABLE", "reason": "top at 0.75 m: a table", "box": {"w": 1.2, "d": 0.7, "h": 0.75}},
-        {"from": "OTHER", "to": None, "reason": "0.6 m behind the wall: outside the room",
-         "box": {"w": 0.5, "d": 0.4, "h": 0.9}},
-        {"from": "TABLE", "to": None, "reason": "holds a couch and a table 1.4 m apart: several things merged",
-         "box": {"w": 3.1, "d": 1.6, "h": 0.8}},
-        {"from": "STORAGE", "to": None, "suggest": "door", "reason": "2.05 m high, 12 cm thin, flat on the wall",
-         "box": {"w": 0.95, "d": 0.12, "h": 2.05}}]
-    SUGGESTIONS = [{"kind": "door", "box": {"cx": 2.45, "cz": 0.9, "top_y": 2.05, "yaw_deg": 90, "w": 0.95, "d": 0.12,
-                                            "h": 2.05}, "wall": 1, "along": 0.72,
-                    "reason": "A tall, thin slab on the wall, 0.95 m wide: a door, or a closet's front"}]
+        {"from": "BED", "to": "BED", "reason": "flat top at 0.55 m, 2.05 x 1.45 m against a wall: a bed",
+         "box": {"w": 1.45, "d": 2.05, "h": 0.55}},
+        {"from": "TABLE", "to": "SCREEN", "reason": "7 cm thin, flat on the wall, 1.1 m above the floor: a screen",
+         "box": {"w": 1.12, "d": 0.07, "h": 0.66}},
+        {"from": "TABLE", "to": "TABLE", "reason": "top at 0.75 m by a wall: a desk",
+         "box": {"w": 1.4, "d": 0.7, "h": 0.75}},
+        {"from": "OTHER", "to": "SCREEN", "reason": "6 cm thin and upright, standing on a table: a screen",
+         "box": {"w": 0.6, "d": 0.06, "h": 0.36}},
+        {"from": "SCREEN", "to": "SCREEN", "reason": "upright on a table, facing the room: a screen",
+         "box": {"w": 0.6, "d": 0.06, "h": 0.36}},
+        {"from": "STORAGE", "to": "STORAGE", "reason": "2.1 m high and 0.6 m deep in a corner: storage",
+         "box": {"w": 1.0, "d": 0.6, "h": 2.1}},
+        {"from": "STORAGE", "to": "TABLE", "reason": "top at 0.52 m, 0.45 m wide by the bed: a nightstand",
+         "box": {"w": 0.45, "d": 0.4, "h": 0.52}},
+        {"from": "LAMP", "to": "LAMP", "reason": "0.38 m high, standing on a table: a lamp",
+         "box": {"w": 0.2, "d": 0.2, "h": 0.38}},
+        {"from": "PLANT", "to": "PLANT", "reason": "0.95 m high and round from above: a plant",
+         "box": {"w": 0.36, "d": 0.36, "h": 0.95}},
+        {"from": "OTHER", "to": None, "reason": "0.5 m behind the wall: outside the room",
+         "box": {"w": 0.6, "d": 0.4, "h": 0.8}},
+        {"from": "TABLE", "to": None, "reason": "only 3 cm above the floor: a rug, not furniture",
+         "box": {"w": 1.6, "d": 1.1, "h": 0.03}},
+        {"from": "STORAGE", "to": None, "suggest": "door", "reason": "2.0 m high, 10 cm thin, flat on the wall",
+         "box": {"w": 0.8, "d": 0.1, "h": 2.0}}]
+    SUGGESTIONS = [{"kind": "door", "box": {"cx": 1.75, "cz": 1.0, "top_y": 2.0, "yaw_deg": 90, "w": 0.8, "d": 0.1,
+                                            "h": 2.0}, "wall": 1, "along": 0.81,
+                    "reason": "A tall, thin slab on the wall, 0.8 m wide: a door, or a closet's front"}]
 
     def report(self, settings: dict | None = None) -> dict:
+        """scan.json's report (its keys: docs/mr/ROOM_FORMAT.md), consistent with the room's own mesh: `kept` is
+        the mesh's triangle count with the recommended settings, other settings remove more or less."""
         s = {**{"walked": 0.4, "smooth": 8, "island": 0.2, "walls": "panels"}, **(settings or {})}
-        removed = int(5200 * s["walked"]) + int(9000 * s["island"]) + (2400 if s["walls"] == "panels" else 600)
-        # scan.json's report keys (docs/mr/ROOM_FORMAT.md)
-        return {"triangles": 48210, "kept": 48210 - removed, "structural": 21480 if s["walls"] != "off" else 0,
-                "near_walls": 310, "outside": 1840, "small_pieces": int(9000 * s["island"]), "thin_pieces": 212,
-                "erased": 0, "walked": int(5200 * s["walked"]), "tops": 640,
-                "panel_triangles": 96 if s["walls"] == "panels" else 0, "truncated": 0, "walked_skipped": False,
-                "floor_y": 0.0, "ceiling_y": 2.6, "boxes": 7, "relabelled": 2, "removed_boxes": 2, "suggestions": 1,
-                "plane_shifts": [{"kind": "wall", "wall": 0, "shift": 0.02}]}
+
+        def removed(s):
+            return {"walked": int(1900 * s["walked"]), "small_pieces": int(3600 * s["island"]),
+                    "near_walls": 140 if s["walls"] == "panels" else 40}
+
+        now, default = removed(s), removed({"walked": 0.4, "island": 0.2, "walls": "panels"})
+        fixed = {"outside": 1260, "thin_pieces": 184, "erased": 0}
+        kept = self.mesh_triangles - (sum(now.values()) - sum(default.values()))
+        return {"triangles": self.mesh_triangles + sum(default.values()) + sum(fixed.values()), "kept": kept,
+                "structural": int(self.mesh_triangles * 0.62) if s["walls"] != "off" else 0, **now, **fixed,
+                "tops": 410, "panel_triangles": 64 if s["walls"] == "panels" else 0, "truncated": 0,
+                "walked_skipped": False, "floor_y": 0.0, "ceiling_y": 2.5,
+                "boxes": sum(1 for lb in self.LABELS if lb["to"]),
+                "relabelled": sum(1 for lb in self.LABELS if lb["to"] and lb["to"] != lb["from"]),
+                "removed_boxes": sum(1 for lb in self.LABELS if not lb["to"]),
+                "suggestions": len(self.SUGGESTIONS), "plane_shifts": [{"kind": "wall", "wall": 3, "shift": 0.02}]}
 
     def status(self) -> dict:
         from frameport.mr.room import summary

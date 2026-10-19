@@ -399,6 +399,17 @@ def _long_upload(session, package: str, seconds: float = 30.0, after: float = 2.
     app.jobs.submit(Job(f"Install {app._title(package)} on Frame", run, package, "install"))
 
 
+def _open_room(session) -> None:
+    """The Room tab with the pretend Frame's scanned room loaded and drawn (3D view, cards)."""
+    fakes.open_room(session.app)
+
+
+def _room_editing(session, which: str = "box") -> None:
+    """The Room tab's editing cards scrolled into view (fakes.show_room_editing: cleanup, more, box = a box selected,
+    doors, suggestion = the door suggestion taken)."""
+    fakes.show_room_editing(session.app, which)
+
+
 def _press_keys(session, text: str, gap: float = 0.28) -> None:
     """Keys typed on the Type on Frame tab (the pretend keyboard), one by one."""
     view = session.app.keyboard_view
@@ -414,4 +425,4 @@ HOOKS = {"fake_install": _fake_install, "wait_jobs": _wait_jobs, "held_install":
          "frame_asks": _frame_asks,
          "easter_eggs": _easter_eggs, "fps_dip": _fps_dip, "perfect_pacing": _perfect_pacing,
          "battery": _battery, "long_upload": _long_upload, "press_keys": _press_keys,
-         "monitor_settled": _monitor_settled}
+         "monitor_settled": _monitor_settled, "open_room": _open_room, "room_editing": _room_editing}

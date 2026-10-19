@@ -202,6 +202,10 @@ Mixed-reality games ask for your room: walls, furniture and its surfaces. **Room
   the scan again (**Back to the scan's boxes** under Labels drops them).
 - The free **Test Quest MR** app (Get Test Quest MR on the tab) shows what a game receives from your scan.
 
+![Room](images/room.png)
+
+![Room: a box picked to edit, and the labels of the clean-up](images/room-editing.png)
+
 ## Updating
 
 FramePort checks for a new version at start and every 6 hours. When there is one, the Library shows **Update now**:
