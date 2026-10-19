@@ -21,6 +21,7 @@
 #include <poll.h>
 #include "yuv_copy.h"
 #include "yuv_color.h"
+#include "hevc_profile.h"
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/opt.h>
@@ -35,7 +36,10 @@ int frameport_v4l2_export_frame(const AVFrame*);
 #include "dma_copy.h"
 
 namespace android {
-static const CodecProfileLevel hevc_profiles[]={{OMX_VIDEO_HEVCProfileMain,OMX_VIDEO_HEVCMainTierLevel62}};
+// Main 10 decodes in software (Iris on the Frame's kernel has no 10-bit
+// capture format) and is narrowed to the 8-bit outputs.
+static const CodecProfileLevel hevc_profiles[]={{OMX_VIDEO_HEVCProfileMain,OMX_VIDEO_HEVCMainTierLevel62},
+    {OMX_VIDEO_HEVCProfileMain10,OMX_VIDEO_HEVCMainTierLevel51}};
 // Android reports constrained AVC streams under their own profile values;
 // stock decoders list them so format-aware clients can match them.
 static const CodecProfileLevel avc_profiles[]={
@@ -57,7 +61,7 @@ struct DecoderKind {
 };
 static const DecoderKind kinds[]={
     {"OMX.frameport.hevc.decoder","video_decoder.hevc","video/hevc","hevc_v4l2m2m","hevc",
-        OMX_VIDEO_CodingHEVC,V4L2_PIX_FMT_HEVC,hevc_profiles,1,8192,8192},
+        OMX_VIDEO_CodingHEVC,V4L2_PIX_FMT_HEVC,hevc_profiles,2,8192,8192},
     {"OMX.frameport.avc.decoder","video_decoder.avc","video/avc","h264_v4l2m2m","h264",
         OMX_VIDEO_CodingAVC,V4L2_PIX_FMT_H264,avc_profiles,5,8192,8192},
     {"OMX.frameport.vp9.decoder","video_decoder.vp9","video/x-vnd.on2.vp9","vp9_v4l2m2m","vp9",
@@ -155,7 +159,7 @@ class FramePortVideo final : public SoftVideoDecoderOMXComponent {
     bool gpu_allowed=true;
     AVCodecContext *codec=nullptr;
     AVCodecParserContext *parser=nullptr;
-    AVFrame *frame=av_frame_alloc();
+    AVFrame *frame=av_frame_alloc(),*narrow=av_frame_alloc();
     uint8_t *config=nullptr;
     size_t config_size=0;
     bool failed=false,held=false,drained=false,replace_config=false,surface=false;
@@ -249,7 +253,7 @@ class FramePortVideo final : public SoftVideoDecoderOMXComponent {
     }
     int openCodec(const char *name,bool hardware) {
         const AVCodec *implementation=avcodec_find_decoder_by_name(name);
-        if(!implementation || !frame)return AVERROR(ENOMEM);
+        if(!implementation || !frame || !narrow)return AVERROR(ENOMEM);
         codec=avcodec_alloc_context3(implementation);
         if(!codec)return AVERROR(ENOMEM);
         const auto &input=editPortInfo(kInputPortIndex)->mDef.format.video;
@@ -273,10 +277,21 @@ class FramePortVideo final : public SoftVideoDecoderOMXComponent {
         int result=avcodec_open2(codec,implementation,&options);av_dict_free(&options);
         return result;
     }
-    bool openDecoder() {
+    bool openDecoder(const uint8_t *first,size_t first_size) {
         if(codec)return true;
         const auto &size=editPortInfo(kInputPortIndex)->mDef.format.video;
         int result=AVERROR(ENODEV);
+        // Iris accepts a Main 10 session but returns no pictures: decode
+        // anything beyond 8-bit Main in software. Parameter sets come as
+        // CODECCONFIG or in-band in the first access unit.
+        if(kind.coding==OMX_VIDEO_CodingHEVC && !prefer_software) {
+            int profile=config_size?hevc_profile(config,config_size):-1;
+            if(profile<0)profile=hevc_profile(first,first_size);
+            if(hevc_needs_software(profile)) {
+                ALOGW("HEVC profile %d is beyond Iris's 8-bit Main; using software decoding",profile);
+                prefer_software=true;
+            }
+        }
         if(size.nFrameWidth>kind.max_width || size.nFrameHeight>kind.max_height)
             ALOGW("%s %ux%u is above what Iris decodes (%ux%u); using software decoding",kind.mime,
                 (unsigned)size.nFrameWidth,(unsigned)size.nFrameHeight,kind.max_width,kind.max_height);
@@ -353,10 +368,30 @@ class FramePortVideo final : public SoftVideoDecoderOMXComponent {
         if(aspects.mRange==ColorAspects::RangeFull)return bt709?&frameport_full709_rgba:&kYvuJPEGConstants;
         return bt709?&kYvuH709Constants:&kYvuI601Constants;
     }
+    bool narrowTo8Bit() {
+        // Software Main 10 pictures are 10-bit planar; every output here is
+        // 8-bit, so round to 8 bits (no tone mapping for HDR transfers).
+        av_frame_unref(narrow);
+        narrow->format=AV_PIX_FMT_YUV420P;narrow->width=frame->width;narrow->height=frame->height;
+        int result=av_frame_get_buffer(narrow,64);
+        if(result>=0)result=av_frame_copy_props(narrow,frame);
+        if(result<0){fail(result,"10-bit picture conversion");return false;}
+        for(int plane=0;plane<3;plane++) {
+            int width=plane?(frame->width+1)/2:frame->width,height=plane?(frame->height+1)/2:frame->height;
+            for(int row=0;row<height;row++) {
+                const uint16_t *src=(const uint16_t*)(frame->data[plane]+row*frame->linesize[plane]);
+                uint8_t *dst=narrow->data[plane]+row*narrow->linesize[plane];
+                for(int x=0;x<width;x++){unsigned value=(src[x]+2u)>>2;dst[x]=value>255?255:value;}
+            }
+        }
+        av_frame_unref(frame);av_frame_move_ref(frame,narrow);
+        return true;
+    }
     bool outputFrame() {
         // Hardware errors are recovered in software. Software decoders
         // conceal damage themselves; output their picture as stock decoders do.
         if(frame->decode_error_flags && hardware_active)return recoverHardware("decoded picture");
+        if(frame->format==AV_PIX_FMT_YUV420P10LE && !narrowTo8Bit())return false;
         reportBitstreamColor();
         bool reset=false;
         handlePortSettingsChange(&reset,frame->width,frame->height,
@@ -591,7 +626,7 @@ protected:
                 if(codec)prepend_config=annexB();
                 consumeInput(info);continue;
             }
-            if(!openDecoder())return;
+            if(!openDecoder(header->pBuffer+header->nOffset,header->nFilledLen))return;
             if(header->nFilledLen) {
                 AVPacket *packet=av_packet_alloc();
                 if(!packet){fail(AVERROR(ENOMEM),"input packet");return;}
@@ -683,7 +718,7 @@ protected:
         surface=false;native_enabled=false;metadata=false;mOutputFormat=OMX_COLOR_FormatYUV420Planar;
         updatePortDefinitions(true,false);
     }
-    ~FramePortVideo() override {av_frame_free(&frame);av_parser_close(parser);gpu.clearBuffers();avcodec_free_context(&codec);av_freep(&config);clearHistory();}
+    ~FramePortVideo() override {av_frame_free(&frame);av_frame_free(&narrow);av_parser_close(parser);gpu.clearBuffers();avcodec_free_context(&codec);av_freep(&config);clearHistory();}
 public:
     FramePortVideo(const DecoderKind &type,const OMX_CALLBACKTYPE *callbacks,OMX_PTR appData,OMX_COMPONENTTYPE **component)
         :SoftVideoDecoderOMXComponent(type.name,type.role,type.coding,

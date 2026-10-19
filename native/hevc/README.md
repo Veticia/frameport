@@ -1,11 +1,18 @@
 # Shared hardware video decoding for Lepton
 
-`frameport_hevc.cpp` implements Android OMX decoders for HEVC Main, H.264
-(Constrained) Baseline/Main/(Constrained) High and VP9 Profile 0 using Iris
+`frameport_hevc.cpp` implements Android OMX decoders for HEVC Main and Main 10,
+H.264 (Constrained) Baseline/Main/(Constrained) High and VP9 Profile 0 using Iris
 stateful V4L2 through FFmpeg. Android reports constrained H.264 streams under
 separate profile values, so they are listed as stock decoders list them.
-These are 8-bit 4:2:0 decoders. Format-aware clients keep Android's existing
-codecs for Main10/HDR and protected content; clients selecting by MIME alone
+Output is 8-bit 4:2:0. HEVC Main 10 decodes in FFmpeg's software decoder inside
+the component and is rounded to 8 bits (no HDR tone mapping): Iris on the
+Frame's kernel (6.18) offers Main 10 only into its compressed `Q10C` capture
+format, and a Main 10 stream in an NV12 session returned no pictures, so the
+session hung and blocked later decoder starts in the app. `hevc_profile.h`
+reads the profile from the parameter sets (CODECCONFIG or the first access
+unit); streams beyond Main never open Iris. Measured on the Frame (software,
+4 threads): a 1080p Main 10 episode at 232 fps, a 4K Main 10 test clip at 72 fps.
+Protected content keeps Android's existing codecs; clients selecting by MIME alone
 must still respect the component's advertised profiles. Other codec types
 retain Android's existing codecs. Applications that explicitly select their
 own software decoder bypass this integration. Byte-buffer clients receive full-size
