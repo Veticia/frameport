@@ -183,6 +183,17 @@ Website owners: see [Install button](INSTALL_BUTTON.md).
   so stop it when you're done.
 - **Screenshots** shows the screenshots you took in the headset, sorted by game and day, to view or download.
 
+## Your room (mixed reality, experimental)
+
+Mixed-reality games ask for your room: walls, furniture and its surfaces. **Room** (in the sidebar) keeps it:
+
+- **Scan room in the headset**, then put the headset on with passthrough and look around for about a minute; the tab
+  shows how far the scan is. **Cancel scan** stops it and keeps your saved room. **Use my play area** makes walls from
+  the SteamVR play area instead (no furniture).
+- The room shows in 3D: drag to turn it, scroll to zoom, right-drag to move it, double-click to see all of it.
+  **Open full 3D view** shows every detail of the scan in your browser (a page on this PC only).
+- The free **Test Quest MR** app (Get Test Quest MR on the tab) shows what a game receives from your scan.
+
 ## Updating
 
 FramePort checks for a new version at start and every 6 hours. When there is one, the Library shows **Update now**:

@@ -59,7 +59,13 @@ Detailed device findings per game/issue: docs/DEVICE_NOTES.md (read before debug
     agent ends at EOF); sources and costs in docs/FRAME_RUNTIME.md "Monitoring sources"; game card (fps from
     FrameBridge pacing; End game = Steam's Exit game, then cmd_stop), tiles with `C.Sparkline` (Flet canvas, no charts
     extension), details, a pooled process table (Game / Steam & SteamVR / All; right-click: end / force kill / end
-    game; MON_CRITICAL needs force, MON_NEVER is refused)); settings; welcome; activity panel). Files, Screenshots and the Library share right-click menus
+    game; MON_CRITICAL needs force, MON_NEVER is refused)); room (`views/room.py`, persistent, "experimental" pill:
+    scan with progress + Cancel = agent v106 `room_capture_stop`, play area, delete; cache `ui/room_state.py` shared
+    with the Frame page's short card, mesh cached in `<data>/rooms-cache/<frame>/`; in-window 3D `ui/room3d.py`
+    RoomCanvas over `mr/view3d.py` (pure-Python projection, mesh reduced to ≤4k/≤1.5k edges at rest/moving, ≤18 fps
+    worker; each redraw sends NEW shape controls: changing a Points list made Flet diff it item by item, 0.3-1 s);
+    "Open full 3D view" = `mr/room_viewer.py` token server on 127.0.0.1 + hand-written WebGL `mr/viewer_page.py`,
+    stopped on disconnect/close; Test Quest MR tip = `mr.TESTER_*`); settings; welcome; activity panel). Files, Screenshots and the Library share right-click menus
     (one `ft.ContextMenu` per view, filled on right-click; on one of several selected items they act on the whole
     selection, `C.menu_targets`) and click-and-drag multi-select (`C.DragSelect`: pan start/end on the area + item
     hover events, which Flutter also sends with the button held; Flet can't report item positions, so no rubber band).
