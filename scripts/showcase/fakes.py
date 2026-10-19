@@ -18,6 +18,7 @@ from frameport.core.paths import user_data_dir
 from frameport.ui.app import FramePortApp
 
 FRAME_STATE = "showcase-frame.json"
+ROOM_DIR = None  # a folder with room.txt (+ its mesh) to serve as the pretend Frame's room instead of the made-up one
 SHOTS_AT = time.mktime((2026, 10, 4, 21, 40, 0, 0, 0, -1))  # the newest sample screenshot (local time)
 
 
@@ -27,6 +28,143 @@ def frame_state() -> dict:
         return json.loads((user_data_dir() / FRAME_STATE).read_text())
     except (OSError, ValueError):
         return {}
+
+
+def fake_room_mesh(room, cell: float = 0.25, seed: int = 7):
+    """A made-up scan of `room`: its floor, walls and furniture as noisy triangle grids, wound like a real scan's
+    (counter-clockwise seen from inside the room)."""
+    from frameport.mr.room import Mesh
+    from frameport.mr.view3d import box_corners
+
+    rnd = random.Random(seed)
+    verts, idx = [], []
+
+    def surface(o, u, v):  # o + s*u + t*v, normal = u x v
+        lu = max(1, round((sum(c * c for c in u) ** 0.5) / cell))
+        lv = max(1, round((sum(c * c for c in v) ** 0.5) / cell))
+        base = len(verts)
+        for i in range(lv + 1):
+            for j in range(lu + 1):
+                n = 0.015 if 0 < i < lv and 0 < j < lu else 0.0
+                verts.append(tuple(o[k] + u[k] * j / lu + v[k] * i / lv + rnd.uniform(-n, n) for k in range(3)))
+        for i in range(lv):
+            for j in range(lu):
+                a = base + i * (lu + 1) + j
+                b, c, d = a + 1, a + lu + 1, a + lu + 2
+                idx.extend((a, b, d, a, d, c))
+
+    y0 = room.floor
+    pts = room.outline
+    xs, zs = [x for x, _ in pts], [z for _, z in pts]
+    surface((min(xs), y0, max(zs)), (max(xs) - min(xs), 0, 0), (0, 0, min(zs) - max(zs)))  # floor, facing up
+    for w in room.walls:
+        if w.label == "INVISIBLE_WALL_FACE":
+            continue
+        surface((w.x0, w.y0, w.z0), (w.x1 - w.x0, 0, w.z1 - w.z0), (0, w.y1 - w.y0, 0))  # facing into the room
+    for vol in room.volumes:
+        c = box_corners(vol.cx, vol.cz, vol.yaw_deg, vol.w, vol.d)
+        top, bottom = vol.top_y, vol.top_y - vol.h
+        surface((c[0][0], top, c[0][1]), (c[3][0] - c[0][0], 0, c[3][1] - c[0][1]),
+                (c[1][0] - c[0][0], 0, c[1][1] - c[0][1]))  # top, facing up
+        for i in range(4):
+            a, b = c[i], c[(i + 1) % 4]
+            surface((a[0], bottom, a[1]), (0, top - bottom, 0), (b[0] - a[0], 0, b[1] - a[1]))  # facing out
+    return Mesh(vertices=verts, indices=idx)
+
+
+def fake_room():
+    """The pretend Frame's scanned room: a 5 x 4 m living room with a couch, a table, a TV and shelves."""
+    from frameport.mr.room import Volume, box_room
+
+    room = box_room(5, 4, 2.6)
+    room.source, room.universe, room.time = "scan", 7, int(SHOTS_AT)
+    room.walls[1].label = "INVISIBLE_WALL_FACE"  # an open side (a doorway the scan closed)
+    vid = iter(f"{i:032x}" for i in range(1, 99))
+    room.volumes = [Volume(next(vid), "COUCH", -1.2, 1.3, 0.85, 0, 2.2, 0.9, 0.85),
+                    Volume(next(vid), "TABLE", -0.9, 0.1, 0.45, 0, 1.1, 0.6, 0.45),
+                    Volume(next(vid), "SCREEN", -1.0, -1.85, 1.5, 0, 1.4, 0.12, 0.8),
+                    Volume(next(vid), "STORAGE", 1.9, -1.4, 1.8, 90, 1.2, 0.4, 1.8),
+                    Volume(next(vid), "TABLE", 1.6, 1.2, 0.75, 20, 1.2, 0.7, 0.75)]
+    return room
+
+
+class FakeRoom:
+    """The pretend Frame's room storage + scanner (agent room_* commands), files under its fake home like the real
+    agent's (rooms.export reads the mesh over the fake SFTP). A scan steps forward on every status poll and then
+    waits, so a screenshot finds it mid-scan; room_capture_stop cancels it."""
+
+    def __init__(self, home: str):
+        from frameport.mr.room import dumps, write_mesh
+
+        self.home = home
+        self.scan: dict = {"state": "none"}
+        self.polls = 0
+        if ROOM_DIR:
+            from pathlib import Path
+
+            from frameport.mr.room import parse
+            src = Path(ROOM_DIR)
+            self.room = parse((src / "room.txt").read_text())
+            self.mesh = (src / self.room.mesh.filename).read_bytes() if self.room.mesh else None
+        else:
+            from frameport.mr.room import Mesh
+
+            self.room = fake_room()
+            m = fake_room_mesh(self.room)
+            self.room.mesh = Mesh(filename="room-mesh.bin", vertex_count=len(m.vertices), index_count=len(m.indices))
+            self.mesh = write_mesh(m)
+        self.text = dumps(self.room)
+        self._write()
+
+    def _folder(self):
+        return os.path.join(self.home, ".local/share/frameport/rooms", str(self.room.universe))
+
+    def _write(self) -> None:
+        os.makedirs(self._folder(), exist_ok=True)
+        with open(os.path.join(self._folder(), "room.txt"), "w") as f:
+            f.write(self.text)
+        if self.mesh is not None and self.room.mesh:
+            with open(os.path.join(self._folder(), self.room.mesh.filename), "wb") as f:
+                f.write(self.mesh)
+
+    def status(self) -> dict:
+        from frameport.mr.room import summary
+
+        if self.text is None:
+            return {"rooms": [], "universe": self.room.universe, "room": None, "room_text": None, "aligned": False,
+                    "default_circle": False, "scanner_installed": True}
+        return {"rooms": [], "universe": self.room.universe, "aligned": True, "default_circle": False,
+                "scanner_installed": True, "room_text": self.text,
+                "room": {"universe": self.room.universe, "source": self.room.source, "summary": summary(self.room)}}
+
+    def agent(self, command, **args):
+        if command == "room_status":
+            return self.status()
+        if command == "room_delete":
+            self.text = None
+            return {"deleted": True}
+        if command == "room_from_boundary":
+            from frameport.mr.room import box_room, dumps
+            room = box_room(5, 4, 2.5)
+            room.source, room.universe = "boundary", self.room.universe
+            self.room, self.mesh, self.text = room, None, dumps(room)
+            self._write()
+            return {"room": {"source": "boundary"}}
+        if command == "room_capture":
+            self.scan, self.polls = {"state": "waiting", "started": time.time()}, 0
+            return {"started": True}
+        if command == "room_capture_status":
+            self.polls += 1
+            if self.scan.get("state") in ("waiting", "recording"):
+                steps = [{"state": "waiting"}, {"state": "recording", "directions": 3, "looked_up": 0},
+                         {"state": "recording", "directions": 7, "looked_up": 6, "looked_down": 2}]
+                self.scan.update(steps[min(self.polls - 1, len(steps) - 1)])
+            return dict(self.scan)
+        if command == "room_capture_stop":
+            if self.scan.get("state") in ("waiting", "recording", "building"):
+                self.scan.update(state="failed", error="cancelled", cancelled=True)
+            return {"stopped": [], "state": self.scan.get("state")}
+        raise RuntimeError(f"fake Frame: {command} not available")
 
 
 class FakeFS:
@@ -54,6 +192,7 @@ class FakeFS:
                 t = SHOTS_AT - 86400 * (2 + (i + j) % 5) - 3600 * ((i * 7 + j * 3) % 11)
                 os.utime(os.path.join(root, name), (t, t))
         self.shots = self._screenshots()
+        self.room = FakeRoom(self.home)
 
     def _screenshots(self) -> list[dict]:
         """Sample Steam screenshots for the Screenshots tab, two days, a few games + SteamVR. They are the games' own
@@ -135,6 +274,8 @@ class FakeFS:
             return {"shots": shots, "total": len(shots), "games": list(games.values())}
         if command == "take_screenshot":  # the Screenshots tab's button: a new shot of the running game
             return self.take_screenshot()
+        if command.startswith("room_"):
+            return self.room.agent(command, **args)
         if command == "saves_info":  # Restore saves…: what the Frame has now, and the copy from the last restore
             return {"package": args.get("package"), "files": 14, "bytes": 2_310_000, "skipped": [],
                     "running": False, "version": "1.0", "rollback": {"size": 812_000, "time": time.time() - 86400}}
@@ -160,6 +301,9 @@ class FakeFS:
                 import shutil
 
                 shutil.copyfile(remote, local)
+
+            def open(self, path, mode="r"):  # (rooms.export reads the room mesh)
+                return open(path, mode)  # noqa: SIM115
         return SFTP()
 
 
@@ -438,6 +582,64 @@ def open_monitor_details(app: FramePortApp) -> None:
         app.monitor_view.toggle_details()
 
 
+def open_room(app: FramePortApp) -> None:
+    """The Room tab, once its room has loaded and the canvas has drawn it."""
+    app.go("room")
+    for _ in range(40):
+        st = getattr(app, "_room_state", None) or {}
+        if st.get("model") is not None or st.get("model_error"):
+            break
+        time.sleep(0.25)
+    time.sleep(1.5)
+
+
+def start_fake_scan(app: FramePortApp) -> None:
+    """Scan room in the headset on the pretend Frame: it reaches 7 of 12 directions and waits there."""
+    from frameport.ui import room_state
+
+    app.go("room")
+    room_state.operate(app, "capture")
+    time.sleep(5)  # rooms.scan polls every 2 s
+
+
+def cancel_fake_scan(app: FramePortApp) -> None:
+    from frameport.ui import room_state
+
+    room_state.operate(app, "cancel")
+    time.sleep(3)
+
+
+def show_room_state(app: FramePortApp, which: str) -> None:
+    """none: the Room tab without a saved room; disconnected: its not-connected page; frame: the Frame page's room card
+    (scrolled into view) with the room back."""
+    from frameport.ui import room_state
+
+    fs = app.target.frame if app.target else None
+    if which == "none":
+        fs.room.saved_text = fs.room.text
+        fs.room.text = None
+        room_state.state(app, force=True)
+        app.go("room")
+        time.sleep(2)
+    elif which == "disconnected":
+        app.frame_state = "none"
+        app.go("room")
+    elif which == "frame":
+        app.frame_state = "connected"
+        fs.room.text = getattr(fs.room, "saved_text", None) or fs.room.text
+        room_state.state(app, force=True)
+        app.go("frame")
+        time.sleep(2)
+        view = app.switcher.content.content
+        try:
+            app.page.run_task(view.scroll_to, offset=T_SCROLL_TO_ROOM, duration=0)
+        except Exception:  # noqa: BLE001 - only for the picture
+            pass
+
+
+T_SCROLL_TO_ROOM = 520  # the Frame page's room card, below the device card and the readiness checklist
+
+
 LINUX_APPIMAGE = "linux.venera"  # --linux's packages
 LINUX_FOLDER = "linux.matineevr"
 
@@ -471,7 +673,9 @@ def install_fakes(game: str | None, monitor_session=None) -> None:
     """--fake-frame: never reach a real Frame (start-up auto-connect, discovery, the 30 s poll); Type on Frame and
     the Monitor stream are fakes. `game` = the Monitor's game card (with its artwork)."""
     from frameport.frame import keyboard, monitor
+    from frameport.install import rooms
 
+    rooms.ensure_scanner = rooms.ensure_prompts = lambda frame: None  # (the pretend Frame has its own scanner)
     keyboard.KeyboardSession = FakeKeyboardSession
     monitor.MonitorSession = monitor_session or FakeMonitorSession
     FakeMonitorSession.GAME = game

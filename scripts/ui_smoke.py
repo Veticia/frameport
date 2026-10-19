@@ -26,12 +26,16 @@ from showcase.fakes import (  # noqa: E402,F401
     LINUX_FOLDER,
     add_fake_linux_apps,
     attach_fake_frame,
+    cancel_fake_scan,
     fake_live_stream,
     fake_save_backups,
     install_fakes,
     open_monitor_details,
+    open_room,
     open_type_tab,
+    show_room_state,
     start_fake_install,
+    start_fake_scan,
     stop_fake_live,
 )
 
@@ -138,6 +142,11 @@ def main() -> int:
              ("live", lambda a: a.go("live")), ("live-streaming", fake_live_stream),
              ("keyboard", lambda a: (stop_fake_live(a), a.go("keyboard"))),
              ("monitor", lambda a: a.go("monitor")), ("monitor-details", open_monitor_details),
+             # the Room tab (--fake-frame: a made-up scanned room; a scan steps forward and waits, then is cancelled)
+             ("room", open_room), ("room-scanning", start_fake_scan), ("room-cancelled", cancel_fake_scan),
+             ("room-none", lambda a: show_room_state(a, "none")),
+             ("room-disconnected", lambda a: show_room_state(a, "disconnected")),
+             ("room-frame-card", lambda a: show_room_state(a, "frame")),
              ("tools", lambda a: a.go("settings")),
              # the index on the left: "This PC" scrolls the page there
              ("settings-index", lambda a: a.page.run_task(a.settings_view.show_section, "pc")),
@@ -546,26 +555,6 @@ def main() -> int:
             app = FramePortApp(page)
             if args.fake_frame:
                 attach_fake_frame(app)
-                # The Room card uses local fixtures too; --fake-frame never contacts a headset.
-                from frameport.mr.room import box_room, dumps, summary
-                room = box_room(4, 3)
-                room.source, room.universe = "scan", 7
-                room_answer = dict(rooms=[], universe=7, room=dict(universe=7, source="scan", summary=summary(room)),
-                                   room_text=dumps(room), aligned=True, default_circle=False, scanner_installed=True)
-                original_agent = app.target.frame.agent
-                def room_agent(command, **kwargs):
-                    if command == "room_capture":
-                        return {"error": "not implemented yet"}
-                    if command == "room_delete":
-                        room_answer.update(room=None, room_text=None, aligned=False)
-                    if command == "room_from_boundary":
-                        room.source = "boundary"
-                        room_answer.update(room=dict(universe=7, source="boundary", summary=summary(room)),
-                                           room_text=dumps(room), aligned=True)
-                    if command.startswith("room_"):
-                        return dict(room_answer)
-                    return original_agent(command, **kwargs)
-                app.target.frame.agent = room_agent
 
         except Exception:  # noqa: BLE001
             ERRORS.append("startup: " + traceback.format_exc())
