@@ -1519,7 +1519,7 @@
  "Scales every controller vibration the game asks for (0-1): plain vibrations, Meta's amplitude envelopes and PCM buffers. For games whose vibrations feel much stronger than on a Quest.": "",
  "Scan": "",
  "Scan a folder…": "",
- "Scan cancelled. Your saved room hasn't changed.": "",
+ "Scan canceled. Your saved room hasn't changed.": "",
  "Scan room in the headset": "",
  "Scan when requested": "",
  "Scan your room and look at it in 3D.": "",

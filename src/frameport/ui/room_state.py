@@ -212,7 +212,7 @@ def operate(app, action: str) -> None:
             else:
                 {"boundary": rooms.from_boundary, "delete": rooms.delete}[action](target.frame)
         except rooms.ScanCancelled:
-            app.toast(tr("Scan cancelled. Your saved room hasn't changed."))
+            app.toast(tr("Scan canceled. Your saved room hasn't changed."))
         except Exception as exc:  # noqa: BLE001
             app.toast(explain(exc), error=True)
         finally:

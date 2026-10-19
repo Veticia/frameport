@@ -191,7 +191,7 @@ def test_cancel_goes_to_the_agent(tmp_path, monkeypatch):
         raise rooms.ScanCancelled("cancelled")
     monkeypatch.setattr(rooms, "scan", cancelled)
     RS.operate(app, "capture")
-    assert app.toasts[-1].startswith("Scan cancelled") and not app._room_state["working"]
+    assert app.toasts[-1].startswith("Scan canceled") and not app._room_state["working"]
 
 
 def test_scan_line_wording():
