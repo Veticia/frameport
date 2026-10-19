@@ -209,8 +209,8 @@ def build_roomscan(tc: Path):
     run([tc / "bin/clang", "--target=aarch64-linux-gnu", "-ffreestanding", "-nostdlib", "-nostdlibinc", "-static",
          "-fno-stack-protector", "-fno-builtin", "-ffp-contract=off", "-fno-math-errno", "-O2", "-Wall", "-Wextra", "-Werror",
          "-fuse-ld=lld", "-Wl,--build-id=none", "-Wl,-z,max-page-size=65536", "-e", "_start",
-         f"-ffile-prefix-map={HERE}=native", "main.c", "fusion.c", "model.c", "mesh.c", "platform.c",
-         "-o", out / "fp_roomscan"], cwd=src)
+         f"-ffile-prefix-map={HERE}=native", "main.c", "fusion.c", "model.c", "mesh.c", "refine.c", "rules.c",
+         "roomio.c", "platform.c", "-o", out / "fp_roomscan"], cwd=src)
 
 
 OCULUSHMD_IMPORTS = ("CreateEventW", "CreateJobObjectW", "AssignProcessToJobObject", "QueryInformationJobObject",

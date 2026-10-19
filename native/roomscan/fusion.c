@@ -52,6 +52,19 @@ void warn(Scan *s, const char *m)
     for (int i = 0; i < s->nwarnings; i++) if (same(s->warnings[i],m)) return;
     if (s->nwarnings < 24) s->warnings[s->nwarnings++] = m;
 }
+/* The head path (where the user stood and walked) for the refinement's walked-volume pass. Bounded: every
+ * head_stride-th tracked frame, halving the kept points and doubling the stride when the buffer is full. */
+static void record_head(Scan *s, Vec eye)
+{
+    if(!s->head_stride) s->head_stride=1;
+    if(s->head_frames++%s->head_stride) return;
+    if(s->nheads==MAX_HEADS) {
+        for(int i=0;i<MAX_HEADS/2;i++) s->heads[i]=s->heads[2*i];
+        s->nheads=MAX_HEADS/2;s->head_stride*=2;
+        if((s->head_frames-1)%s->head_stride) return;
+    }
+    s->heads[s->nheads++]=eye;
+}
 static u32 u32le(const u8 *p) { return (u32)p[0]|(u32)p[1]<<8|(u32)p[2]<<16|(u32)p[3]<<24; }
 static float f32le(const u8 *p) { union { u32 u; float f; } v = {u32le(p)}; return v.f; }
 /* 1 = complete, 0 = clean EOF, -1 = I/O error or partial record. */
@@ -207,6 +220,7 @@ const char *read_dump(Scan *s, int fuse)
         for (int i = 3; i < 7; i++) norm += pose[i]*pose[i];
         if (!finite(norm) || ab(norm-1) > QUATERNION_NORM_TOLERANCE) invalid=1;
         if(!invalid) for (int i = 3; i < 7; i++) pose[i] /= root(norm);
+        if(!fuse && !invalid) record_head(s,vec(pose[0],pose[1],pose[2]));
         u32 nv = u32le(header+36), ni = u32le(header+40);
         if (nv > MAX_FRAME_VERTICES || ni > MAX_FRAME_INDICES || ni%3 || (!nv && ni)) {
             error = "invalid frame counts"; break;
