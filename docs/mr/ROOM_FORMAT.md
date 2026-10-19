@@ -65,8 +65,39 @@ float32 xyz[vertex_count], u32 indices[index_count]   (triangles; counter-clockw
 ```
 Coordinates in STAGE space. Kept below 200k triangles (decimated).
 
+## Raw files and scan.json (scanner sidecars)
+`fp_roomscan` refines its output by default (docs/mr/scan.md "Refinement"). `room.txt` + `room-mesh.bin` are always
+the refined room (what games and the GUI read; the contract above is unchanged). Next to them:
+- `room-raw.txt` + `room-mesh-raw.bin`: the scanner's unrefined output in the same formats (its `mesh` record names
+  `room-mesh-raw.bin`). Same UUIDs as the refined room.txt, so anchors stay the same when the room is refined again.
+  The refined room differs in: the ceiling height (re-estimated from the scan, wall tops follow it), the volumes
+  (after the label rules) and the mesh. Records the scanner doesn't model (e.g. `plane`) are copied verbatim.
+- `scan.json` (UTF-8 JSON, `version` 1):
+  ```
+  {"version": 1,
+   "heads": [[x, y, z], ...],          # head path of the recording (STAGE), <= 2000 points, decimated evenly
+   "refine": {"refine": 1, "walls": "panels", "band": 0.35, ..., "erase": [[x, y, z, r], ...]},
+                                       # every refinement setting used (keys = the CLI options, docs/mr/scan.md)
+   "report": {"triangles", "kept", "structural", "near_walls", "outside", "small_pieces", "thin_pieces",
+              "erased", "walked", "tops", "panel_triangles", "truncated", "walked_skipped", "floor_y",
+              "ceiling_y", "boxes", "relabelled", "removed_boxes", "suggestions",
+              "plane_shifts": [{"kind": "wall"|"floor"|"ceiling", "wall": i, "shift": m}, ...]},
+   "labels": [{"from": "COUCH", "to": "TABLE"|null, "reason": "top 0.69 m", "suggest": "door"|"closet" (optional),
+               "id": "<volume uuid>", "box": {"cx", "cz", "top_y", "yaw_deg", "w", "d", "h"}}, ...],
+                                       # one per scanner volume, in room-raw.txt order; to = null: removed
+   "suggestions": [{"kind": "door"|"closet", "box": {...}, "wall": i, "along": t, "reason": "..."}, ...]}
+                                       # tall thin slabs; never applied by the scanner. wall = index of the nearest
+                                       # wall record in room-raw.txt, along = 0..1 position on it (from x0,z0)
+  ```
+  `report` counts triangles of the raw mesh per pass (`panel_triangles` are added ones), `wall` in `plane_shifts`
+  indexes the wall records. Readers ignore unknown keys.
+- `fp_roomscan --refine-only <dir>` re-runs only the refinement from these files (an older folder without them:
+  its room.txt + mesh are copied to the raw names first). Publishing order: [raw mesh, raw text,] `scan.json`,
+  `room-mesh.bin`, `room.txt`.
+
 ## Where the files live
-- Frame: `~/.local/share/frameport/rooms/<universe>/room.txt` + `room-mesh.bin` (+ `scan.log`).
+- Frame: `~/.local/share/frameport/rooms/<universe>/room.txt` + `room-mesh.bin` (+ `scan.log`, the raw files and
+  `scan.json` above).
   `~/.local/share/frameport/rooms/current` = symlink to the newest room's folder.
 - Per game: launch.sh copies the current universe's room (else `current`) to `<app_dir>/room.txt` (+ mesh) before
   Lepton starts, next to `settings.conf`; FrameBridge reads `dirname($FRAMEBRIDGE_CONFIG)/room.txt`. No room ->

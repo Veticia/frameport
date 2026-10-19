@@ -2,7 +2,9 @@
 
 `fp_roomscan` converts recorded FPRS v1 meshes to the [room contract](ROOM_FORMAT.md), including the optional
 wall label adopted from upstream commit `8cb2783`:
-`room.txt` and `room-mesh.bin`. It does not capture RoomView queues, contact a headset, install rooms, or modify
+`room.txt` and `room-mesh.bin`, refined by default (see "Refinement" below), plus the unrefined `room-raw.txt` +
+`room-mesh-raw.bin` and `scan.json` (head path, settings, per-pass report, label decisions, door/closet
+suggestions; ROOM_FORMAT.md "Raw files and scan.json"). It does not capture RoomView queues, contact a headset, install rooms, or modify
 the current-room symlink. Scanner work changes `native/roomscan/`, its build target and artifact/checksum,
 `scripts/mr/synth_scan.py`, `tests/test_roomscan.py`, and this note. The upstream contract commit also brings its
 existing prompt assets and renderer unchanged. No runtime, agent, patch, or analysis versions were bumped.
@@ -17,7 +19,7 @@ python native/build.py --only roomscan
 
 The result is `artifacts/linux-arm64-bin/fp_roomscan`, a static aarch64 Linux ELF with its own `_start`, raw Linux
 syscalls, and no interpreter, dynamic section, libc, libm, UAPI headers, generated tables, or new dependencies.
-`platform.h` is the reconstruction code's entire I/O/allocation boundary. The same five C sources compile on the
+`platform.h` is the reconstruction code's entire I/O/allocation boundary. The same eight C sources compile on the
 host:
 
 ```sh
@@ -34,8 +36,13 @@ exactly one JSON summary, whether `--json` is supplied or omitted. Success exits
 {"ok":true,"frames":30,"skipped_frames":0,"far_vertices":0,"discontinuity_triangles":0,
  "walls":4,"detected_walls":4,"volumes":2,"floor_y":-0.0023,
  "ceiling_y":2.5992,"coverage_percent":100.0,"hint_used":false,"triangles":70997,
- "accepted_triangles":118804,"rejected_triangles":704,"warnings":[],
- "timings_ms":{"read":0,"fusion":0,"model":0,"mesh":0,"total":0}}
+ "accepted_triangles":118804,"rejected_triangles":704,"heads":28,
+ "refine":{"triangles":70997,"kept":7159,"structural":46121,"near_walls":148,"outside":0,"small_pieces":38,
+  "thin_pieces":0,"erased":0,"walked":203,"tops":1896,"panel_triangles":12,"truncated":0,"walked_skipped":false,
+  "floor_y":-0.0051,"ceiling_y":2.6028,"boxes":2,"relabelled":1,"removed_boxes":0,"suggestions":0,
+  "plane_shifts":[{"kind":"wall","wall":0,"shift":-0.0004},...,{"kind":"ceiling","shift":-0.0021}],
+  "output_triangles":7171,"output_volumes":2},"warnings":[],
+ "timings_ms":{"read":0,"fusion":0,"model":0,"mesh":0,"refine":0,"total":0}}
 ```
 
 The example above illustrates the schema; actual counts and timings depend on the input. Heights are absolute
@@ -43,7 +50,10 @@ STAGE coordinates. `frames` includes skipped frames; `skipped_frames`, `far_vert
 `discontinuity_triangles` count input exclusions once, not once per pass. `walls` counts output polygon
 edges including synthesized edges; `detected_walls` counts fitted physical planes. Coverage means the percentage
 of the output perimeter supported by observed wall planes, **not camera coverage of all room surfaces**. Timings
-include parsing, fusion, structural/furniture modelling, mesh generation, and total time including output.
+include parsing, fusion, structural/furniture modelling, mesh generation, refinement, and total time including
+output. The scanner fields describe the unrefined scan (`triangles`, `volumes`, `ceiling_y` are the raw files');
+`refine` is the refinement report (same keys as scan.json's `report`) plus the refined `output_triangles` and
+`output_volumes`. `heads` counts the head-path points kept for the walked-volume pass.
 
 All frame headers, timestamps/vertices/poses, approximately unit quaternions, counts, indices and EOF boundaries
 are checked before publication. A non-finite timestamp/pose/vertex or invalid tracking quaternion skips the entire
@@ -57,9 +67,10 @@ triangles fails. Empty frames may accompany useful frames. Structural corruption
 bad counts or indices) remains fatal, preserves any existing output byte for byte and creates no output directory.
 UUIDs come from `getrandom`, fresh per scan; mesh geometry is repeatable.
 
-Both complete files are written to exclusive, randomly named temporary files, then individually renamed, with
-the mesh first and `room.txt` last. A write failure removes the temporary files. These are atomic **file**
-replacements, not a two-file filesystem transaction: the installer should scan into a fresh staging directory
+All files are computed first, then each is written to an exclusive, randomly named temporary file and renamed, in
+the order `room-mesh-raw.bin`, `room-raw.txt`, `scan.json`, `room-mesh.bin`, `room.txt` (meshes before their room
+text, `room.txt` last). A write failure removes the temporary files. These are atomic **file** replacements, not a
+multi-file filesystem transaction: the installer should scan into a fresh staging directory
 and publish that directory/symlink after success. Do not run concurrent writers into the same output directory.
 There is no fsync-based power-loss durability promise. Neither scan nor build writes application data outside
 the worktree's `FRAMEPORT_HOME`; fixtures and test output use temporary directories.
@@ -111,6 +122,77 @@ the worktree's `FRAMEPORT_HOME`; fixtures and test output use temporary director
    excess beyond that fails. Vertices are unshared triangle vertices, so at most 600,000 vertices. Structural
    planes are semantic anchors, not substituted for the observed global mesh.
 
+## Refinement
+
+After the mesh, the scanner cleans the room the way the owner tuned it in the room-scan cleanup page (2026-10-18);
+`native/roomscan/refine.c` and `rules.c` port that page's `refine()` and label rules pass for pass (local parity
+check on the owner's recording: identical counts and bit-identical refined meshes, see below). `--refine 0`
+switches it off: room.txt and room-mesh.bin are then byte-for-byte what the scanner wrote before refinement existed
+(the raw files and scan.json are still written, so refinement can be switched on later without a new scan).
+
+The input is exactly what the raw files hold: the raw room is written as text and read back (doubles parsed from the
+4-decimal text, like the page reads it), the head path is rounded the same way. Therefore `--refine-only <dir>`
+on the raw files reproduces the scan's refined files byte for byte. The mesh is welded at 1 mm (quantized, as the
+page does) for the passes that need topology; the output is again unshared triangle vertices.
+
+1. **Label rules** (`rules.c`, `--label-rules 0` off) on the scanner's volumes, using the raw room (walls, outline,
+   floor): a box that holds >= 60% of two boxes whose centres are >= 1 m apart covers several things (removed); a
+   box >= 75% inside a bigger box with a top no higher (+5 cm) is part of it (removed); a centre > 10 cm outside the
+   outline is behind a wall (removed). A tall thin slab from the floor (thinner than 22 cm, >= 1.8 m high, bottom
+   <= 0.3 m, at most 0.5 m behind the wall line) becomes a door (<= 1.1 m wide) or closet **suggestion** in
+   scan.json (box removed, nothing added: the GUI decides). Thin (< 22 cm) upright boxes are SCREEN only when
+   raised >= 0.3 m, top <= 2.2 m, width/height >= 1.2, within 15 degrees of the nearest wall (when closer than
+   0.35 m) and flat: the raw mesh's depth spread inside the box <= 3 cm (with >= 30 triangles; fewer = unknown,
+   accepted); otherwise removed. Then BED (top 0.25-0.65 m, area >= 2 m^2, long side 1.8-3 m), COUCH (top
+   0.35-0.6 m, long side >= 1.4 m), TABLE (top 0.6-1.1 m), STORAGE (>= 1.1 m high, >= 25 cm deep, within 0.35 m of a
+   wall); anything taller than 1.1 m otherwise is removed, the rest is OTHER. Every box gets a reason in scan.json.
+   These thresholds are constants in `rules.c` (the page's `RULES0`).
+2. **Furniture**: triangles within 10 cm of a ruled box (after the rules) are furniture; the passes below never
+   classify, clear or walk them away, and the tubes pass keeps pieces that are mostly furniture.
+3. **Planes**: seen walls (`WALL_FACE` records), floor and ceiling. Each plane's offset moves to the median signed
+   distance of the non-furniture triangles facing it (normal within `--facing-deg`) within `--band` of it (walls:
+   within their length + band), when there are more than 50. An unseen ceiling (floor + 2.5 m) moves to the real
+   one; the re-estimated ceiling is written to the refined room.txt (ceiling record and wall tops).
+4. **Structural triangles**: facing a plane, not furniture, behind it by less than `--band`, in front of it by less
+   than `--band-in` (walls), `--floor-in`, `--ceil-in`; in a wall's top `--top-strip` below the ceiling the full
+   band applies in front too (the depth bends where wall meets ceiling). The nearest qualifying plane owns it.
+5. **Erase spheres** (`--erase "x,y,z,r;..."`, from the GUI's eraser) drop every triangle whose centroid is inside.
+6. **Walked volume** (`--walked` = radius R, 0 off): where the user stood, nothing solid can be. Non-furniture
+   triangles from 0.2 m above the floor up to 0.25 m above a head position, within R horizontally of it, go.
+   Needs the head path (scan.json); without it the pass is skipped (`walked_skipped`).
+7. **Walls** (`--walls`): `panels` (default) removes the structural triangles, then non-furniture triangles closer
+   than `--near` to any plane (within the wall's extent), and adds flat panels: one quad per seen wall (moved by its
+   offset shift) from floor to ceiling, and the outline ear-clipped at the floor and the ceiling heights, all wound
+   counter-clockwise seen from inside. `snap` instead projects every vertex of a structural triangle onto its plane
+   (the last owner wins). `off` keeps them.
+8. **Furniture tops** (`--tops`, 0 off): upward-facing (normal y > 0.8) triangles within `--tops` of a box top and
+   inside its footprint are flattened onto it.
+9. **Clip**: centroids further than `--clip` outside the outline (`--clip` + `--clip-open` past an unseen wall), or
+   further than `--clip` above the ceiling / below the floor plane go. `--clip 1 --clip-open 2` switches it off.
+10. **Islands**: connected pieces smaller than `--island` m^2 go (`--protect 1` keeps furniture triangles).
+11. **Thin floating pieces** (`--tubes`, 0 off): pieces of >= 10 triangles, < 1 m^2, at most half furniture, whose
+    longest principal axis (vertex PCA, std) is >= `--tubes` times the second and the second <= `--tube-thick`.
+12. **Smoothing**: `--smooth` Taubin iterations (lambda 0.5, mu -0.53) over the kept triangles.
+
+Output: the kept scan triangles, then the panels (`refine.panel_triangles`), at most 200,000 triangles (more kept
+triangles would be cut, `truncated`, with a warning). The refinement adds about 20 ms on the host for the owner's
+64k-triangle scan; its buffers (welding hash, double positions, union-find, adjacency) stay below ~170 MiB for a
+200k-triangle mesh and the fusion grid is freed before it runs, so peak memory is still the fusion phase's.
+
+`--refine-only <room dir> [refinement options] [--json]` runs only steps 1-12 from `room-raw.txt` +
+`room-mesh-raw.bin` (+ the head path from `scan.json`) and rewrites scan.json, room-mesh.bin and room.txt. A folder
+from an older scanner without raw files: its room.txt + mesh become the raw files first (the room text is rewritten
+with the mesh record pointing at `room-mesh-raw.bin`), a warning says so, and there is no head path. Its JSON:
+`{"ok":true,"refine_only":true,"raw_triangles":..,"volumes":..,"floor_y":..,"ceiling_y":..,"heads":..,
+"refine":{...},"warnings":[...],"timings_ms":{"refine":..,"total":..}}`.
+
+Local parity (2026-10-18, private recording `room1.fprs`, not in the repository): the reference page's functions run
+under node on this scanner's raw output give the same per-pass counts, the same label decisions and reasons, and
+bit-identical refined meshes for the defaults, snap, off + protect, erase spheres + tubes 2, and a wide-band setting
+(one triangle differs there: a facing test exactly at the threshold), and the same on an older 128k-triangle room
+folder. Distance ties at outline corners decide which wall's clip allowance applies, so the corner distance uses
+V8's Math.hypot algorithm.
+
 Peak allocation stays below 260 MiB, including maximum frame buffers, the grid, model worklists and mesh buffers
 (the latter phases do not retain frame buffers). Default synthetic scenes use a much smaller grid. Thresholds
 are CLI options below or named constants next to their algorithms. No room-specific coordinates or dimensions are
@@ -143,6 +225,31 @@ Distances are metres, areas m², volumes m³. `--universe` accepts the full unsi
 | `--gap` | 0.65 | 0.1–1.5, maximum adjacent-wall endpoint extrapolation |
 | `--horizontal` | 0.85 | 0.6–0.99, minimum floor/ceiling/top normal cosine |
 
+Refinement (all distances metres; defaults = the owner's settings):
+
+| Option | Default | Accepted range / meaning |
+| --- | ---: | --- |
+| `--refine` | 1 | 0/1; 0 = the unrefined output in room.txt/room-mesh.bin |
+| `--walls` | panels | `off`, `snap` (project onto the planes) or `panels` (flat wall/floor/ceiling panels) |
+| `--band` | 0.35 | 0.02–1, structural band behind a surface; plane re-estimation window |
+| `--facing-deg` | 60 | 5–89, maximum angle between a triangle's normal and the surface's |
+| `--band-in` | 0.12 | 0–1, band in front of a wall (room side) |
+| `--floor-in` | 0.08 | 0–1, band above the floor |
+| `--ceil-in` | 0.25 | 0–1, band below the ceiling |
+| `--top-strip` | 0.5 | 0–2, top part of a wall where the full band applies in front too |
+| `--near` | 0.03 | 0–0.3, panels: also clear non-furniture scan this close to a plane |
+| `--clip` | 0.05 | 0–1, clip distance outside the outline / beyond floor and ceiling |
+| `--clip-open` | 0.10 | 0–2, extra allowance past unseen walls (`--clip 1 --clip-open 2` = no clipping) |
+| `--island` | 0.20 | 0–5 m^2, minimum connected piece area (0 off) |
+| `--smooth` | 8 | 0–50 integer, Taubin iterations |
+| `--tops` | 0.10 | 0–0.5, flatten upward scan this close to a box top (0 off) |
+| `--protect` | 0 | 0/1, islands never remove furniture triangles |
+| `--tubes` | 3 | 0–20, elongation (PCA axis ratio) of a thin floating piece (0 off) |
+| `--tube-thick` | 0.15 | 0.01–1, maximum second PCA axis (std) of a thin floating piece |
+| `--walked` | 0.40 | 0 or 0.05–1.5, walked-volume radius around the head path (0 off) |
+| `--label-rules` | 1 | 0/1, label rules on the scanner's volumes |
+| `--erase` | none | `"x,y,z,r;..."`, up to 64 spheres (r 0–5 m) whose scan is removed |
+
 Additional constants in `model.c` include RANSAC trials, normal agreement, wall span, furniture margins,
 label height/area thresholds, box trimming and circle recognition. Fusion sampling/weight limits are in
 `fusion.c`; mesh splat radii/decimation limits in `mesh.c`; hard resource limits in `scan.h`.
@@ -174,10 +281,17 @@ Incompatible inset play boundaries are ignored with a warning. Hint-completed ed
 
 ## Offline validation
 
-`tests/test_roomscan.py` builds with the host compiler (skips only if none exists). Its 41 tests cover the noisy
+`tests/test_roomscan.py` builds with the host compiler (skips only if none exists). Its tests cover the noisy
 4 x 3 x 2.6 m room with table/couch, six-wall L, moving and rotated/translated mesh poses, ceiling fallback, a single
 frame, missing walls, circular/matching hints, correct UUIDs/wire layout, interior mesh winding, triangle budget,
 repeatable mesh bytes with fresh UUIDs, truncated/corrupt dumps, invalid counts/indices/poses and invalid CLI values.
+Refinement tests: a floating pole and a column in the walked path (`synth_scan.py` `TUBE`/`GHOST`, `extra=`)
+are meshed by the scanner and removed by the tubes / walked passes (each kept with its pass off, the table top kept);
+panels wind into the room on the re-estimated planes; `--refine-only` reproduces a scan's files byte for byte;
+`--refine 0` equals the raw output (and refining it later equals the default); scan.json settings/report/heads; head
+path decimation to <= 2000 points; erase spheres; the label rules on a hand-written older room folder (merged,
+nested, behind a wall, SCREEN from a flat panel, a door suggestion with wall and position, unknown records kept,
+idempotent, `--label-rules 0`); invalid refinement options.
 The test module takes about fourteen seconds including synthetic rendering and compilation (under the 60 s budget).
 New cases cover non-finite frames before/after usable frames, per-vertex far rejection, depth jumps below the edge
 limit, weak ceiling evidence, wall labels and a complete camera-fan scan. The deterministic stdlib renderer now
@@ -193,7 +307,7 @@ UV_OFFLINE=1 UV_CACHE_DIR=/tmp/frameport-uv-cache uv run ruff check scripts/mr/s
 ```
 
 The synthetic camera fan passes AddressSanitizer + UndefinedBehaviorSanitizer. Two consecutive final native builds
-produce identical SHA-256 `0d88e5adfa1a21da7e0cfec2698a835d7767961e15c0b41c84235fa24ae1e751` (54,248 bytes),
+produce identical SHA-256 `2cc16b90abcd3d359f1658c581172bd650017bf2725e24268915f50904c000ec` (97,808 bytes, with refinement),
 matching `artifacts/SHA256SUMS`. ELF inspection confirms aarch64, little-endian, no PT_INTERP / PT_DYNAMIC, and no
 embedded local build paths.
 
