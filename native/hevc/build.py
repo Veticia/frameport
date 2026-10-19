@@ -252,7 +252,7 @@ def build(parser, repo: Path, ndk_root: Path, runtime: Path):
         path = artifacts / (name + ".txt" if name == "podman.py" else name)
         files[name] = hashlib.sha256(path.read_bytes()).hexdigest()
     # bump the revision with every change: a Frame keeps an installed codec of the same or a newer revision
-    manifest = {"revision": 8, "runtime_sha256": RUNTIME_SHA, "files": files,
+    manifest = {"revision": 9, "runtime_sha256": RUNTIME_SHA, "files": files,
                 "codecs": ["video/hevc", "video/avc", "video/x-vnd.on2.vp9"],
                 "build": {"ndk_revision": NDK_REVISION, "ffmpeg_source_sha256": FFMPEG_SHA}}
     (artifacts / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
