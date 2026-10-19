@@ -202,11 +202,12 @@ def prepare(room: Room, mesh: Mesh | None = None, budget: int = REST_BUDGET,
     if mesh is not None and mesh.vertices:
         sc.triangles = len(mesh.indices) // 3
         sc.lods = reduce_mesh(mesh, {"rest": budget, "drag": drag_budget})
-        for lod in sc.lods.values():
-            for p in lod.vertices:  # (only the reduced vertices: a stray far point of the raw scan doesn't count)
-                for k in range(3):
-                    lo[k], hi[k] = min(lo[k], p[k]), max(hi[k], p[k])
-            break
+        rest = sc.lods.get("rest")
+        if rest is not None and rest.vertices:  # 2nd..98th percentile: a scan's stray far-off bits don't count
+            for k in range(3):
+                vals = sorted(p[k] for p in rest.vertices)
+                lo[k] = min(lo[k], vals[int(len(vals) * 0.02)])
+                hi[k] = max(hi[k], vals[min(len(vals) - 1, int(len(vals) * 0.98))])
     sc.lo, sc.hi = tuple(lo), tuple(hi)
     for gx in range(math.floor(lo[0]), math.ceil(hi[0]) + 1):  # 1 m floor grid
         sc.grid.append(((gx, y0, math.floor(lo[2])), (gx, y0, math.ceil(hi[2]))))
@@ -271,7 +272,7 @@ class Camera:
         self.target = ((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2 * 0.8, (lo[2] + hi[2]) / 2)
         radius = 0.5 * math.sqrt(sum((hi[i] - lo[i]) ** 2 for i in range(3)))
         aspect = max(0.2, min(1.0, self.width / max(1.0, self.height)))  # a narrow canvas needs more room
-        self.distance = max(1.0, radius / math.sin(self.fov / 2) / aspect * 0.95)
+        self.distance = max(1.0, radius / math.sin(self.fov / 2) / aspect * 0.88)
         self.yaw, self.pitch = 0.55, 0.6
 
     # projection

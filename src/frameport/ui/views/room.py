@@ -65,12 +65,12 @@ class RoomView:
     def _tester(self) -> ft.Control:
         """Test Quest MR: Get (its install link: FramePort's own install question) or Open once it's in the library."""
         if library.game(TESTER_PACKAGE):
-            button = C.secondary(tr("Open Test Quest MR"), ft.Icons.VIEW_IN_AR_OUTLINED,
+            button = C.secondary(tr("Open Test Quest MR"), ft.Icons.VIEW_IN_AR_ROUNDED,
                                  lambda e: self.app.open_game(TESTER_PACKAGE), tooltip=C.tip(HELP["room_tester"]))
         else:
             from .link_dialog import open_link
 
-            button = C.secondary(tr("Get Test Quest MR"), ft.Icons.VIEW_IN_AR_OUTLINED,
+            button = C.secondary(tr("Get Test Quest MR"), ft.Icons.VIEW_IN_AR_ROUNDED,
                                  lambda e: open_link(self.app, TESTER_MANIFEST), tooltip=C.tip(HELP["room_tester"]))
         return C.callout(ft.Column([
             C.body(tr("Try it out: Test Quest MR shows the room, furniture and anchors a game receives from this "
@@ -101,7 +101,7 @@ class RoomView:
                        self.place_actions], spacing=T.S3, tight=True,
                       horizontal_alignment=ft.CrossAxisAlignment.CENTER),
             alignment=ft.Alignment.CENTER, left=0, right=0, top=0, bottom=0, bgcolor=T.soft(T.BG, 0.88))
-        self.reset_btn = C.icon_btn(ft.Icons.CENTER_FOCUS_STRONG_OUTLINED, tr("Show the whole room"),
+        self.reset_btn = C.icon_btn(ft.Icons.CENTER_FOCUS_STRONG_ROUNDED, tr("Show the whole room"),
                                     lambda e: self.canvas.fit())
         view = ft.Stack([self.canvas.control, self.placeholder,
                          ft.Container(self.reset_btn, right=T.S2, top=T.S2)], height=T.px(CANVAS_HEIGHT))
