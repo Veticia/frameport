@@ -65,7 +65,15 @@ Detailed device findings per game/issue: docs/DEVICE_NOTES.md (read before debug
     RoomCanvas over `mr/view3d.py` (pure-Python projection, mesh reduced to ≤4k/≤1.5k edges at rest/moving, ≤18 fps
     worker; each redraw sends NEW shape controls: changing a Points list made Flet diff it item by item, 0.3-1 s);
     "Open full 3D view" = `mr/room_viewer.py` token server on 127.0.0.1 + hand-written WebGL `mr/viewer_page.py`,
-    stopped on disconnect/close; Test Quest MR tip = `mr.TESTER_*`); settings; welcome; activity panel). Files, Screenshots and the Library share right-click menus
+    stopped on disconnect/close; Test Quest MR tip = `mr.TESTER_*`; editing cards `views/room_edit.py` (agent v107):
+    Clean-up = fp_roomscan's refinement settings, `install/rooms.REFINE_DEFAULTS` = the owner's defaults + slider
+    metadata (agent `ROOM_REFINE_DEFAULTS` must match, a test checks), saved non-defaults in the Frame's
+    `rooms/refine.json`, used by every build; Apply = job → agent `room_refine` (`--refine-only` on a copy of the room
+    folder from `room-raw.txt`/`room-mesh-raw.bin`, scan.json → status `report`/`labels`/`suggestions`); Labels =
+    the label rules' decisions + Add as door / Add as closet; Furniture & screens = box editor (click a box in the
+    canvas: `view3d.pick`) + doors/windows on a wall (`mr.room.plane_on_wall`), Save = `rooms.put_room` → `room_put
+    edited` (keeps raw files, `edits.txt` survives a new clean-up; "Back to the scan's boxes" = keep_edits false); no
+    eraser in the GUI (`rooms.refine(erase=)` only)); settings; welcome; activity panel). Files, Screenshots and the Library share right-click menus
     (one `ft.ContextMenu` per view, filled on right-click; on one of several selected items they act on the whole
     selection, `C.menu_targets`) and click-and-drag multi-select (`C.DragSelect`: pan start/end on the area + item
     hover events, which Flutter also sends with the button held; Flet can't report item positions, so no rubber band).

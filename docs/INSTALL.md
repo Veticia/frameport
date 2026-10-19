@@ -192,6 +192,14 @@ Mixed-reality games ask for your room: walls, furniture and its surfaces. **Room
   the SteamVR play area instead (no furniture).
 - The room shows in 3D: drag to turn it, scroll to zoom, right-drag to move it, double-click to see all of it.
   **Open full 3D view** shows every detail of the scan in your browser (a page on this PC only).
+- **Clean-up** tidies every scan (flat walls, no scan behind walls or where you walked, no loose bits). The
+  recommended settings suit most rooms; change them (**More settings** has all of them) and press **Apply** to clean
+  up your saved scan again. Your settings are also used for your next scans.
+- **Labels** shows what the scanner's boxes became and why. A tall, thin box by a wall can be **Add as door** or
+  **Add as closet**.
+- **Furniture & screens**: pick a box in the list or click it in the 3D view to change its type, place or size, add
+  or delete boxes, and add doors and windows on a wall. **Save** sends them to the Frame; they stay when you clean up
+  the scan again (**Back to the scan's boxes** under Labels drops them).
 - The free **Test Quest MR** app (Get Test Quest MR on the tab) shows what a game receives from your scan.
 
 ## Updating
