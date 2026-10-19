@@ -10,7 +10,7 @@ const site = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const repo = resolve(site, '..');
 
 const SHOTS = ['library.png', 'game.png', 'monitor.png', 'live-view.png', 'files.png', 'type-on-frame.png',
-  'screenshots.png', 'install-progress.png', 'patches.png'];
+  'screenshots.png', 'install-progress.png', 'patches.png', 'room.png'];
 const PUBLIC = {
   'docs/images': ['tour-teaser.webp'],
   'docs/media': ['frameport-tour.mp4', 'frameport-tour.jpg', 'frameport-install.mp4', 'frameport-install.jpg'],

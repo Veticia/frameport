@@ -117,6 +117,10 @@ Hooks (`steps.HOOKS`) cover what a real Frame would do:
 - `pairing_done`: the Frame ran the setup command, so FramePort connects.
 - `live_stream`: a test picture through the real relay.
 - `monitor_details`, `type_tab`, `select_files` and `settings_section`.
+- `open_room` (the Room tab with the pretend Frame's room drawn) and `room_editing` (its editing cards: `cleanup`,
+  `more`, `box`, `doors`, `suggestion`). The room is a made-up bedroom built in code (`fakes.fake_room`, never a real
+  scan): a bed under a wall-mounted TV, a desk with two monitors under a window, a closet, a door, a lamp and a plant,
+  with a noisy scanned-surface mesh and a clean-up report and labels that match it.
 
 In a video, clicking Install runs the scripted install, and the game is then installed on the pretend Frame.
 

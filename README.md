@@ -36,6 +36,9 @@ Frame, patches each game so it runs there, uploads it and adds it to your Steam 
   in FramePort.
 - **Your Frame from your PC:** Type on Frame (your keyboard on the Frame), Files, Screenshots, Live view (what the
   headset shows, in your browser) and Monitor (frame rate, temperatures, battery, processes).
+- **Your room for mixed reality (experimental):** scan the room in the headset, see it in 3D, clean up the scan and
+  fix furniture, screen and door labels, so mixed-reality games get your room. Try it with
+  [Test Quest MR](https://github.com/spoopyghosty0/TestQuestMR).
 - **Updates itself**, and reports problems without personal data.
 
 Details for each: [Install and first steps](docs/INSTALL.md).
@@ -43,6 +46,8 @@ Details for each: [Install and first steps](docs/INSTALL.md).
 ![Monitor](docs/images/monitor.png)
 
 ![Screenshots](docs/images/screenshots.png)
+
+![Room (experimental): the scanned room in 3D, clean-up and labels](docs/images/room.png)
 
 ## Quick start
 

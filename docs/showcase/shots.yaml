@@ -108,3 +108,21 @@ shots:
     steps:
       - go: settings
       - wait_for: "Portal (OLED)"
+
+  - name: room             # experimental: the pretend Frame's made-up bedroom scan (fakes.fake_room), no real scan
+    docs: [README.md, docs/INSTALL.md]
+    viewport: [1280, 1640]
+    steps:
+      - hook: open_room
+      - wait_for: "Furniture & screens"
+      - park: true
+
+  - name: room-editing     # a box picked in the list (its type, place and size) next to the clean-up's labels
+    docs: [docs/INSTALL.md]
+    viewport: [1280, 2000]  # (tall enough that nothing scrolls)
+    steps:
+      - hook: open_room
+      - wait_for: "Furniture & screens"
+      - hook: {name: room_editing, args: [box]}
+      - park: true
+    crop: {anchor: "Furniture & screens", left: -26, top: -28, width: 670, height: 1262}
