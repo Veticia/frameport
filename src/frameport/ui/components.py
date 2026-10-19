@@ -767,7 +767,7 @@ def _ghost_bar(width: float, height: float = 10, color: str | None = None) -> ft
 def ghost_preview(kind: str) -> ft.Control:
     """A faint, wordless sketch of what a Frame tab shows once a Frame is connected (its not-connected empty state):
     shapes only, so it reads as "this is where it goes", never as content. kinds: files, screenshots, live,
-    keyboard, monitor."""
+    keyboard, monitor, room."""
     if kind == "files":
         rows = [ft.Row([as_icon(ft.Icons.FOLDER_OUTLINED if i < 2 else ft.Icons.MOVIE_OUTLINED, T.px(18),
                                 T.BORDER_STRONG),
@@ -790,6 +790,27 @@ def ghost_preview(kind: str) -> ft.Control:
         return ft.Column([card(ft.Column([_ghost_bar(220), _ghost_bar(160)], spacing=T.S3), bgcolor=T.SURFACE,
                                height=T.px(130), width=T.px(640)), keys],
                          spacing=T.S4, horizontal_alignment=ft.CrossAxisAlignment.CENTER)
+    if kind == "room":  # a dollhouse: the floor and two far walls in perspective, a box of furniture, the side card
+        import flet.canvas as cv
+
+        w, h = T.px(500), T.px(300)
+        def pt(x, y):
+            return x * w, y * h
+        def poly(points, color, fill=False):
+            els = [cv.Path.MoveTo(*pt(*points[0]))] + [cv.Path.LineTo(*pt(*p)) for p in points[1:]] + [cv.Path.Close()]
+            return cv.Path(els, paint=ft.Paint(color=color, stroke_width=T.px(2),
+                                               style=ft.PaintingStyle.FILL if fill else ft.PaintingStyle.STROKE))
+        floor = [(0.08, 0.72), (0.5, 0.95), (0.92, 0.72), (0.5, 0.5)]
+        left = [(0.08, 0.72), (0.5, 0.5), (0.5, 0.08), (0.08, 0.3)]
+        right = [(0.5, 0.5), (0.92, 0.72), (0.92, 0.3), (0.5, 0.08)]
+        box = [(0.42, 0.68), (0.58, 0.76), (0.7, 0.7), (0.7, 0.6), (0.54, 0.52), (0.42, 0.58)]
+        sketch = cv.Canvas([poly(floor, T.SURFACE_2, True), poly(left, T.SURFACE, True), poly(right, T.SURFACE, True),
+                            poly(floor, T.BORDER_STRONG), poly(left, T.BORDER_STRONG), poly(right, T.BORDER_STRONG),
+                            poly(box, T.BORDER_STRONG)], width=w, height=h)
+        side = card(ft.Column([_ghost_bar(150), _ghost_bar(110), ft.Container(height=T.S2), _ghost_bar(170),
+                               _ghost_bar(90, 28)], spacing=T.S3), bgcolor=T.SURFACE, width=T.px(220))
+        return ft.Row([card(sketch, bgcolor=T.BG), side], spacing=T.S3, alignment=ft.MainAxisAlignment.CENTER,
+                      vertical_alignment=ft.CrossAxisAlignment.START)
     # monitor: tiles with a little graph, then a few process rows
     spark = [5, 9, 7, 12, 10, 14, 11, 16, 13, 15, 12, 17]
     tile = card(ft.Column([_ghost_bar(70), _ghost_bar(44, 18),

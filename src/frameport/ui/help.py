@@ -25,7 +25,16 @@ HELP: dict[str, str] = _Translated({
                     "scan again or use the new boundary to line up virtual walls with your room.",
     "mr_scanner": "The scanner turns a recorded depth-mesh dump into a room. FramePort installs it when you "
                   "build a recorded scan.",
-    "steam_library": "Now waits until Steam can restart safely. Later saves shortcuts for the next Steam start. "
+    "room_experimental": "Mixed reality on the Frame is new. FramePort makes up the room data Quest games ask for "
+                         "(walls, furniture, the room mesh, saved anchors) from your scan, and it has been tried with "
+                         "only a few games so far.",
+    "room_tester": "Test Quest MR is a small free app that shows what Meta's mixed-reality APIs return on this Frame: "
+                   "the room layout, walls and furniture, the room mesh, saved anchors and the boundary. Install it "
+                   "to check a scan before you try it in a game.",
+    "room_view": "Drag to turn the room, scroll or pinch to zoom, right-drag to move it, double-click to see all of "
+                 "it again. The walls nearest to you are left out so you can look inside. The full 3D view in your "
+                 "browser shows every detail of the scan.",
+    "steam_library":"Now waits until Steam can restart safely. Later saves shortcuts for the next Steam start. "
                      "Off uses FramePort Play without Steam per-game integration; existing shortcuts stay.",
     # ---- game status / library
     "status": "How well the game runs on the Steam Frame. \"Works\" and \"Works with issues\" were tested on a Frame; "
