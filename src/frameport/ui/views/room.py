@@ -23,7 +23,7 @@ from ..help import HELP
 if TYPE_CHECKING:
     from ..app import FramePortApp
 
-CANVAS_HEIGHT = 480
+CANVAS_HEIGHT = 560
 
 
 def furniture_name(label: str) -> str:
@@ -67,17 +67,17 @@ class RoomView:
     def _tester(self) -> ft.Control:
         """Test Quest MR: Get (its install link: FramePort's own install question) or Open once it's in the library."""
         if library.game(TESTER_PACKAGE):
-            button = C.secondary(tr("Open Test Quest MR"), ft.Icons.VIEW_IN_AR_ROUNDED,
-                                 lambda e: self.app.open_game(TESTER_PACKAGE), tooltip=C.tip(HELP["room_tester"]))
+            label, go = tr("Open Test Quest MR"), lambda e: self.app.open_game(TESTER_PACKAGE)
         else:
             from .link_dialog import open_link
 
-            button = C.secondary(tr("Get Test Quest MR"), ft.Icons.VIEW_IN_AR_ROUNDED,
-                                 lambda e: open_link(self.app, TESTER_MANIFEST), tooltip=C.tip(HELP["room_tester"]))
-        return C.callout(ft.Column([
-            C.body(tr("Try it out: Test Quest MR shows the room, furniture and anchors a game receives from this "
-                      "scan."), T.TEXT),
-            button], spacing=T.S3, tight=True), "info", ft.Icons.LIGHTBULB_OUTLINE_ROUNDED)
+            label, go = tr("Get Test Quest MR"), lambda e: open_link(self.app, TESTER_MANIFEST)
+        link = ft.Container(ft.Text(label, size=T.T_META, color=T.ACCENT, weight=ft.FontWeight.W_600), on_click=go,
+                            ink=True, border_radius=T.RADIUS_XS, tooltip=C.tip(HELP["room_tester"]))
+        # one line at the bottom of "In this room" (not a card of its own)
+        return ft.Row([ft.Icon(ft.Icons.LIGHTBULB_OUTLINE_ROUNDED, size=T.ICON_S, color=T.TEXT_3),
+                       C.meta(tr("See what a game gets:")), link], spacing=T.S1, wrap=True,
+                      vertical_alignment=ft.CrossAxisAlignment.CENTER)
 
     def _build(self) -> None:
         from ..room3d import RoomCanvas
@@ -105,13 +105,16 @@ class RoomView:
             alignment=ft.Alignment.CENTER, left=0, right=0, top=0, bottom=0, bgcolor=T.soft(T.BG, 0.88))
         self.reset_btn = C.icon_btn(ft.Icons.CENTER_FOCUS_STRONG_ROUNDED, tr("Show the whole room"),
                                     lambda e: self.canvas.fit())
-        view = ft.Stack([self.canvas.control, self.placeholder,
+        # the legend sits on the view's bottom edge, so the card is exactly the view's height (the right column is
+        # made the same height: the top row ends level)
+        legend = ft.Container(ft.Row([ft.Container(self.canvas.legend(), expand=True), C.help_icon("room_view")],
+                                     vertical_alignment=ft.CrossAxisAlignment.CENTER),
+                              left=0, right=0, bottom=0, bgcolor=T.soft(T.BG, 0.82),
+                              padding=ft.Padding(T.S3, T.S2, T.S3, T.S2),
+                              border_radius=ft.BorderRadius(0, 0, T.RADIUS_SM, T.RADIUS_SM))
+        view = ft.Stack([self.canvas.control, legend, self.placeholder,
                          ft.Container(self.reset_btn, right=T.S2, top=T.S2)], height=T.px(CANVAS_HEIGHT))
-        self.canvas_card = C.card(ft.Column([
-            view,
-            ft.Row([ft.Container(self.canvas.legend(), expand=True), C.help_icon("room_view")],
-                   vertical_alignment=ft.CrossAxisAlignment.CENTER),
-        ], spacing=T.S3), padding=T.S3, col={"xs": 12, "lg": 8})
+        self.canvas_card = C.card(view, padding=T.S3, col={"xs": 12, "lg": 8})
 
         # status
         self.checks = ft.Container(C.checklist([C.Check(None, tr("Checking the room…"))]))
@@ -134,17 +137,19 @@ class RoomView:
         self.summary = C.body("", T.TEXT)
         self.source = C.meta("")
         self.furniture = ft.Row([], spacing=T.S2, run_spacing=T.S2, wrap=True)
+        # the right column: as tall as the 3D view's card (its last card takes what's left),
+        # every card with the same padding
         side = ft.Column([
-            C.card(ft.Column([self.checks, self.error], spacing=T.S2),
-                   padding=ft.Padding(T.S4, T.S2, T.S4, T.S2)),
+            C.card(ft.Column([self.checks, self.error], spacing=T.S2), padding=T.S4),
             C.card(ft.Column([C.section(tr("Scan"), self.scan_box,
                                         ft.Row([self.scan_btn, self.cancel_btn], spacing=T.S2, wrap=True),
                                         ft.Row([self.boundary_btn, self.delete_btn], spacing=T.S2, wrap=True),
                                         help="mr_room")], spacing=T.S3), padding=T.S4),
-            C.card(ft.Column([C.meta(tr("In this room")), self.summary, self.source, self.furniture],
-                             spacing=T.S2), padding=T.S4),
-            self._tester(),
-        ], spacing=T.S3, col={"xs": 12, "lg": 4}, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
+            C.card(ft.Column([C.meta(tr("In this room")), self.summary, self.source, self.furniture,
+                              ft.Container(expand=True), self._tester()], spacing=T.S2),
+                   padding=T.S4, expand=True),
+        ], spacing=T.S4, col={"xs": 12, "lg": 4}, horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
+            height=T.px(CANVAS_HEIGHT) + 2 * T.S3 + 2)
         # editing: the scan clean-up, what the label rules decided, furniture boxes + doors / windows
         from .room_edit import CleanupCard, FurnitureEditor, LabelsCard
 

@@ -144,16 +144,23 @@ class FakeRoom:
         {"from": "OTHER", "to": None, "reason": "0.6 m behind the wall: outside the room",
          "box": {"w": 0.5, "d": 0.4, "h": 0.9}},
         {"from": "TABLE", "to": None, "reason": "holds a couch and a table 1.4 m apart: several things merged",
-         "box": {"w": 3.1, "d": 1.6, "h": 0.8}}]
+         "box": {"w": 3.1, "d": 1.6, "h": 0.8}},
+        {"from": "STORAGE", "to": None, "suggest": "door", "reason": "2.05 m high, 12 cm thin, flat on the wall",
+         "box": {"w": 0.95, "d": 0.12, "h": 2.05}}]
     SUGGESTIONS = [{"kind": "door", "box": {"cx": 2.45, "cz": 0.9, "top_y": 2.05, "yaw_deg": 90, "w": 0.95, "d": 0.12,
-                                            "h": 2.05}, "wall": 1, "along": 0.72}]
+                                            "h": 2.05}, "wall": 1, "along": 0.72,
+                    "reason": "A tall, thin slab on the wall, 0.95 m wide: a door, or a closet's front"}]
 
     def report(self, settings: dict | None = None) -> dict:
         s = {**{"walked": 0.4, "smooth": 8, "island": 0.2, "walls": "panels"}, **(settings or {})}
         removed = int(5200 * s["walked"]) + int(9000 * s["island"]) + (2400 if s["walls"] == "panels" else 600)
-        return {"triangles": 48210, "kept": 48210 - removed, "struct": 21480 if s["walls"] != "off" else 0,
-                "near": 310, "clip": 1840, "island": int(9000 * s["island"]), "tubes": 212,
-                "walked": int(5200 * s["walked"]), "tops": 640, "panels": 96 if s["walls"] == "panels" else 0}
+        # scan.json's report keys (docs/mr/ROOM_FORMAT.md)
+        return {"triangles": 48210, "kept": 48210 - removed, "structural": 21480 if s["walls"] != "off" else 0,
+                "near_walls": 310, "outside": 1840, "small_pieces": int(9000 * s["island"]), "thin_pieces": 212,
+                "erased": 0, "walked": int(5200 * s["walked"]), "tops": 640,
+                "panel_triangles": 96 if s["walls"] == "panels" else 0, "truncated": 0, "walked_skipped": False,
+                "floor_y": 0.0, "ceiling_y": 2.6, "boxes": 7, "relabelled": 2, "removed_boxes": 2, "suggestions": 1,
+                "plane_shifts": [{"kind": "wall", "wall": 0, "shift": 0.02}]}
 
     def status(self) -> dict:
         from frameport.mr.room import summary
