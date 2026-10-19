@@ -429,7 +429,8 @@ UI: dict[str, dict] = {
                        help="Scene games get your saved room. Without one, they get a simple room from the play area.",
                        control=("switch",)),
     "scene_scan_request": dict(group="room", level="advanced", label="Scan when requested", depends="scene_emul",
-                               help="Scan your room in the headset when the game asks for a room scan.", control=("switch",)),
+                               help="Scan your room in the headset when the game asks for a room scan.",
+                               control=("switch",)),
     "scene_hide_bounds": dict(group="room", level="advanced", label="Hide play-area size", depends="scene_emul",
                               help="For games that reject the room because of the play area.", control=("switch",)),
     "scene_height": dict(group="room", level="advanced", label="Room height", depends="scene_emul",
@@ -564,7 +565,8 @@ UI: dict[str, dict] = {
 # functions OVRPort's dispatcher doesn't know. scene_emul: the dispatcher refuses every scene/anchor function
 # ("Unknown proc addr: xrQuerySpacesFB", Pinball FX VR 2026-10-16), so the emulated room only reaches the game through
 # the shim (Demeter/NOPE only got it because haptic_fix happened to be on)
-XRSHIM_SETTINGS = ("fixed_resolution", "hide_fb_foveation", "controller_models", "haptic_fix", "surface_native", "scene_emul")
+XRSHIM_SETTINGS = ("fixed_resolution", "hide_fb_foveation", "controller_models", "haptic_fix", "surface_native",
+                   "scene_emul")
 # shown with an "experimental" pill (Game settings, game page, CLI): not proven in the headset on many games yet
 EXPERIMENTAL_SETTINGS = ("quest_buttons",)
 

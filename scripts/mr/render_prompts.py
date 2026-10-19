@@ -76,8 +76,8 @@ def images() -> dict[str, bytes]:
                                      "every wall and your furniture.", seen=n, accent=SECONDARY)
     for n in range(DIRECTIONS + 1):  # everything seen before the minimum scan time: the ring is the time left
         out[f"finish_{n:02d}"] = panel("Almost done", "Walls, ceiling and floor are covered.\n"
-                                       "Look closely at your furniture\nuntil the ring fills.", seen=n, accent=OK, ring=OK,
-                                       label=f"{(DIRECTIONS - n) * 5}s")
+                                       "Look closely at your furniture\nuntil the ring fills.", seen=n, accent=OK,
+                                       ring=OK, label=f"{(DIRECTIONS - n) * 5}s")
     data = {}
     for key, img in out.items():
         buf = io.BytesIO()

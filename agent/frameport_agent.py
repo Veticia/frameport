@@ -5211,7 +5211,8 @@ class _ScanPreview:
             U, E = ct.c_uint64, ct.c_int
             signatures = {"Create": (ct.c_char_p, ct.c_char_p, ct.POINTER(U)), "Destroy": (U,),
                           "SortOrder": (U, ct.c_uint32), "Width": (U, ct.c_float),
-                          "Absolute": (U, E, ct.POINTER(rv.M34)), "Raw": (U, ct.c_void_p, ct.c_uint32, ct.c_uint32, ct.c_uint32), "Show": (U,)}
+                          "Absolute": (U, E, ct.POINTER(rv.M34)),
+                          "Raw": (U, ct.c_void_p, ct.c_uint32, ct.c_uint32, ct.c_uint32), "Show": (U,)}
             self.functions = {name: ct.CFUNCTYPE(E, *args)(fn[self.SLOTS[name]])
                               for name, args in signatures.items()}
             h = U(0)
@@ -5319,7 +5320,8 @@ def _scan_complete(started, now, yaw_bins, pitch):
             and pitch["up"] >= ROOM_SCAN_LOOK_FRAMES and pitch["down"] >= ROOM_SCAN_LOOK_FRAMES)
 
 
-def capture_roomview(seconds, out_path, wait=0.0, max_hz=3.0, progress=None, prompts=None, preview=True, preview_log=None):
+def capture_roomview(seconds, out_path, wait=0.0, max_hz=3.0, progress=None, prompts=None, preview=True,
+                     preview_log=None):
     """Record RoomView 3D meshes into a .fprs dump: `seconds` of fresh meshes (after waiting up to `wait` s for the
     first one), at most `max_hz` frames per second. progress(dict) is called about once a second. Returns a summary:
     frames, duration, yaw coverage (30 deg bins seen), frames looking up/down, warnings."""
@@ -5492,7 +5494,7 @@ def room_capture_worker(payload):
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise AgentError("A room scan is already running")
+            raise AgentError("A room scan is already running") from None
         return _room_capture_worker(payload)
 
 
@@ -5570,8 +5572,10 @@ def set_scan_watch_line(text, pkg, want):
         return text
     line = SCAN_WATCH_LINE.format(agent_q=shlex.quote(os.path.abspath(__file__)), pkg_q=shlex.quote(pkg))
     text = text.replace("\nchild=$!\n", "\nchild=$!\n" + line + "\n", 1)
-    return text.replace('    trap - EXIT INT TERM\n',
-                        '    trap - EXIT INT TERM\n    [[ -z "${scanwatch:-}" ]] || kill "$scanwatch" 2>/dev/null || true\n', 1) if '${scanwatch:-}' not in text else text
+    if '${scanwatch:-}' in text:
+        return text
+    stop = '    [[ -z "${scanwatch:-}" ]] || kill "$scanwatch" 2>/dev/null || true\n'
+    return text.replace('    trap - EXIT INT TERM\n', '    trap - EXIT INT TERM\n' + stop, 1)
 
 
 def scan_watch_write(folder, name, text):

@@ -94,7 +94,8 @@ def test_launcher_sync_and_upgrade(monkeypatch, tmp_path, capsys):
     assert '9>&- & scanwatch=$!' in text
     assert text.index("_room_sync") < text.index("\nsetsid ")
     assert a.set_room_sync_line(text, pkg, True) == text
-    old = "\n".join(line for line in text.splitlines() if "# frameport-room-sync" not in line and "# frameport-scan-watch" not in line) + "\n"
+    old = "\n".join(line for line in text.splitlines()
+                    if "# frameport-room-sync" not in line and "# frameport-scan-watch" not in line) + "\n"
     (anchor / "launch.sh").write_text(old)
     a.upgrade_launchers()
     assert (anchor / "launch.sh").read_text().count("# frameport-room-sync") == 1

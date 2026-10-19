@@ -66,7 +66,8 @@ def suggest(analysis: Analysis, use_catalog: bool = True) -> Recipe:
                 and "frame.meta_permissions" not in entry.frame_remove):
             # the room needs Meta's scene/anchor permissions granted, or the game never asks for it (NOPE)
             recipe.patches.setdefault("frame.meta_permissions", {})
-            recipe.reasons.setdefault("frame.meta_permissions", "Meta's room and anchor permissions for the saved room.")
+            recipe.reasons.setdefault("frame.meta_permissions",
+                                      "Meta's room and anchor permissions for the saved room.")
         if entry.device_files:
             recipe.patches["device.files"] = {"files": dict(entry.device_files)}
             recipe.reasons["device.files"] = why

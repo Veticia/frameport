@@ -342,7 +342,8 @@ def _migrate(data: dict) -> bool:
             if (not isinstance(a, dict) or not isinstance(r, dict) or r.get("source") == "user"
                     or g.get("kind") in ("linux", "rift")):
                 continue
-            if (r.get("patches") or {}).get("adapter.scene_emul", {}).get("value") and uses_scene(analysis_from_dict(a)):
+            scene_on = (r.get("patches") or {}).get("adapter.scene_emul", {}).get("value")
+            if scene_on and uses_scene(analysis_from_dict(a)):
                 r["patches"].setdefault("frame.meta_permissions", {})
                 r.setdefault("reasons", {}).setdefault(
                     "frame.meta_permissions", "Meta's room and anchor permissions must be granted for the saved room.")

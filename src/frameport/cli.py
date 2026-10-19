@@ -883,7 +883,8 @@ def room_scan(frame: Optional[str] = typer.Option(None, help=FRAME_HELP),
         typer.echo(f"{st.get('state')}: {st.get('directions', 0)}/12 directions, "
                    f"ceiling {'seen' if st.get('looked_up', 0) >= 5 else 'not yet'}", err=True)
 
-    typer.echo(json.dumps(rooms.scan(_target(frame).frame, seconds, wait, progress=progress, preview=preview), indent=2))
+    result = rooms.scan(_target(frame).frame, seconds, wait, progress=progress, preview=preview)
+    typer.echo(json.dumps(result, indent=2))
 
 
 @room_app.command("refine")

@@ -36,7 +36,8 @@ def harness(tmp_path_factory):
 def run(harness, folder, mode, *args, process="org.frameport.test"):
     binary, _ = harness
     env = {**os.environ, "FRAMEBRIDGE_CONFIG": str(folder / "settings.conf")}
-    result = subprocess.run([process, mode, *map(str, args)], executable=binary, capture_output=True, text=True, env=env)
+    result = subprocess.run([process, mode, *map(str, args)], executable=binary, capture_output=True, text=True,
+                            env=env)
     assert result.returncode == 0, result.stdout + result.stderr
     return result.stderr
 
@@ -50,7 +51,7 @@ def room(folder, *, generated_walls=False):
              f"volume {uuid(40)} TABLE,OTHER 2 1 0.75 90 2 1 0.75",
              f"plane {uuid(41)} WINDOW_FRAME 1 1.5 0 0 0 0 1 0.8 1.2"]
     if not generated_walls:
-        for i, ((x, z), (xx, zz)) in enumerate(zip(points, points[1:] + points[:1])):
+        for i, ((x, z), (xx, zz)) in enumerate(zip(points, points[1:] + points[:1], strict=True)):
             lines.append(f"wall {uuid(10 + i)} {x} {z} {xx} {zz} 0 2.5")
     lines += [f"mesh {uuid(42)} room-mesh.bin 4 6", "future-data ignored"]
     (folder / "room.txt").write_text("\n".join(lines) + "\n")
@@ -130,7 +131,8 @@ def test_rejects_corrupt_mesh_without_losing_room(harness, tmp_path, damage):
     assert "bad room line" in log and "0 mesh triangles" in log
 
 
-@pytest.mark.parametrize("record", [f"mesh {uuid(80)} ../escape.bin 4 6", f"mesh {uuid(80)} room-mesh.bin 600001 600000",
+@pytest.mark.parametrize("record", [f"mesh {uuid(80)} ../escape.bin 4 6",
+                                     f"mesh {uuid(80)} room-mesh.bin 600001 600000",
                                      f"mesh {uuid(80)} room-mesh.bin 4 7"])
 def test_mesh_caps_and_path_confinement(harness, tmp_path, record):
     room(tmp_path)
@@ -139,7 +141,8 @@ def test_mesh_caps_and_path_confinement(harness, tmp_path, record):
     run(harness, tmp_path, "room", 5, 0)
 
 
-@pytest.mark.parametrize("text", [None, "", "frameport-room 2\n", "bad 1\n", "# comment before magic\nframeport-room 1\n",
+@pytest.mark.parametrize("text", [None, "", "frameport-room 2\n", "bad 1\n",
+                                  "# comment before magic\nframeport-room 1\n",
                                   "frameport-room 1\noutline 3 0 0 1 1 2 2\n"])
 def test_box_fallback_unchanged(harness, tmp_path, text):
     if text is not None:
@@ -191,7 +194,7 @@ def test_failed_anchor_write_is_reported_and_rolled_back(harness, tmp_path):
 def test_missing_outline_and_ceiling_are_derived(harness, tmp_path):
     points = [(0, 0), (4, 0), (4, 3), (0, 3)]
     lines = ["frameport-room 1", f"room {uuid(1)}", f"floor {uuid(2)} 1"]
-    for i, ((x, z), (xx, zz)) in enumerate(zip(points, points[1:] + points[:1])):
+    for i, ((x, z), (xx, zz)) in enumerate(zip(points, points[1:] + points[:1], strict=True)):
         lines.append(f"wall {uuid(10 + i)} {x} {z} {xx} {zz} 1 4")
     (tmp_path / "room.txt").write_text("\n".join(lines) + "\n")
     run(harness, tmp_path, "derived")
@@ -221,7 +224,8 @@ def test_real_shim_bypasses_a_dispatcher_that_refuses_scene_calls(harness, tmp_p
     subprocess.run([*common, "-shared", "-fPIC", "-DFAKE_DISPATCH", str(native / "scene_shim_test.c"),
                     "-o", str(tmp_path / "libopenxr_loader.so")], check=True)
     shim = tmp_path / "libframe_xrshim.so"
-    subprocess.run([*common, "-shared", "-fPIC", "-fvisibility=hidden", "-I", str(ROOT / "tests/fixtures/src/host_include"),
+    subprocess.run([*common, "-shared", "-fPIC", "-fvisibility=hidden",
+                    "-I", str(ROOT / "tests/fixtures/src/host_include"),
                     str(ROOT / "native/xrshim/xrshim.c"), "-ldl", "-pthread", "-lm", "-o", str(shim)], check=True)
     binary = tmp_path / "test-shim"
     subprocess.run([*common, str(native / "scene_shim_test.c"), "-ldl", "-o", str(binary)], check=True)
