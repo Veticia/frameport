@@ -5,13 +5,27 @@ H.264 (Constrained) Baseline/Main/(Constrained) High and VP9 Profile 0 using Iri
 stateful V4L2 through FFmpeg. Android reports constrained H.264 streams under
 separate profile values, so they are listed as stock decoders list them.
 Output is 8-bit 4:2:0. HEVC Main 10 decodes in FFmpeg's software decoder inside
-the component and is rounded to 8 bits (no HDR tone mapping): Iris on the
-Frame's kernel (6.18) offers Main 10 only into its compressed `Q10C` capture
-format, and a Main 10 stream in an NV12 session returned no pictures, so the
-session hung and blocked later decoder starts in the app. `hevc_profile.h`
-reads the profile from the parameter sets (CODECCONFIG or the first access
-unit); streams beyond Main never open Iris. Measured on the Frame (software,
-4 threads): a 1080p Main 10 episode at 232 fps, a 4K Main 10 test clip at 72 fps.
+the component and is narrowed to 8 bits: Iris on the Frame's kernel (6.18)
+switches a Main 10 session to its compressed `Q10C` capture format by itself
+(the capture width becomes a multiple of 192), so an NV12 session returned no
+usable pictures, hung and blocked later decoder starts in the app. Mainline
+Iris gained linear P010 in Linux 7.2; `Q10C`'s compression isn't public.
+`hevc_profile.h` reads the profile from the parameter sets (CODECCONFIG or the
+first access unit); streams beyond Main never open Iris. Measured on the Frame
+(software, 4 threads): a 1080p Main 10 episode at 232 fps, a 4K Main 10 test
+clip at 72 fps.
+
+HDR pictures (PQ/HDR10 or HLG, from the bitstream or the container) are tone
+mapped to SDR BT.709 while they are narrowed (`hdr_tonemap.h`): BT.2390's
+EETF puts HDR reference white (203 cd/m²) at SDR white and rolls highlights
+off up to the content's MaxCLL (else the mastering display's peak, else
+1000 cd/m²); colour is converted per chroma sample through linear light into
+BT.709, and colours outside it move toward grey of the same luminance. The
+component then reports BT.709 (bitstream aspects preferred) so surfaces and
+its own RGBA conversion treat the picture as SDR. The work runs in the colour
+helper threads; one big core takes about 10 ms per 1080p picture and 40-50 ms
+per 4K picture, so 4K HDR is split over four threads. Other 10-bit pictures
+are rounded to 8 bits.
 Protected content keeps Android's existing codecs; clients selecting by MIME alone
 must still respect the component's advertised profiles. Other codec types
 retain Android's existing codecs. Applications that explicitly select their

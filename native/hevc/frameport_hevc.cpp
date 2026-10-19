@@ -22,9 +22,11 @@
 #include "yuv_copy.h"
 #include "yuv_color.h"
 #include "hevc_profile.h"
+#include "hdr_tonemap.h"
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavutil/opt.h>
+#include <libavutil/mastering_display_metadata.h>
 extern const YuvConstants kYvuH709Constants, kYvuI601Constants;
 extern const YuvConstants kYvuJPEGConstants;
 void NV21ToARGBRow_Any_NEON(const uint8_t*,const uint8_t*,uint8_t*,const YuvConstants*,int);
@@ -78,8 +80,10 @@ class ColorWorkers {
     AVFrame *frame=nullptr;uint8_t *output=nullptr;size_t stride=0;
     const YuvConstants *matrix=nullptr;
     FramePortYuvPlane planes[3]={};bool native_yuv=false;
+    void (*job)(void*,unsigned,unsigned)=nullptr;void *job_context=nullptr;
     void rows(unsigned band) {
         unsigned bands=count+1;
+        if(job){job(job_context,band,bands);return;}
         if(frame->format==AV_PIX_FMT_YUV420P || frame->format==AV_PIX_FMT_YUVJ420P){
             unsigned begin=(frame->height/2)*band/bands,end=(frame->height/2)*(band+1)/bands;
             if(native_yuv){
@@ -120,21 +124,35 @@ class ColorWorkers {
         }
         pthread_mutex_unlock(&pool.mutex);return nullptr;
     }
+    void start() {
+        if(started)return;
+        started=true;
+        for(unsigned i=0;i<3;i++) {
+            // Only this thread advances the generation, so a helper
+            // created now waits for the next picture, never a stale one.
+            workers[i]={this,i+1,generation,{}};
+            if(pthread_create(&workers[i].thread,nullptr,thread,&workers[i]))break;
+            count++;
+        }
+    }
 public:
+    /** Run fn(context, band, bands) over every band, this thread taking band 0. */
+    void run(void (*fn)(void*,unsigned,unsigned),void *context) {
+        start();
+        pthread_mutex_lock(&mutex);
+        job=fn;job_context=context;complete=0;generation++;
+        pthread_cond_broadcast(&work);pthread_mutex_unlock(&mutex);
+        rows(0);
+        pthread_mutex_lock(&mutex);
+        while(complete<count)pthread_cond_wait(&done,&mutex);
+        job=nullptr;
+        pthread_mutex_unlock(&mutex);
+    }
     void convert(AVFrame *source,uint8_t *destination,size_t pitch,const YuvConstants *constants,
         const AHardwareBuffer_Planes *native=nullptr) {
         // Start helpers when a large picture first appears, including after
         // an adaptive stream begins at a lower resolution.
-        if(!started && source->width*source->height>=4096*2048) {
-            started=true;
-            for(unsigned i=0;i<3;i++) {
-                // Only this thread advances the generation, so a helper
-                // created now waits for the next picture, never a stale one.
-                workers[i]={this,i+1,generation,{}};
-                if(pthread_create(&workers[i].thread,nullptr,thread,&workers[i]))break;
-                count++;
-            }
-        }
+        if(source->width*source->height>=4096*2048)start();
         pthread_mutex_lock(&mutex);
         frame=source;output=destination;stride=pitch;matrix=constants;complete=0;generation++;
         native_yuv=native!=nullptr;
@@ -160,6 +178,9 @@ class FramePortVideo final : public SoftVideoDecoderOMXComponent {
     AVCodecContext *codec=nullptr;
     AVCodecParserContext *parser=nullptr;
     AVFrame *frame=av_frame_alloc(),*narrow=av_frame_alloc();
+    // HDR pictures are tone mapped to SDR BT.709 while narrowed (hdr_tonemap.h); the output then reports BT.709
+    fp_tonemap *tonemap=nullptr;
+    bool tone_mapped=false;
     uint8_t *config=nullptr;
     size_t config_size=0;
     bool failed=false,held=false,drained=false,replace_config=false,surface=false;
@@ -368,15 +389,63 @@ class FramePortVideo final : public SoftVideoDecoderOMXComponent {
         if(aspects.mRange==ColorAspects::RangeFull)return bt709?&frameport_full709_rgba:&kYvuJPEGConstants;
         return bt709?&kYvuH709Constants:&kYvuI601Constants;
     }
+    struct ToneMapJob {const fp_tonemap *tm;AVFrame *src,*dst;};
+    static void toneMapBand(void *context,unsigned band,unsigned bands) {
+        auto &job=*static_cast<ToneMapJob*>(context);
+        int rows=(job.src->height+1)/2,begin=rows*band/bands,end=rows*(band+1)/bands;
+        const uint8_t *src[3]={job.src->data[0],job.src->data[1],job.src->data[2]};
+        uint8_t *dst[3]={job.dst->data[0],job.dst->data[1],job.dst->data[2]};
+        fp_tonemap_rows(job.tm,job.src->width,job.src->height,begin,end,src,job.src->linesize,dst,job.dst->linesize);
+    }
+    int hdrTransfer() {
+        // the bitstream's transfer, else the container's
+        if(frame->color_trc==AVCOL_TRC_SMPTE2084)return FP_TM_PQ;
+        if(frame->color_trc==AVCOL_TRC_ARIB_STD_B67)return FP_TM_HLG;
+        if(frame->color_trc!=AVCOL_TRC_UNSPECIFIED)return FP_TM_NONE;
+        Mutex::Autolock lock(mColorAspectsLock);
+        if(mDefaultColorAspects.mTransfer==ColorAspects::TransferST2084)return FP_TM_PQ;
+        if(mDefaultColorAspects.mTransfer==ColorAspects::TransferHLG)return FP_TM_HLG;
+        return FP_TM_NONE;
+    }
+    float contentPeak() {
+        // MaxCLL, else the mastering display's peak (0: unknown, 1000 cd/m² is assumed)
+        if(auto *side=av_frame_get_side_data(frame,AV_FRAME_DATA_CONTENT_LIGHT_LEVEL)){
+            auto *light=reinterpret_cast<const AVContentLightMetadata*>(side->data);
+            if(light->MaxCLL)return (float)light->MaxCLL;
+        }
+        if(auto *side=av_frame_get_side_data(frame,AV_FRAME_DATA_MASTERING_DISPLAY_METADATA)){
+            auto *display=reinterpret_cast<const AVMasteringDisplayMetadata*>(side->data);
+            if(display->has_luminance)return (float)av_q2d(display->max_luminance);
+        }
+        return 0;
+    }
     bool narrowTo8Bit() {
         // Software Main 10 pictures are 10-bit planar; every output here is
-        // 8-bit, so round to 8 bits (no tone mapping for HDR transfers).
+        // 8-bit SDR, so HDR is tone mapped to BT.709 and other pictures are rounded.
         av_frame_unref(narrow);
         narrow->format=AV_PIX_FMT_YUV420P;narrow->width=frame->width;narrow->height=frame->height;
         int result=av_frame_get_buffer(narrow,64);
         if(result>=0)result=av_frame_copy_props(narrow,frame);
         if(result<0){fail(result,"10-bit picture conversion");return false;}
-        for(int plane=0;plane<3;plane++) {
+        int transfer=hdrTransfer();
+        if(transfer!=FP_TM_NONE) {
+            bool full=frame->color_range==AVCOL_RANGE_JPEG;
+            bool matrix2020=frame->colorspace==AVCOL_SPC_BT2020_NCL || frame->colorspace==AVCOL_SPC_UNSPECIFIED;
+            bool primaries2020=frame->color_primaries==AVCOL_PRI_BT2020 || frame->color_primaries==AVCOL_PRI_UNSPECIFIED;
+            float peak=transfer==FP_TM_PQ?contentPeak():0;
+            if(!tonemap)tonemap=new fp_tonemap;
+            if(!tone_mapped || tonemap->transfer!=transfer || tonemap->full_range!=full || tonemap->matrix2020!=matrix2020 ||
+                tonemap->primaries2020!=primaries2020 || tonemap->peak!=fp_tonemap_peak(transfer,peak)) {
+                fp_tonemap_init(tonemap,transfer,full,matrix2020,primaries2020,peak);
+                ALOGI("%s HDR (%s, peak %.0f cd/m²): tone mapping to SDR BT.709",kind.mime,
+                    transfer==FP_TM_PQ?"PQ":"HLG",tonemap->peak);
+            }
+            tone_mapped=true;
+            ToneMapJob job={tonemap,frame,narrow};
+            color.run(toneMapBand,&job);
+            narrow->color_primaries=AVCOL_PRI_BT709;narrow->color_trc=AVCOL_TRC_BT709;
+            narrow->colorspace=AVCOL_SPC_BT709;narrow->color_range=AVCOL_RANGE_MPEG;
+        } else for(int plane=0;plane<3;plane++) {
             int width=plane?(frame->width+1)/2:frame->width,height=plane?(frame->height+1)/2:frame->height;
             for(int row=0;row<height;row++) {
                 const uint16_t *src=(const uint16_t*)(frame->data[plane]+row*frame->linesize[plane]);
@@ -566,7 +635,8 @@ protected:
         OMX_ERRORTYPE result=SoftVideoDecoderOMXComponent::internalSetParameter(index,params);
         rgbaPort();return result;
     }
-    int getColorAspectPreference() override {return kPreferContainer;}
+    // a tone mapped picture is BT.709 whatever the container says
+    int getColorAspectPreference() override {return tone_mapped?kPreferBitstream:kPreferContainer;}
     void onQueueFilled(OMX_U32) override {
         if(failed || mOutputPortSettingsChange!=NONE || drained)return;
         auto &inputs=getPortQueue(kInputPortIndex);auto &outputs=getPortQueue(kOutputPortIndex);
@@ -711,14 +781,14 @@ protected:
     void onReset() override {
         gpu_allowed=true;
         av_frame_unref(frame);av_parser_close(parser);parser=nullptr;gpu.clearBuffers();avcodec_free_context(&codec);av_freep(&config);config_size=0;clearHistory();
-        hardware_active=false;prefer_software=false;eos_submitted=false;replay_eos=false;
+        hardware_active=false;prefer_software=false;eos_submitted=false;replay_eos=false;tone_mapped=false;
         last_output_pts=discard_until=AV_NOPTS_VALUE;
         held=false;drained=false;failed=false;replace_config=false;
         SoftVideoDecoderOMXComponent::onReset();
         surface=false;native_enabled=false;metadata=false;mOutputFormat=OMX_COLOR_FormatYUV420Planar;
         updatePortDefinitions(true,false);
     }
-    ~FramePortVideo() override {av_frame_free(&frame);av_frame_free(&narrow);av_parser_close(parser);gpu.clearBuffers();avcodec_free_context(&codec);av_freep(&config);clearHistory();}
+    ~FramePortVideo() override {delete tonemap;av_frame_free(&frame);av_frame_free(&narrow);av_parser_close(parser);gpu.clearBuffers();avcodec_free_context(&codec);av_freep(&config);clearHistory();}
 public:
     FramePortVideo(const DecoderKind &type,const OMX_CALLBACKTYPE *callbacks,OMX_PTR appData,OMX_COMPONENTTYPE **component)
         :SoftVideoDecoderOMXComponent(type.name,type.role,type.coding,
