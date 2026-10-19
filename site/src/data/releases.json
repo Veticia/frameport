@@ -1,6 +1,14 @@
 {
- "updated": "2026-10-17",
+ "updated": "2026-10-19",
  "releases": [
+  {
+   "tag": "v1.3.0",
+   "name": "FramePort v1.3.0",
+   "date": "2026-10-19",
+   "url": "https://github.com/spoopyghosty0/frameport/releases/tag/v1.3.0",
+   "dev": false,
+   "notes": "FramePort v1.3.0: Windows (x64), macOS (Apple Silicon) and Linux (x64, ARM64).\n\n## What's new\n\n- **Mixed reality (experimental):** a new Room tab scans your room in the headset, shows it in 3D, cleans up the scan and lets you fix furniture, screen and door labels; mixed-reality games get the room through full Meta scene emulation (thanks @alicecatpaw).\n- **Quest 3 by default:** games see a Quest 3; the headset model, game language, foveation and render resolution can be set per game.\n- **Save backups:** choose the backup folder and keep automatic snapshots made on the Frame when a game closes.\n- **Steam library:** add new games to Steam now, at Steam's next start, or not at all.\n- **Files:** SD cards and other drives, plus sections for PC VR games and Linux apps.\n- **Controllers:** an experimental Quest button mode, and own button layouts for the gamepad in 2D apps.\n- **Game fixes:** Batman: Arkham Shadow's edge line and audio hooks (thanks @Lucas-Mathieu), PrimedGun, 4XVR's menus, Halo CE VR closing during the intro, OutRun, Transformers Beyond Reality, cube loading screens, and Unreal games whose install stopped at a memory patch check.\n- **Fixes:** USB setup without a flashing console, store details after a rename.\n- **22 new recipes.**\n\nAlready have FramePort? It offers this update itself (Library → **Update now**).\n\n## Install\n\nDownload the file for your PC, unpack it and start FramePort. Guide:\n[Install and first steps](https://frameport.app/docs/install/).\n\n"
+  },
   {
    "tag": "v1.2.1",
    "name": "FramePort v1.2.1",
