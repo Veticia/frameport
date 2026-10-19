@@ -111,7 +111,7 @@ shots:
 
   - name: room             # experimental: the pretend Frame's made-up bedroom scan (fakes.fake_room), no real scan
     docs: [README.md, docs/INSTALL.md]
-    viewport: [1280, 1640]
+    viewport: [1280, 1690]
     steps:
       - hook: open_room
       - wait_for: "Furniture & screens"
