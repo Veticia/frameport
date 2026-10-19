@@ -90,3 +90,12 @@ def test_clockwise_outline_and_wall_directions_are_repaired():
     got = parse(dumps(r))
     edges = list(zip(got.outline, got.outline[1:] + got.outline[:1], strict=True))
     assert all(((w.x0, w.z0), (w.x1, w.z1)) in edges for w in got.walls)
+
+
+def test_preview_is_seen_from_above_with_forward_at_the_top():
+    # a table in front of the play area (-Z) on the right (+X) must be drawn top right, not mirrored to bottom right
+    r = box_room(4, 4, 2.5)
+    r.volumes.append(Volume("a"*32, "TABLE", 1.5, -1.5, .8, 0, .5, .5, .8))
+    root = ET.fromstring(preview_svg(r))
+    label = next(e for e in root.iter() if e.text == "TABLE")
+    assert float(label.get("x")) > 250 and float(label.get("y")) < 250
