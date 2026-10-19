@@ -112,9 +112,10 @@ class RoomView:
                               left=0, right=0, bottom=0, bgcolor=T.soft(T.BG, 0.82),
                               padding=ft.Padding(T.S3, T.S2, T.S3, T.S2),
                               border_radius=ft.BorderRadius(0, 0, T.RADIUS_SM, T.RADIUS_SM))
-        view = ft.Stack([self.canvas.control, legend, self.placeholder,
-                         ft.Container(self.reset_btn, right=T.S2, top=T.S2)], height=T.px(CANVAS_HEIGHT))
-        self.canvas_card = C.card(view, padding=T.S3, col={"xs": 12, "lg": 8})
+        self.view = ft.Stack([self.canvas.control, legend, self.placeholder,
+                              ft.Container(self.reset_btn, right=T.S2, top=T.S2)], height=T.px(CANVAS_HEIGHT))
+        self.canvas_card = C.card(self.view, padding=T.S3, col={"xs": 12, "lg": 8})
+        self.canvas_card.on_size_change = self._card_sized
 
         # status
         self.checks = ft.Container(C.checklist([C.Check(None, tr("Checking the room…"))]))
@@ -137,8 +138,10 @@ class RoomView:
         self.summary = C.body("", T.TEXT)
         self.source = C.meta("")
         self.furniture = ft.Row([], spacing=T.S2, run_spacing=T.S2, wrap=True)
-        # the right column: as tall as the 3D view's card (its last card takes what's left),
-        # every card with the same padding
+        # the right column sizes to its content (never clipped: window width, UI scale and the furniture chips change
+        # its height); level() then makes the top row end level: a short column's last card grows to the 3D view's
+        # card (self.level_gap), a tall column makes the 3D view taller. Every card with the same padding.
+        self.level_gap = ft.Container(height=0)
         side = ft.Column([
             C.card(ft.Column([self.checks, self.error], spacing=T.S2), padding=T.S4),
             C.card(ft.Column([C.section(tr("Scan"), self.scan_box,
@@ -146,10 +149,11 @@ class RoomView:
                                         ft.Row([self.boundary_btn, self.delete_btn], spacing=T.S2, wrap=True),
                                         help="mr_room")], spacing=T.S3), padding=T.S4),
             C.card(ft.Column([C.meta(tr("In this room")), self.summary, self.source, self.furniture,
-                              ft.Container(expand=True), self._tester()], spacing=T.S2),
-                   padding=T.S4, expand=True),
+                              self.level_gap, self._tester()], spacing=T.S2),
+                   padding=T.S4),
         ], spacing=T.S4, col={"xs": 12, "lg": 4}, horizontal_alignment=ft.CrossAxisAlignment.STRETCH,
-            height=T.px(CANVAS_HEIGHT) + 2 * T.S3 + 2)
+            on_size_change=self._side_sized)
+        self._sizes = {"card": None, "side": None}
         # editing: the scan clean-up, what the label rules decided, furniture boxes + doors / windows
         from .room_edit import CleanupCard, FurnitureEditor, LabelsCard
 
@@ -308,6 +312,40 @@ class RoomView:
     def _ask_delete(self, e) -> None:
         C.confirm(self.app.page, tr("Delete room?"), tr("Games will use a simple room until you save another room."),
                   tr("Delete room"), lambda: RS.operate(self.app, "delete"), danger=True)
+
+    # ------------------------------------------------------------------ the top row ends level
+    def _card_sized(self, e) -> None:
+        self._sizes["card"] = (e.width, e.height)
+        self.level()
+
+    def _side_sized(self, e) -> None:
+        self._sizes["side"] = (e.width, e.height)
+        self.level()
+
+    def level(self) -> None:
+        """The right column's height (its content's, measured) against the 3D view's card: a shorter column gets a
+        gap in its last card, a taller one makes the 3D view taller. Stacked (narrow window): neither."""
+        card, side = self._sizes["card"], self._sizes["side"]
+        if not card or not side:
+            return
+        base = T.px(CANVAS_HEIGHT)
+        base_card = base + 2 * T.S3 + 2  # (the card's padding and border)
+        content = side[1] - (self.level_gap.height or 0)
+        gap, view = 0, base
+        if side[0] < card[0] * 0.9:  # side by side
+            if content <= base_card:
+                gap = int(base_card - content)
+            else:
+                view = base + int(content - base_card + 0.999)
+        changed = []
+        if gap != (self.level_gap.height or 0):
+            self.level_gap.height = gap
+            changed.append(self.level_gap)
+        if view != self.view.height:
+            self.view.height = self.canvas.control.height = view
+            changed.append(self.view)
+        if changed:
+            C.update(*changed)
 
     async def show_editing(self) -> None:
         """Scroll down to the editing cards (Clean-up, Furniture & screens, Labels)."""

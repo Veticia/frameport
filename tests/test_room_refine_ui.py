@@ -372,3 +372,10 @@ class _local_dir:
 
     def __exit__(self, *a):
         return False
+
+
+def test_box_sizes_keep_thin_sizes_readable():
+    from frameport.ui.views.room_edit import metres, size_text
+
+    assert metres(0.03) == "0.03" and metres(0.07) == "0.07" and metres(0.5) == "0.5" and metres(2.05) == "2.0"
+    assert size_text(1.6, 1.1, 0.03) == "1.6×1.1×0.03 m"

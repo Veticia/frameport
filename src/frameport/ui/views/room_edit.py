@@ -324,8 +324,7 @@ class LabelsCard:
     @staticmethod
     def _size(box: dict) -> str:
         try:
-            return tr("{w}×{d}×{h} m").format(w=f"{float(box['w']):.1f}", d=f"{float(box['d']):.1f}",
-                                               h=f"{float(box['h']):.1f}")
+            return size_text(float(box["w"]), float(box["d"]), float(box["h"]))
         except (KeyError, TypeError, ValueError):
             return ""
 
@@ -398,6 +397,15 @@ def _panel(rows: list[ft.Control]) -> ft.Container:
     return ft.Container(ft.Column(rows, spacing=T.S3, tight=True,
                                   horizontal_alignment=ft.CrossAxisAlignment.STRETCH),
                         bgcolor=T.SURFACE_2, border_radius=T.RADIUS_SM, padding=T.S3, visible=False)
+
+
+def metres(value: float) -> str:
+    """A box size in metres: one decimal, two below 10 cm (a rug's 3 cm isn't "0.0")."""
+    return f"{value:.2f}" if abs(value) < 0.095 else f"{value:.1f}"
+
+
+def size_text(w: float, d: float, h: float) -> str:
+    return tr("{w}×{d}×{h} m").format(w=metres(w), d=metres(d), h=metres(h))
 
 
 def field_label(name: str) -> str:
@@ -529,7 +537,7 @@ class FurnitureEditor:
     # ------------------------------------------------------------------ lists
     @staticmethod
     def _box_size(v) -> str:
-        return tr("{w}×{d}×{h} m").format(w=f"{v.w:.1f}", d=f"{v.d:.1f}", h=f"{v.h:.1f}")
+        return size_text(v.w, v.d, v.h)
 
     def _plane_info(self, i: int) -> str:
         p = self.room.planes[i]
