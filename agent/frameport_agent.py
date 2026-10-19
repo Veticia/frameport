@@ -47,7 +47,7 @@ try:
 except ImportError:  # Windows: pc_revive loads this file for its VDF code only (GitHub #131)
     fcntl = None
 
-AGENT_VERSION = 105
+AGENT_VERSION = 106
 HOME = os.path.expanduser("~")
 STEAM = os.path.join(HOME, ".local/share/Steam")
 ANCHORS = os.path.join(HOME, "Applications/quest-frame")
@@ -5233,6 +5233,19 @@ def cmd_room_capture_status(args):
             return json.load(f)
     except (OSError, ValueError):
         return {"state": "none"}
+
+
+def cmd_room_capture_stop(args):
+    """Cancel a running room scan (the Room tab's Cancel): stop its job (systemd ends the recorder and the room
+    builder with it); the saved room stays as it was."""
+    state = cmd_room_capture_status({})
+    p = run(["systemctl", "--user", "list-units", "--no-legend", "--plain", f"{ROOM_SCAN_UNIT}-*"])
+    units = [line.split()[0] for line in (p.stdout or "").splitlines() if line.strip()]
+    stopped = [u for u in units if run(["systemctl", "--user", "stop", u]).returncode == 0]
+    if state.get("state") in ("waiting", "recording", "building"):  # the job can't write its own end any more
+        state.update(state="failed", error="cancelled", cancelled=True, finished=time.time())
+        _write_json(ROOM_SCAN_STATUS, state)
+    return {"stopped": stopped, "state": state.get("state")}
 
 
 def room_capture_worker(payload):

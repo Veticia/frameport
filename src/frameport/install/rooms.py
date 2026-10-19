@@ -42,6 +42,15 @@ def capture_status(frame) -> dict:
 SCAN_DONE = ("done", "failed", "none")
 
 
+class ScanCancelled(RuntimeError):
+    """The scan was cancelled (cancel_scan, the Room tab's Cancel)."""
+
+
+def cancel_scan(frame) -> dict:
+    """Stop a running scan in the headset; the saved room stays."""
+    return frame.agent("room_capture_stop")
+
+
 def scan(frame, seconds: float = 90, wait: float = 180, progress=None, poll: float = 2.0,
          sleep=time.sleep, preview: bool = True) -> dict:
     """capture() and wait for the result. progress(status) gets every status the agent reports (state waiting ->
@@ -57,6 +66,8 @@ def scan(frame, seconds: float = 90, wait: float = 180, progress=None, poll: flo
         if time.monotonic() > deadline:
             raise RuntimeError("The room scan didn't finish")
         sleep(poll)
+    if st.get("cancelled") or st.get("error") == "cancelled":
+        raise ScanCancelled("The room scan was cancelled")
     if st.get("state") != "done":
         raise RuntimeError(st.get("error") or "The room scan didn't finish")
     return st
