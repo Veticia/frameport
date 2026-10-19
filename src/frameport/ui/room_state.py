@@ -67,7 +67,9 @@ def model_key(status: dict | None) -> tuple | None:
     from ..mr.room import parse
 
     room = parse(text)
-    return room.universe, room.time, room.uuid, room.mesh.uuid if room.mesh else None
+    # + the text itself: a clean-up or a box edit may keep the room's ids and time
+    return (room.universe, room.time, room.uuid, room.mesh.uuid if room.mesh else None,
+            hashlib.sha256(text.encode()).hexdigest()[:16])
 
 
 def _cache_root(target):
@@ -114,19 +116,17 @@ def load_model(target, room_text: str, key: tuple) -> dict:
     the Frame), parsed and prepared for the canvas."""
     from ..install import rooms
     from ..mr import view3d
-    from ..mr.room import parse, read_mesh
+    from ..mr.room import dumps, parse, read_mesh
 
     room = parse(room_text)
     root = _cache_root(target)
-    folder = root / f"{room.universe}-{room.time}-{room.uuid[:8]}"
+    folder = root / f"{room.universe}-{room.time}-{room.uuid[:8]}-{key[-1] if len(key) > 4 else ''}"
     mesh_bytes = None
     path = folder / "room.txt"
     fresh = path.is_file() and (room.mesh is None or (folder / room.mesh.filename).is_file())
     if fresh:
-        try:
-            cached_room = parse(path.read_text(encoding="utf-8"))
-            fresh = cached_room.uuid == room.uuid and (cached_room.mesh and cached_room.mesh.uuid) == (
-                room.mesh and room.mesh.uuid)
+        try:  # the same room file (a clean-up keeps the ids but changes the mesh: its counts and the text differ)
+            fresh = path.read_text(encoding="utf-8") == dumps(room)
         except (OSError, ValueError):
             fresh = False
     if not fresh:
@@ -221,3 +221,60 @@ def operate(app, action: str) -> None:
             state(app, force=True)
             app.refresh_view()
     app.run_bg(work)
+
+
+def _frame_job(app, working: str, title: str, run) -> None:
+    """A Room tab action on the Frame as an Activity job (kind tool-frame: a lost connection pauses it); the cache
+    says what runs (working) and its stage (job_stage) for the tab's progress line, and takes the room status the
+    action returns (the 3D model reloads when the room changed)."""
+    cached = state(app)
+    target = app.target
+    if target is None or cached["loading"] or cached.get("working"):
+        return
+    cached.update(working=working, job_stage=tr("Waiting for the Frame…"))
+    app.refresh_view()
+
+    def job(j):
+        def stage(text):
+            cached["job_stage"] = text
+            j.reporter.stage(text)
+            if app.target is target:
+                app.refresh_view()
+        try:
+            result = run(target, stage)
+            if isinstance(result, dict) and "room_text" in result:
+                cached.update(status=result, time=time.monotonic(), error=None)
+            return result.pop("_message", None) if isinstance(result, dict) else None
+        finally:
+            cached.update(working=False, job_stage=None)
+            if app.target is target:
+                state(app, force=True)  # (the Frame page's preview too)
+                _maybe_load_model(app, cached)
+                app.refresh_view()
+    app.submit(title, job, kind="tool-frame")
+
+
+def refine_room(app, settings: dict | None, keep_edits: bool = True) -> None:
+    """Clean up the saved room's scan again on the Frame with `settings` (also saved there for the next scans)."""
+    def run(target, stage):
+        from ..install import rooms
+
+        stage(tr("Cleaning up the scan on the Frame…"))
+        result = rooms.refine(target.frame, settings, keep_edits=keep_edits)
+        state(app)["refine_result"] = result.get("report") or result.get("summary") or {}
+        result["_message"] = tr("Room scan cleaned up")
+        return result
+    _frame_job(app, "refine", tr("Clean up the room scan"), run)
+
+
+def save_room(app, room, mesh: bytes | None) -> None:
+    """Save the Room tab's edited furniture boxes, doors and windows on the Frame."""
+    def run(target, stage):
+        from ..install import rooms
+
+        stage(tr("Saving your room on the Frame…"))
+        rooms.put_room(target.frame, room, mesh)
+        result = rooms.status(target.frame)
+        result["_message"] = tr("Room saved")
+        return result
+    _frame_job(app, "save", tr("Save room edits"), run)

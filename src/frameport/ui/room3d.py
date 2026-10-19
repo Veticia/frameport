@@ -52,13 +52,16 @@ class RoomCanvas:
             "wall_lines": ("lines", dict(color=T.soft(blue, 0.6), stroke_width=T.px(1.4), style=stroke)),
             "boxes": ("fill", dict(color=T.soft(T.ACCENT, 0.16), style=fill)),
             "box_lines": ("lines", dict(color=T.soft(T.ACCENT, 0.85), stroke_width=T.px(1.3), style=stroke)),
+            "planes": ("fill", dict(color=T.soft(T.OK, 0.35), style=fill)),
+            "selected": ("lines", dict(color=T.TEXT, stroke_width=T.px(2.5), style=stroke)),
             "marker": ("fill", dict(color=T.ACCENT, style=fill)),
         }
+        self.on_pick = None  # callback(("box", i) / ("plane", i) / None) for a click on the room (the box editor)
         self.canvas = cv.Canvas([], expand=True, on_resize=self._resized)
         self.detector = ft.GestureDetector(
             self.canvas, mouse_cursor=ft.MouseCursor.MOVE, drag_interval=16,
             on_scale_start=self._scale_start, on_scale_update=self._scale_update, on_scale_end=self._scale_end,
-            on_scroll=self._scroll, on_double_tap=lambda e: self.fit(),
+            on_scroll=self._scroll, on_double_tap=lambda e: self.fit(), on_tap_up=self._tap,
             on_right_pan_start=self._right_start, on_right_pan_update=self._right_update,
             on_right_pan_end=lambda e: self._end_move())
         self.control = ft.Container(self.detector, height=self.height, expand=True, bgcolor=T.BG,
@@ -108,6 +111,11 @@ class RoomCanvas:
             self.cam.zoom(1.0015 ** dy)
             self._move()
             self._end_move()
+
+    def _tap(self, e) -> None:
+        if self.on_pick is None or self.scene is None or e.local_position is None:
+            return
+        self.on_pick(V.pick(self.scene, self.cam, e.local_position.x, e.local_position.y))
 
     def _right_start(self, e) -> None:
         self._right = (e.local_position.x, e.local_position.y)
@@ -181,7 +189,7 @@ class RoomCanvas:
         f = V.render(self.scene, self.cam, lod)
         data = {"grid": f.grid, "floor": [f.floor] if f.floor else [], "hidden": f.hidden_walls, "walls": f.walls,
                 "mesh": f.mesh, "wall_lines": f.wall_lines, "boxes": f.boxes, "box_lines": f.box_lines,
-                "marker": [f.marker] if f.marker else []}
+                "planes": f.planes, "selected": f.selected, "marker": [f.marker] if f.marker else []}
         if lod == "drag" and len(f.boxes) > MAX_DRAG_BOX_FACES:  # a room full of furniture: outlines while moving
             data["boxes"] = []
         shapes = []
@@ -207,6 +215,7 @@ class RoomCanvas:
         return ft.Row([key(T.soft(T.SECONDARY, 0.5), tr("Walls")),
                        key(T.soft(T.SECONDARY, 0.7), tr("Scanned surfaces"), line=True),
                        key(T.soft(T.ACCENT, 0.6), tr("Furniture")),
+                       key(T.soft(T.OK, 0.6), tr("Doors and windows")),
                        key(T.ACCENT, tr("Middle of your play area, facing forward"))],
                       spacing=T.S4, run_spacing=T.S2, wrap=True)
 
