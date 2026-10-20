@@ -56,12 +56,13 @@ class RoomView:
         head = ft.Column([ft.Row([C.title(tr("Room")), pill], spacing=T.S3,
                                  vertical_alignment=ft.CrossAxisAlignment.CENTER),
                           C.body(tr("The room mixed-reality games see: walls, furniture and the scanned surfaces"))],
-                         spacing=T.px(2), expand=1)
-        if not actions:
+                         spacing=T.px(2))
+        if not actions:  # (alone in the page's Column: an expand here took half the window's height)
             return head
-        return ft.Row([head, ft.Container(ft.Row(actions, spacing=T.S3, run_spacing=T.S2, wrap=True,
-                                                 alignment=ft.MainAxisAlignment.END,
-                                                 vertical_alignment=ft.CrossAxisAlignment.CENTER), expand=1)],
+        return ft.Row([ft.Container(head, expand=1),
+                       ft.Container(ft.Row(actions, spacing=T.S3, run_spacing=T.S2, wrap=True,
+                                           alignment=ft.MainAxisAlignment.END,
+                                           vertical_alignment=ft.CrossAxisAlignment.CENTER), expand=1)],
                       vertical_alignment=ft.CrossAxisAlignment.CENTER, spacing=T.S3)
 
     def _tester(self) -> ft.Control:
