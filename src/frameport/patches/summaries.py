@@ -94,6 +94,8 @@ SUMMARIES = {
                                   "Android 12 vibrator call).",
     "frame.bhaptics_permission": "Stops bHaptics from asking for a Bluetooth permission the Frame doesn't have (the "
                                  "game would freeze on its loading screen).",
+    "device.shared_folder": "Makes a folder of this game's storage the same as another game's (e.g. a companion app "
+                            "that manages its game's mods), as on a Quest where all apps share one storage.",
     "frame.pojlib_connection": "Lets QuestCraft download its Java runtime: it waits for Wi-Fi, and the Frame's "
                                 "Android reports its network as Ethernet.",
     "frame.eos_keychain_loop":"Stops Epic Online Services from retrying its login keychain forever (the game "

@@ -2737,6 +2737,8 @@ Extra settings for the Android container (for testing).
 
 ### <a id="device-shared_folder"></a>Share a folder with another game
 
+Makes a folder of this game's storage the same as another game's (e.g. a companion app that manages its game's mods), as on a Quest where all apps share one storage.
+
 - `device.shared_folder` · also for 2D apps
 - **Changes:** Install only: written on the Frame when the game is installed; the APK isn't changed.
 - **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.

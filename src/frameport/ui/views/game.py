@@ -445,7 +445,7 @@ class GameView:
         for name, wanted in pipeline.misnamed_obbs(g):  # a renamed build's OBB next to the original APK (#129)
             out.append(C.callout(tr("{name} is named for another app, so the game won't find it. Rename it to "
                                     "{wanted}, scan again and install it again.").format(name=name, wanted=wanted),
-                                 "warn", ft.Icons.DRIVE_FILE_RENAME_OUTLINE_ROUNDED))
+                                 "warn", ft.Icons.DRIVE_FILE_RENAME_OUTLINE_OUTLINED))
         web = (extra.get("web_wrapper") or None) if not self.rift and not self.linux else None
         if web:
             out.append(C.callout(ft.Column([

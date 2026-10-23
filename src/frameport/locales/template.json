@@ -1100,6 +1100,7 @@
  "Low": "",
  "Made in another play area: scan again or use your play area.": "",
  "Make Unity text fields work": "",
+ "Makes a folder of this game's storage the same as another game's (e.g. a companion app that manages its game's mods), as on a Quest where all apps share one storage.": "",
  "Makes an embedded OpenXR loader use FrameBridge and your game settings.": "",
  "Makes BlazeRush's menus and controllers work without Meta's avatars, and lets its shader fixes take effect.": "",
  "Makes grip, trigger and touch controls reach the game's hands (it picked the empty Gear VR controls on the Frame, for example Vader Immortal).": "",
