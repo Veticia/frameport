@@ -839,6 +839,39 @@ class Language(Patch):
         ctx.env[self.ENV_KEY] = f"0\npersist.sys.locale={tag}"
 
 
+SHARE_PACKAGE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$")
+SHARE_FOLDER = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}$")
+
+
+class SharedFolder(Patch):
+    id = "device.shared_folder"
+    title = "Share a folder with another game"
+    description = ("On a Quest every app sees the same /sdcard; on the Frame each game has its own. This makes a "
+                   "folder of this game's /sdcard the same folder as in another game's, e.g. a companion app that "
+                   "manages its game's mods and start options (JKXR's companion app and /sdcard/JKXR, GitHub #440). "
+                   "The folder stays in the other game's storage; this game's own copy of it, if it had one, is kept "
+                   "beside it. Both games must be installed on the Frame. Applied with Update on Frame.")
+    category = "device"
+    needs_vr = False
+    stage = "install"
+    params = [Param("game", "str", "", "The other game's package, e.g. com.drbeef.jkxr"),
+              Param("folder", "str", "", "The folder in /sdcard to share, e.g. JKXR")]
+    ENV_KEY = "FRAMEPORT_SHARE"
+
+    def applies(self, a):
+        return True
+
+    def install(self, ctx: InstallContext) -> None:
+        game, folder = str(ctx.params.get("game") or "").strip(), str(ctx.params.get("folder") or "").strip()
+        if not game and not folder:
+            return
+        if not SHARE_PACKAGE.match(game):
+            raise ValueError(f"Not a package name: {game!r} (for example com.drbeef.jkxr)")
+        if not SHARE_FOLDER.match(folder) or folder in (".", ".."):
+            raise ValueError(f"Not a folder name in /sdcard: {folder!r} (for example JKXR)")
+        ctx.env[self.ENV_KEY] = f"{game}:{folder}"
+
+
 class SteamGamepad(Patch):
     id = "device.steam_gamepad"
     title = "Controllers as a gamepad (Steam Input)"
@@ -1033,6 +1066,7 @@ register(LeptonEnv)
 register(HideNavBar)
 register(Language)
 register(SteamGamepad)
+register(SharedFolder)
 register(TextInputWindow)
 register(DisplayMode)
 register(Foveation)

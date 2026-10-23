@@ -1058,6 +1058,34 @@ def test_launchers_give_lepton_the_resolved_time_zone(monkeypatch, tmp_path):
     assert a.set_tz_line("#!/bin/bash\n# a Linux app\n") == "#!/bin/bash\n# a Linux app\n"
 
 
+def test_shared_folder_links_the_other_games_folder(monkeypatch, tmp_path):
+    """GitHub #440: JKXR's companion app needs JKXR's /sdcard/JKXR; each Lepton game has its own /sdcard."""
+    import subprocess
+
+    a = load_agent(monkeypatch, tmp_path)
+    home = tmp_path / "home"
+    jk = home / "Applications/quest-frame/com.drbeef.jkxr"
+    jk.mkdir(parents=True)
+    (jk / "deployment.json").write_text(json.dumps({"base": str(jk)}))
+    comp = home / "Applications/quest-frame/com.BaggyG.JKXR_Companion_App"
+    own = comp / "lepton-data/external/JKXR"
+    own.mkdir(parents=True)
+    (own / "old.txt").write_text("x")  # the companion's own folder from before: kept beside the link
+    text = a.set_share_lines("x=1\nchild=''\nrest\n", True)
+    assert a.set_share_lines(text, True) == text and a.set_share_lines("child=''", False) == "child=''"
+    script = "app_dir=%s\n" % comp + text.split("child=''")[0] + 'echo "LIB=$STEAM_COMPAT_LIBRARY_PATHS"\n'
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env={
+        "HOME": str(home), "PATH": os.environ["PATH"], "FRAMEPORT_SHARE": "com.drbeef.jkxr:JKXR",
+        "STEAM_COMPAT_LIBRARY_PATHS": str(comp)}).stdout
+    src = jk / "lepton-data/external/JKXR"
+    assert os.readlink(comp / "lepton-data/external/JKXR") == str(src) and src.is_dir()
+    assert (comp / "lepton-data/external/JKXR.frameport-own/old.txt").exists()
+    assert f"LIB={comp}:{src}" in out
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env={
+        "HOME": str(home), "PATH": os.environ["PATH"], "FRAMEPORT_SHARE": "com.missing.game:JKXR"}).stdout
+    assert "isn't installed" in out
+
+
 def test_keyboard_session_reports_a_refused_device(monkeypatch, tmp_path):
     import io
 

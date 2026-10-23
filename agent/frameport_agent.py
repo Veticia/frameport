@@ -48,7 +48,7 @@ try:
 except ImportError:  # Windows: pc_revive loads this file for its VDF code only (GitHub #131)
     fcntl = None
 
-AGENT_VERSION = 114
+AGENT_VERSION = 115
 HOME = os.path.expanduser("~")
 STEAM = os.path.join(HOME, ".local/share/Steam")
 ANCHORS = os.path.join(HOME, "Applications/quest-frame")
@@ -3484,6 +3484,41 @@ def set_tz_line(text):
     return text.replace("\nexport IS_PARENT=true\n", "\nexport IS_PARENT=true\n" + TZ_LINE + "\n", 1)
 
 
+# device.shared_folder (GitHub #440): FRAMEPORT_SHARE="<other package>:<folder>". On a Quest every app sees one
+# /sdcard; in Lepton each game has its own. The folder becomes a link to the other game's copy, and that path joins
+# STEAM_COMPAT_LIBRARY_PATHS, which Lepton bind-mounts at the same path (as it does for ~/Documents behind its own
+# Documents link). A real folder of this game's with that name is kept beside it (<folder>.frameport-own).
+SHARE_LINES = r"""# FramePort: a folder shared with another game's storage (device.shared_folder)
+if [[ -n "${FRAMEPORT_SHARE:-}" ]]; then
+    share_pkg=${FRAMEPORT_SHARE%%:*}; share_dir=${FRAMEPORT_SHARE#*:}
+    share_base=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["base"])' \
+        "$HOME/Applications/quest-frame/$share_pkg/deployment.json" 2>/dev/null)
+    share_link="$HOME/.local/share/frameport/lepton-paths/$share_pkg"  # Lepton can't take paths with spaces
+    [[ -e "$share_link" ]] && share_base="$share_link"
+    if [[ -n "$share_base" && "$share_dir" != */* && "$share_dir" != .* ]]; then
+        share_src="$share_base/lepton-data/external/$share_dir"
+        share_dst="$app_dir/lepton-data/external/$share_dir"
+        mkdir -p "$share_src" "$app_dir/lepton-data/external"
+        if [[ -d "$share_dst" && ! -L "$share_dst" ]]; then
+            rmdir "$share_dst" 2>/dev/null || mv "$share_dst" "$share_dst.frameport-own"
+        fi
+        ln -sfn "$share_src" "$share_dst"
+        export STEAM_COMPAT_LIBRARY_PATHS="${STEAM_COMPAT_LIBRARY_PATHS:+$STEAM_COMPAT_LIBRARY_PATHS:}$share_src"
+        echo "FramePort: /sdcard/$share_dir is $share_pkg's"
+    else
+        echo "FramePort: can't share /sdcard/$share_dir: $share_pkg isn't installed on this Frame"
+    fi
+fi
+"""
+
+
+def set_share_lines(text, wanted):
+    """SHARE_LINES before the container starts (`child=''`), once, when the recipe shares a folder."""
+    if not wanted or SHARE_LINES in text or "\nchild=''\n" not in text:
+        return text
+    return text.replace("\nchild=''\n", "\n" + SHARE_LINES + "child=''\n", 1)
+
+
 def upgrade_launchers():
     """Give launchers written by older agents the parent watchdog, the dashboard closer and the play-session log (in
     place: a new file, so a running launcher keeps reading the old one). Returns the packages changed."""
@@ -3988,6 +4023,7 @@ def write_launcher(anchor, base, pkg, title, appid, lepton, env, hw_video=False,
                             plays_end=plays_lines(anchor)[1], save_snapshot=snapshot_line(pkg),
                             restart=restart_block(pkg, lepton))
     text = set_tz_line(text)
+    text = set_share_lines(text, bool((env or {}).get("FRAMEPORT_SHARE")))
     try:
         ensure_lepton_shims()
     except OSError:

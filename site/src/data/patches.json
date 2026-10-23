@@ -444,6 +444,11 @@
   "title": "Extra Lepton settings",
   "group": "Files and settings on the Frame"
  },
+ "device.shared_folder": {
+  "anchor": "device-shared_folder",
+  "title": "Share a folder with another game",
+  "group": "Files and settings on the Frame"
+ },
  "device.steam_gamepad": {
   "anchor": "device-steam_gamepad",
   "title": "Controllers as a gamepad (Steam Input)",

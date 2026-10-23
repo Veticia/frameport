@@ -73,6 +73,9 @@ def suggest(analysis: Analysis, use_catalog: bool = True) -> Recipe:
             recipe.reasons["device.files"] = why
         if entry.lepton_env:
             recipe.patches["device.lepton_env"] = {"env": dict(entry.lepton_env)}
+        if entry.shared_folder:
+            recipe.patches["device.shared_folder"] = dict(entry.shared_folder)
+            recipe.reasons["device.shared_folder"] = why
         if entry.config_sync:
             recipe.patches["device.config_sync"] = {"files": {k: dict(v) for k, v in entry.config_sync.items()}}
             recipe.reasons["device.config_sync"] = why
