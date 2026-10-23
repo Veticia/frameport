@@ -110,3 +110,34 @@ def test_swapchain_pool_catalog_is_gated_for_older_apps(monkeypatch):
     # Older installed apps see this catalog from main, but cannot register the new adapter key.
     monkeypatch.delitem(base.REGISTRY, "adapter.swapchain_pool")
     assert "adapter.swapchain_pool" in catalog.unusable_reason(entry)
+
+
+def test_a_newer_entry_this_app_cant_use_keeps_the_last_usable_one(github):
+    """An entry naming a patch, setting or field this app doesn't have must not change its games' recipes: the last
+    remote entry it could use stays (not the bundled one, which can be older and broken, e.g. AC Nexus on Quest 3)."""
+    files, _ = github
+    catalog.refresh_remote(force=True)
+    assert catalog.load(refresh=True)["com.x.good"].status == "works"
+    newer = GOOD.replace("- frame.unity_text_input", "- frame.unity_text_input\n- frame.not_yet_released") \
+        .replace("status: works", "status: issues")
+    files["catalog/games/com.x.good.yaml"] = ("s7", newer)
+    catalog.refresh_remote(force=True)
+    entries = catalog.load(refresh=True)
+    assert entries["com.x.good"].status == "works" and entries["com.x.good"].origin == "remote"
+    assert "frame.not_yet_released" in catalog.remote_status()["skipped"]["com.x.good"]
+    # usable again (the app was updated, or the entry fixed): that one is used and becomes the last usable one
+    files["catalog/games/com.x.good.yaml"] = ("s8", GOOD.replace("status: works", "status: issues"))
+    catalog.refresh_remote(force=True)
+    assert catalog.load(refresh=True)["com.x.good"].status == "issues"
+    # never usable here: nothing to keep, as before
+    assert "com.x.future" not in catalog.load(refresh=True)
+
+
+def test_fields_that_stand_for_a_patch_need_it(monkeypatch):
+    from frameport.patches import base
+
+    entry = {"package": "com.x.y", "title": "Y", "status": "works", "shared_folder": {"game": "com.a.b", "folder": "F"}}
+    assert catalog.unusable_reason(entry) is None
+    monkeypatch.setitem(catalog.FIELD_PATCHES, "shared_folder", "device.not_in_this_app")
+    base.load_all()
+    assert "device.not_in_this_app" in catalog.unusable_reason(entry)

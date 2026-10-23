@@ -132,6 +132,12 @@ def remote_enabled() -> bool:
         return True
 
 
+# catalog fields that the engine turns into a patch of the recipe: the patch must exist in this app too
+FIELD_PATCHES = {"foveation": "device.foveation", "lepton_env": "device.lepton_env", "device_files": "device.files",
+                 "config_sync": "device.config_sync", "shared_folder": "device.shared_folder",
+                 "proton_env": "pcvr.proton_env", "proton_tool": "pcvr.proton_tool"}
+
+
 def unusable_reason(entry_dict: dict) -> str | None:
     """Why this FramePort can't use a (remote) entry, or None: a recipe field, patch or adapter setting it doesn't
     know (the entry was written for a newer FramePort), or min_app above this version."""
@@ -149,6 +155,7 @@ def unusable_reason(entry_dict: dict) -> str | None:
     ids = [i for key in ("overport_extra", "overport_remove", "alt_overport", "frame", "frame_remove", "device",
                          "pcvr", "pcvr_remove") for i in (entry_dict.get(key) or [])]
     ids += [f"adapter.{k}" for k in (entry_dict.get("adapter") or {})]
+    ids += [patch for field_name, patch in FIELD_PATCHES.items() if entry_dict.get(field_name)]
     missing = [i for i in ids if isinstance(i, str) and i not in known]
     return f"unknown patch(es) {', '.join(missing)}" if missing else None
 
@@ -213,6 +220,44 @@ def remote_status() -> dict:
 _skipped: dict[str, str] = {}
 
 
+def _last_good_path(package: str) -> Path | None:
+    return cache.cache_dir() / f"catalog-lastgood-{package}.yaml" if PACKAGE_RE.match(package) else None
+
+
+def _usable_remote(d: dict, text: str | None = None) -> CatalogEntry | None:
+    """The remote entry when this app can use it (and remembered as the last usable one), else the last usable remote
+    entry for that game: a newer entry naming patches or settings this app doesn't have must not change its games'
+    recipes back to the bundled entry (an older, sometimes broken recipe) while the app waits for its update."""
+    pkg = d["package"]
+    keep = _last_good_path(pkg)
+    reason = unusable_reason(d)
+    if not reason:
+        try:
+            entry = CatalogEntry.from_dict(d, "remote")
+        except Exception:  # noqa: BLE001
+            return None
+        if keep is not None:
+            try:
+                keep.write_text(text if text is not None else yaml.safe_dump(d, sort_keys=False, allow_unicode=True),
+                                encoding="utf-8")
+            except OSError:
+                pass
+        return entry
+    _skipped[pkg] = reason
+    if keep is None:
+        return None
+    try:
+        old = yaml.safe_load(keep.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return None
+    if not isinstance(old, dict) or old.get("package") != pkg or unusable_reason(old):
+        return None
+    try:
+        return CatalogEntry.from_dict(old, "remote")
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _load_github() -> dict[str, CatalogEntry]:
     """Cached entries from GitHub main (no network here)."""
     import json
@@ -230,14 +275,9 @@ def _load_github() -> dict[str, CatalogEntry]:
             continue
         if not isinstance(d, dict) or not d.get("package"):
             continue
-        reason = unusable_reason(d)
-        if reason:
-            _skipped[d["package"]] = reason
-            continue
-        try:
-            out[d["package"]] = CatalogEntry.from_dict(d, "remote")
-        except Exception:  # noqa: BLE001
-            continue
+        entry = _usable_remote(d)
+        if entry is not None:
+            out[d["package"]] = entry
     return out
 
 
@@ -255,11 +295,9 @@ def _load_remote() -> dict[str, CatalogEntry]:
         if text:
             try:
                 d = yaml.safe_load(text)
-                reason = unusable_reason(d)
-                if reason:
-                    _skipped[pkg] = reason
-                    continue
-                out[pkg] = CatalogEntry.from_dict(d, "remote")
+                entry = _usable_remote(d, text) if isinstance(d, dict) and d.get("package") == pkg else None
+                if entry is not None:
+                    out[pkg] = entry
             except Exception:
                 pass
     return out
