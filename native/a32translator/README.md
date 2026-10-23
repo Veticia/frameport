@@ -141,8 +141,9 @@ python native/a32translator/bridge/build.py [--test]
   `vrapi_GetPredictedTracking`). The runtime exports it itself (`libvrapi.so` is a system library; the game's copy is
   Oculus' loader and is dropped) and translates it to FramePort's 64-bit VrApi -> OpenXR bridge (shipped as
   `libfp_vrapi64.so`, with OVRPort's OpenXR dispatcher and the FrameBridge adapter). Layouts are VrApi 1.5's.
-- **NDK media** (`host/media.c`, imports.txt): libmediandk's AMediaFormat/AMediaCodec/AMediaExtractor as Unity's
-  video player looks them up (it drops NDK playback if one is missing, and its JNI fallback needs
+- **NDK media** (`host/media.c`, imports.txt): libmediandk's AMediaFormat/AMediaCodec/AMediaExtractor functions and
+  its `AMEDIAFORMAT_KEY_*` string variables (`guest/media_keys.c`, AOSP's values), as Unity's video player looks
+  them up (it drops NDK playback if one is missing, and its JNI fallback needs
   `GetDirectBufferAddress` of codec buffers above 4 GiB). Format strings/buffers get guest copies freed with the
   format; codec buffers get a guest mirror per (codec, input/output, index): input mirrors go to the codec at
   `queueInputBuffer` (the queued range), output buffers come in at `getOutputBuffer` (the range

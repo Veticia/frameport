@@ -288,6 +288,9 @@ def gen_guest(ndk, imports, gdir, extra):
         names[n] = n
     for n, *_ in imports:
         names[n] = n
+    # libmediandk's data symbols (const char * variables), defined in guest/media_keys.c
+    for n in re.findall(r"^KEY\((\w+),", (HERE / "guest" / "media_keys.c").read_text(), re.M):
+        names[f"AMEDIAFORMAT_KEY_{n}"] = f"AMEDIAFORMAT_KEY_{n}"
     for n in extra:
         names.setdefault(n, OVERRIDES.get(n, n))
     missing = sorted(want - have - set(OVERRIDES) - SKIP - set(COMPAT))

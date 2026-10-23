@@ -284,6 +284,7 @@ static void test_media(const char *dir)
     uint32_t fn = h ? a32b_sym(h, "media_test") : 0;
     int r = fn ? (int)a32b_call(fn, NULL, 0) : -1;
     CHECK(r >= 0 && (r & 1), "libmediandk: every function Unity's video player looks up resolves (0x%x)", r);
+    CHECK(r >= 0 && (r & 64), "libmediandk data symbols: every AMEDIAFORMAT_KEY_* Unity looks up, with AOSP's value");
     CHECK(r >= 0 && (r & 2), "AMediaFormat: values both ways, host-owned string, buffer and toString copied in");
     CHECK(fake_media.buffers_high, "the fake codec's buffers lie above 4 GiB");
     CHECK(r >= 0 && (r & 4) && fake_media.configured && fake_media.queued_guest_data == 1,

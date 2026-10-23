@@ -24,7 +24,32 @@ static const char *const unity_names[] = {
     "AMediaFormat_setInt32", "AMediaFormat_setInt64", "AMediaFormat_setString", "AMediaFormat_toString",
 };
 
+/* ... and the data symbols (const char *AMEDIAFORMAT_KEY_*) it looks up the same way */
+static const char *const unity_keys[][2] = {
+    {"AMEDIAFORMAT_KEY_AAC_PROFILE", "aac-profile"}, {"AMEDIAFORMAT_KEY_BIT_RATE", "bitrate"},
+    {"AMEDIAFORMAT_KEY_CHANNEL_COUNT", "channel-count"}, {"AMEDIAFORMAT_KEY_CHANNEL_MASK", "channel-mask"},
+    {"AMEDIAFORMAT_KEY_COLOR_FORMAT", "color-format"}, {"AMEDIAFORMAT_KEY_DURATION", "durationUs"},
+    {"AMEDIAFORMAT_KEY_FLAC_COMPRESSION_LEVEL", "flac-compression-level"},
+    {"AMEDIAFORMAT_KEY_FRAME_RATE", "frame-rate"}, {"AMEDIAFORMAT_KEY_HEIGHT", "height"},
+    {"AMEDIAFORMAT_KEY_I_FRAME_INTERVAL", "i-frame-interval"}, {"AMEDIAFORMAT_KEY_IS_ADTS", "is-adts"},
+    {"AMEDIAFORMAT_KEY_IS_AUTOSELECT", "is-autoselect"}, {"AMEDIAFORMAT_KEY_IS_DEFAULT", "is-default"},
+    {"AMEDIAFORMAT_KEY_IS_FORCED_SUBTITLE", "is-forced-subtitle"}, {"AMEDIAFORMAT_KEY_LANGUAGE", "language"},
+    {"AMEDIAFORMAT_KEY_MAX_HEIGHT", "max-height"}, {"AMEDIAFORMAT_KEY_MAX_INPUT_SIZE", "max-input-size"},
+    {"AMEDIAFORMAT_KEY_MAX_WIDTH", "max-width"}, {"AMEDIAFORMAT_KEY_MIME", "mime"},
+    {"AMEDIAFORMAT_KEY_PUSH_BLANK_BUFFERS_ON_STOP", "push-blank-buffers-on-shutdown"},
+    {"AMEDIAFORMAT_KEY_REPEAT_PREVIOUS_FRAME_AFTER", "repeat-previous-frame-after"},
+    {"AMEDIAFORMAT_KEY_ROTATION", "rotation-degrees"}, {"AMEDIAFORMAT_KEY_SAMPLE_RATE", "sample-rate"},
+    {"AMEDIAFORMAT_KEY_STRIDE", "stride"}, {"AMEDIAFORMAT_KEY_WIDTH", "width"},
+};
+
 static void *lib;
+
+/* the key variable's string ("" if the symbol is missing) */
+static const char *key(const char *sym)
+{
+    const char *const *p = dlsym(lib, sym);
+    return p && *p ? *p : "";
+}
 #define FN(name) ((__typeof__(&name))dlsym(lib, #name))
 
 int media_test(void)
@@ -35,12 +60,16 @@ int media_test(void)
     int all = 1;
     for (unsigned k = 0; k < sizeof unity_names / sizeof *unity_names; k++) all &= dlsym(lib, unity_names[k]) != NULL;
     bits |= all;
+    int keys = 1;
+    for (unsigned k = 0; k < sizeof unity_keys / sizeof *unity_keys; k++)
+        keys &= !strcmp(key(unity_keys[k][0]), unity_keys[k][1]);
+    if (keys) bits |= 64;
 
     /* formats: values both ways, a string and a buffer the host owns */
     AMediaFormat *fmt = FN(AMediaFormat_new)();
     static const uint8_t csd[5] = {0, 0, 0, 1, 0x67};
-    FN(AMediaFormat_setString)(fmt, "mime", "video/avc");
-    FN(AMediaFormat_setInt32)(fmt, "width", 640);
+    FN(AMediaFormat_setString)(fmt, key("AMEDIAFORMAT_KEY_MIME"), "video/avc"); /* names from the key symbols, as Unity does */
+    FN(AMediaFormat_setInt32)(fmt, key("AMEDIAFORMAT_KEY_WIDTH"), 640);
     FN(AMediaFormat_setInt64)(fmt, "durationUs", 1ll << 40);
     FN(AMediaFormat_setFloat)(fmt, "frame-rate", 29.5f);
     FN(AMediaFormat_setBuffer)(fmt, "csd-0", csd, sizeof csd);

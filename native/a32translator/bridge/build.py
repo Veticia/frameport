@@ -25,7 +25,7 @@ TRANSLATOR = ["dispatch.c", "mem.c", "loader.c", "syscall.c", "signals.c", "thre
 HOST = ["bridge.c", "handles.c", "jni.c", "natives.c", "native_activity.c", "android.c", "vrapi.c", "input.c", "media.c", "tramp.S", "gen/jni_gen.c",
         "gen/imports.c"]
 HOST_GL = ["gl.c", "gen/gl.c"]  # not in the PC harness (no GLES there)
-GUEST = ["main.c", "loader.c", "compat.c", "log.c", "gl.c", "opensles.c", "hc.S", "gen/stubs.S", "gen/gl_stubs.S", "gen/exports.S"]
+GUEST = ["main.c", "loader.c", "compat.c", "log.c", "gl.c", "opensles.c", "media_keys.c", "hc.S", "gen/stubs.S", "gen/gl_stubs.S", "gen/exports.S"]
 WARN = ["-Wall", "-Wextra", "-Wno-unused-parameter", "-Wno-missing-field-initializers"]
 
 
