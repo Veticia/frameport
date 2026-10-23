@@ -1020,6 +1020,23 @@ def test_keyboard_session_on_a_pipe_releases_stale_keys(monkeypatch, tmp_path):
     assert events[:2] == [(103, 1), (103, 0)]
 
 
+def test_clipboard_get_reads_the_frames_displays(monkeypatch, tmp_path):
+    """GitHub #413: Copy from Frame reads the Frame's clipboard (no xclip/wl-paste there: libX11 through ctypes)."""
+    a = load_agent(monkeypatch, tmp_path)
+    monkeypatch.setattr(a, "run", lambda cmd, **k: SimpleNamespace(returncode=1, stdout="", stderr=""))
+    monkeypatch.setattr(a, "session_env", lambda: {"DISPLAY": ":1"})
+    asked = []
+    texts = {":1": ("", None), ":0": ("copied ✓", None)}
+    monkeypatch.setattr(a.os.path, "isdir", lambda p: p == "/tmp/.X11-unix" or os.path.isdir(p))
+    real_listdir = a.os.listdir
+    monkeypatch.setattr(a.os, "listdir", lambda p: ["X0", "X1", ".lock"] if p == "/tmp/.X11-unix" else real_listdir(p))
+    monkeypatch.setattr(a, "x_clipboard_text", lambda d: asked.append(d) or texts[d])
+    assert a.cmd_clipboard_get({}) == {"text": "copied ✓", "source": ":0"}
+    assert asked == [":1", ":0"]  # Steam's display first, each once
+    texts[":0"] = (None, "can't open the display")
+    assert a.cmd_clipboard_get({})["reasons"] == [":0: can't open the display"]
+
+
 def test_keyboard_session_reports_a_refused_device(monkeypatch, tmp_path):
     import io
 

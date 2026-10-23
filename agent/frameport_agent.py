@@ -48,7 +48,7 @@ try:
 except ImportError:  # Windows: pc_revive loads this file for its VDF code only (GitHub #131)
     fcntl = None
 
-AGENT_VERSION = 111
+AGENT_VERSION = 112
 HOME = os.path.expanduser("~")
 STEAM = os.path.join(HOME, ".local/share/Steam")
 ANCHORS = os.path.join(HOME, "Applications/quest-frame")
@@ -8640,6 +8640,94 @@ class VirtualKeyboard:
                 pass
             os.close(self.fd)
         self.fd = None
+
+
+def x_clipboard_text(display, timeout=1.5):
+    """The X11 CLIPBOARD of `display` as text (UTF8_STRING), with libX11 through ctypes (the Frame has no xclip or
+    wl-paste). (text, None) or (None, reason); "" = nothing copied."""
+    import ctypes
+    import ctypes.util
+
+    try:
+        x = ctypes.CDLL(ctypes.util.find_library("X11") or "libX11.so.6")
+    except OSError as exc:
+        return None, f"no libX11: {exc}"
+    x.XOpenDisplay.restype = ctypes.c_void_p
+    x.XOpenDisplay.argtypes = [ctypes.c_char_p]
+    d = x.XOpenDisplay(display.encode())
+    if not d:
+        return None, "can't open the display"
+    x.XCloseDisplay.argtypes = [ctypes.c_void_p]
+    try:
+        x.XInternAtom.restype = ctypes.c_ulong
+        x.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+        clipboard, utf8, prop = (x.XInternAtom(d, n, 0) for n in (b"CLIPBOARD", b"UTF8_STRING", b"FRAMEPORT_CLIP"))
+        x.XGetSelectionOwner.restype = ctypes.c_ulong
+        x.XGetSelectionOwner.argtypes = [ctypes.c_void_p, ctypes.c_ulong]
+        if not x.XGetSelectionOwner(d, clipboard):
+            return "", None
+        x.XDefaultRootWindow.restype = ctypes.c_ulong
+        x.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+        x.XCreateSimpleWindow.restype = ctypes.c_ulong
+        x.XCreateSimpleWindow.argtypes = ([ctypes.c_void_p, ctypes.c_ulong] + [ctypes.c_int] * 2 + [ctypes.c_uint] * 3
+                                          + [ctypes.c_ulong] * 2)
+        w = x.XCreateSimpleWindow(d, x.XDefaultRootWindow(d), 0, 0, 1, 1, 0, 0, 0)
+        x.XConvertSelection.argtypes = [ctypes.c_void_p] + [ctypes.c_ulong] * 5
+        x.XConvertSelection(d, clipboard, utf8, prop, w, 0)
+        x.XFlush.argtypes = [ctypes.c_void_p]
+        x.XFlush(d)
+        event = (ctypes.c_long * 24)()
+        x.XCheckTypedWindowEvent.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_void_p]
+        end = time.time() + timeout
+        while not x.XCheckTypedWindowEvent(d, w, 31, event):  # SelectionNotify
+            if time.time() > end:
+                return None, "the app that copied didn't answer"
+            time.sleep(0.02)
+        kind, fmt, n, after, data = ctypes.c_ulong(), ctypes.c_int(), ctypes.c_ulong(), ctypes.c_ulong(), \
+            ctypes.c_void_p()
+        x.XGetWindowProperty.argtypes = ([ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_long,
+                                          ctypes.c_long, ctypes.c_int, ctypes.c_ulong] + [ctypes.c_void_p] * 5)
+        x.XGetWindowProperty(d, w, prop, 0, 1 << 20, 1, 0, ctypes.byref(kind), ctypes.byref(fmt), ctypes.byref(n),
+                             ctypes.byref(after), ctypes.byref(data))
+        text = ctypes.string_at(data, n.value).decode("utf-8", "replace") if data and n.value else ""
+        if data:
+            x.XFree.argtypes = [ctypes.c_void_p]
+            x.XFree(data)
+        return text, None
+    finally:
+        x.XCloseDisplay(d)
+
+
+def cmd_clipboard_get(args):
+    """The Frame's clipboard as text, for "Copy from Frame" (GitHub #413): Desktop Mode's Plasma clipboard (Klipper
+    over its own D-Bus), else the X clipboards of gamescope's Xwayland displays. Android apps in Lepton have no
+    clipboard service, so text copied inside them never gets here."""
+    for pid in run(["pgrep", "-x", "plasmashell"]).stdout.split():
+        try:
+            raw = open(f"/proc/{pid}/environ", "rb").read().split(b"\0")
+        except OSError:
+            continue
+        env = dict(kv.decode(errors="replace").split("=", 1) for kv in raw if b"=" in kv)
+        if env.get("DBUS_SESSION_BUS_ADDRESS") and shutil.which("qdbus6"):
+            try:
+                p = subprocess.run(["qdbus6", "org.kde.klipper", "/klipper", "getClipboardContents"],
+                                   capture_output=True, text=True, timeout=5,
+                                   env=dict(os.environ, DBUS_SESSION_BUS_ADDRESS=env["DBUS_SESSION_BUS_ADDRESS"]))
+            except (OSError, subprocess.SubprocessError):
+                p = None
+            if p is not None and p.returncode == 0 and p.stdout.strip("\n"):
+                return {"text": p.stdout[:-1] if p.stdout.endswith("\n") else p.stdout, "source": "desktop"}
+    displays = [session_env().get("DISPLAY")] + sorted(
+        ":" + n[1:] for n in (os.listdir("/tmp/.X11-unix") if os.path.isdir("/tmp/.X11-unix") else [])
+        if re.fullmatch(r"X\d+", n))
+    reasons = []
+    for display in dict.fromkeys(d for d in displays if d):
+        text, reason = x_clipboard_text(display)
+        if text:
+            return {"text": text, "source": display}
+        if reason:
+            reasons.append(f"{display}: {reason}")
+    return {"text": "", "source": None, "reasons": reasons}
 
 
 def keyboard_session(stdin, stdout, keyboard=None):

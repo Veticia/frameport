@@ -75,7 +75,10 @@ class KeyboardView:
                     ft.Row([self.status, self.reconnect], spacing=T.S3,
                            vertical_alignment=ft.CrossAxisAlignment.CENTER),
                     self.listener,
-                    ft.Row([self.paste, C.secondary(tr("Type it"), ft.Icons.SEND_OUTLINED, self._send_text)],
+                    ft.Row([self.paste, C.secondary(tr("Type it"), ft.Icons.SEND_OUTLINED, self._send_text),
+                            C.secondary(tr("Copy from Frame"), ft.Icons.CONTENT_PASTE_GO_ROUNDED, self._copy_from_frame,
+                                        tooltip=tr("Copy the text copied on the Frame (Desktop Mode, Steam) to this "
+                                                   "PC's clipboard"))],
                            spacing=T.S2),
                     ft.Row([C.meta(tr("In the headset, select a text field, then type here."), T.TEXT_2),
                             C.help_icon("type_on_frame", 16)], spacing=T.px(2), tight=True,
@@ -169,6 +172,26 @@ class KeyboardView:
             self.app.page.run_task(self.listener.focus)
         except Exception:  # noqa: BLE001
             pass
+
+    def _copy_from_frame(self, e=None) -> None:
+        """The Frame's clipboard to this PC's (GitHub #413; agent clipboard_get)."""
+        app = self.app
+        if not (app.target and app.frame_state == "connected"):
+            return
+
+        def work():
+            try:
+                res = app.target.connect().frame.agent("clipboard_get", timeout=20)
+            except Exception as exc:  # noqa: BLE001
+                app.toast(tr("Couldn't read the Frame's clipboard: {error}").format(error=explain(exc)), error=True)
+                return
+            text = res.get("text") or ""
+            if not text:
+                app.toast(tr("Nothing copied on the Frame yet. Copy text there first (Desktop Mode or Steam; Android "
+                             "games can't share their clipboard)."), error=True)
+                return
+            app.copy(text)
+        app.run_bg(work)
 
     def _send_text(self, e=None) -> None:
         from .. import easter
