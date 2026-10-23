@@ -2380,8 +2380,60 @@ class FramePortApp:
             else:
                 text = tr_n("Added {n} game", "Added {n} games", n) if added else \
                     (tr("No new games in that folder") if report.handled() else tr("No games found in that folder"))
+            if report.other_version:
+                self.offer_newer_versions(report.other_version)
             return " · ".join([text] + scan_report_lines(report))
         return self.submit(tr("Scan {name}").format(name=Path(path).name), run, None, "scan")
+
+    def offer_newer_versions(self, items: list[dict]) -> None:
+        """A rescan found another version of games whose own files are gone (pipeline.ScanReport.other_version): ask
+        whether to switch to it, like "Update with a newer APK…" from the game's page (GitHub #427)."""
+        items = [i for i in items if library.game(i["package"])]
+        if not items:
+            return
+        rows = ft.Column(spacing=T.S3, tight=True)
+
+        def use(chosen: list[dict]):
+            def handler(e):
+                self.page.pop_dialog()
+                for item in chosen:
+                    self._use_found_version(item)
+            return handler
+
+        for item in items:
+            rows.controls.append(ft.Row([
+                ft.Column([ft.Text(item["title"], weight=ft.FontWeight.W_600, color=T.TEXT),
+                           ft.Text(tr("Found: {path}").format(path=item["path"]), size=T.px(12), color=T.TEXT_2,
+                                   selectable=True)],
+                          spacing=T.S1, expand=True, tight=True),
+                C.secondary(tr("Use this version"), on_click=use([item]))], spacing=T.S3))
+        intro = ft.Text(tr("The files these games used are gone, and the folder now has another version. Switch to "
+                           "it? The name, artwork, tags and your settings stay; then press Update on Frame."),
+                        color=T.TEXT_2)
+        actions = [C.ghost(tr("Not now"), on_click=lambda e: self.page.pop_dialog())]
+        if len(items) > 1:
+            actions.append(C.primary(tr("Use all"), on_click=use(items)))
+        self.page.show_dialog(C.dialog(tr_n("Another version of {n} game found", "Other versions of {n} games found",
+                                            len(items)),
+                                       ft.Column([intro, rows], spacing=T.S4, tight=True,
+                                                 scroll=ft.ScrollMode.AUTO if len(items) > 4 else None),
+                                       actions))
+
+    def _use_found_version(self, item: dict) -> None:
+        pkg = item["package"]
+        if self.jobs.busy_with(pkg):
+            return
+        on_frame = self.frame_state == "connected" and \
+            C.install_state(library.game(pkg) or {}, self.frame_info) in ("installed", "outdated")
+
+        def run(job: Job):
+            job.reporter.stage(tr("Reading the new version"))
+            pipeline.replace_source(pkg, Path(item["path"]), job.reporter)
+            self.refresh_view()
+            if on_frame:
+                return tr("{title}: newer version added. Press Update to install it.").format(title=self._title(pkg))
+            return tr("{title}: newer version added").format(title=self._title(pkg))
+        self.submit(tr("Newer version for {title}").format(title=self._title(pkg)), run, pkg, "task")
 
     # ------------------------------------------------------------------ executable choice / artwork
     def next_exe_choice(self) -> None:

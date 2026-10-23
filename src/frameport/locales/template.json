@@ -190,6 +190,10 @@
  "Android VR": "",
  "Animate fingers from touch": "",
  "Another app": "",
+ "Another version of {n} game found": [
+  "",
+  ""
+ ],
  "Answer the open install question first": "",
  "Any": "",
  "APK": "",
@@ -679,6 +683,7 @@
  "Form empty? Open a plain issue": "",
  "Found": "",
  "Found on your network": "",
+ "Found: {path}": "",
  "Foveated rendering (Valve)": "",
  "fps": "",
  "fps isn't reported for PC VR and Linux games": "",
@@ -1882,6 +1887,7 @@
  "The connection to the Frame is busy. Try again in a moment.": "",
  "The download didn't finish. Check your internet connection.": "",
  "the downloaded app": "",
+ "The files these games used are gone, and the folder now has another version. Switch to it? The name, artwork, tags and your settings stay; then press Update on Frame.": "",
  "The first picture takes a few seconds.": "",
  "The Frame can't keep up: {n} frame dropped in the last 10 seconds. Choose a lower quality.": [
   "",
@@ -2132,6 +2138,7 @@
  "Upside down and mirrored": "",
  "Upside-down panel images (diagnostics)": "",
  "USB MIDI: don't poll for USB devices": "",
+ "Use all": "",
  "Use controllers": "",
  "Use FramePort": "",
  "Use FramePort for these links": "",
@@ -2146,6 +2153,7 @@
  "Use this PC's keyboard on the Frame": "",
  "Use this PC's keyboard on the Frame.": "",
  "Use this program": "",
+ "Use this version": "",
  "Use your own artwork…": "",
  "Use your SteamVR play area as walls, without furniture.": "",
  "Used when installing or updating games that follow the global default. Each game's Game settings can override it. Changes take effect at the next launch. Games installed before this feature need Update on Frame once for the mode to work.": "",

@@ -109,6 +109,8 @@ def main() -> int:
                     "changelog dialog, what's new bar + dialog, Settings changelog)")
     ap.add_argument("--announcement", action="store_true", help="show the announcement pop-up (with a picture, "
                     "then text only); nothing is fetched")
+    ap.add_argument("--newer-versions", action="store_true", help="the dialog after a rescan found other versions "
+                    "of library games whose own files are gone (uses the library's first games)")
     ap.add_argument("--fake-frame", action="store_true", help="pretend a Steam Frame is connected (no device needed)")
     ap.add_argument("--hover", default=None, help="x,y: move the mouse there before the Library screenshot")
     ap.add_argument("--install-questions", nargs="+", metavar="PKG", default=None,
@@ -460,6 +462,11 @@ def main() -> int:
             print(f"open dialogs: {len([d for d in a.page._dialogs.controls if d.open])}, queued: {queued}", flush=True)
         steps = [("library", lambda a: a.navigate(0)), ("questions", open_questions),
                  ("after-1st-double", double_click), ("after-2nd-double", double_click), ("end", report)]
+    if args.newer_versions:
+        found = [{"package": g["package"], "title": g.get("title") or g["package"],
+                  "path": str(Path(g.get("apk") or g.get("game_dir") or "game").parent.parent / "New downloads"
+                              / Path(g.get("apk") or g.get("game_dir") or "game").name)} for g in library.games()[:2]]
+        steps = [("newer-versions", lambda a: (a.navigate(0), a.offer_newer_versions(found)))]
     if args.announcement:
         import shutil
 
