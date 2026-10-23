@@ -79,7 +79,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [SDL apps: start without a clipboard service](#frame-sdl_clipboard) | `frame.sdl_clipboard` | Steam Frame patches | 8 |
 | [Stress Level Zero: let Unity start Vulkan itself](#frame-slz_vulkan_hooks) | `frame.slz_vulkan_hooks` | Steam Frame patches | 1 |
 | [Start straight in VR (skip the 2D launcher)](#frame-start_activity) | `frame.start_activity` | Steam Frame patches |  |
-| [Embedded OpenXR loader: use FrameBridge](#frame-static_openxr_loader) | `frame.static_openxr_loader` | Steam Frame patches | 1 |
+| [Embedded OpenXR loader: use FrameBridge](#frame-static_openxr_loader) | `frame.static_openxr_loader` | Steam Frame patches |  |
 | [Allow swapchains larger than 4096 px](#frame-swapchain_limit) | `frame.swapchain_limit` | Steam Frame patches | default |
 | [Team Beef ports: treat the Frame as a Meta headset](#frame-tbxr_vendor) | `frame.tbxr_vendor` | Steam Frame patches | 2 |
 | [Unity App UI: no Android 12 vibrator](#frame-unity_appui_vibrator) | `frame.unity_appui_vibrator` | Steam Frame patches |  |
@@ -975,7 +975,6 @@ Makes an embedded OpenXR loader use FrameBridge and your game settings.
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** The embedded Khronos OpenXR loader bypasses FrameBridge.
 - **Requires:** [`frame.adapter`](#frame-adapter)
-- **Catalog games (1):** PrimedGun v2.
 - **Suggested by launch-test signatures:**
   - `static-openxr-loader-bypass` (warning): A Khronos loader loaded the system runtime without FrameBridge.
 - **Source:** [patches/frame/static_openxr_loader.py](../src/frameport/patches/frame/static_openxr_loader.py)
