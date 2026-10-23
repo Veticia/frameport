@@ -971,7 +971,7 @@ Opens the app straight in VR, skipping its flat launcher screen. Turn off to use
 
 Makes an embedded OpenXR loader use FrameBridge and your game settings.
 
-- `frame.static_openxr_loader`
+- `frame.static_openxr_loader` · revision 2
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** The embedded Khronos OpenXR loader bypasses FrameBridge.
 - **Requires:** [`frame.adapter`](#frame-adapter)

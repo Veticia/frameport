@@ -20,6 +20,7 @@ class StaticOpenXRLoader(Patch):
                    "Khronos loader, which reads the system runtime manifest. Reinstall to write the per-game manifest.")
     requires = ("frame.adapter",)
     order = 9  # provide the inner loader before frame.adapter wraps it
+    revision = 2  # 2: the game's loader no longer loads implicit API layers (Valve's layer twice, #254)
 
     def applies(self, a):
         return bool((a.extra or {}).get("static_openxr_loader"))

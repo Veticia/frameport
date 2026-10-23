@@ -161,6 +161,33 @@ def test_composed_khronos_paths(tmp_path, embedded):
     assert "/sd" + "card/fp/" + "1" + "/active_runtime.json" == sx.COMPOSED_MANIFEST
 
 
+def test_game_loader_skips_implicit_layers(tmp_path):
+    # GitHub #254: the game's loader and FrameBridge's inner loader both loaded Valve's implicit layer; its two
+    # chains called each other until the stack ran out. Only the inner loader may see implicit layers.
+    cc = shutil.which("cc")
+    if not cc:
+        pytest.skip("needs host C compiler")
+    src = tmp_path / "layers.c"
+    strings = list(sx.PARTITIONS) + [sx.SUBDIR, "/active_runtime.json", "/active_runtime.aarch64.json"]
+    strings += ["/vendor/etc", "/system/etc", sx.IMPLICIT_LAYERS, "/api_layers/explicit.d",
+                "openxr/1/api_layers/implicit.d/"]
+    strings += list(sx.BROKERS) + ["RuntimeManifestFile", "xrNegotiateLoaderRuntimeInterface"]
+    src.write_text("const char *strings[] = {" + ",".join(json.dumps(s) for s in strings) + "};")
+    out = tmp_path / "layers.so"
+    subprocess.run([cc, "-shared", "-fPIC", str(src), "-o", str(out)], check=True)
+    buf = bytearray(out.read_bytes())
+    struct.pack_into("<H", buf, 18, 183)
+    data = bytes(buf)
+    fixed, count = sx.rewrite(data)
+    assert count == 9 and len(fixed) == len(data)
+    assert not sx.implicit_layers(fixed) and sx.redirected(fixed) and sx.rewrite(fixed) == (fixed, 0)
+    assert b"/api_layers/explicit.d\0" in fixed and b"openxr/1/api_layers/implicit.d/\0" in fixed
+    # a build from before the fix (runtime already redirected, layers not) is no longer "redirected" and gets them
+    old = fixed.replace(sx.NO_IMPLICIT_LAYERS.encode() + b"\0\0", sx.IMPLICIT_LAYERS.encode() + b"\0")
+    assert not sx.redirected(old) and sx.rewrite(old) == (fixed, 1)
+    assert patch.StaticOpenXRLoader.revision >= 2
+
+
 def test_analysis_records_embedded_loader(tmp_path, embedded, quest_manifest):
     apk = tmp_path / "analyze.apk"
     with zipfile.ZipFile(apk, "w") as z:

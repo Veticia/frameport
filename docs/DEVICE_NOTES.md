@@ -952,6 +952,16 @@ layouts, idempotence, unchanged other bytes, APK apply/validate with no OVRPort,
 negotiation rejection, Android init forwarding and missing-chain failure. No Frame
 connection or device test was performed.
 
+**Crash at Play (GitHub #254, 2026-10-23):** the reporter's 1.3.0 build crashed right after `xrCreateInstance`
+(stack overflow in SDLThread: FrameBridge GIPA → `libopenxr_loader_original.so` → the game's library → FrameBridge
+…). Lepton mounts Valve's implicit layer manifest at `/vendor/etc/openxr/1/api_layers/implicit.d/`, and the log shows
+`XR_APILAYER_VALVE_fdm_injection` loaded by BOTH loaders: one shared layer library stacked into two chains, so the
+inner chain's next call landed in the game loader's code. The rewrite now also turns the game loader's implicit-layer
+suffix `/api_layers/implicit.d` into `/api_layers/fp_none.d` (Khronos builds `<partition>/etc` + `openxr/1` + suffix),
+so only FrameBridge's inner loader loads implicit layers, as in every other FramePort game (patch revision 2). Not
+device-verified: headless, PrimedGun stays in its own launcher without the game's disc image, so the catalog keeps
+the patch off until a headset check.
+
 Headless acceptance after rebuilding and installing with this development build:
 `uv run frameport test org.primedgun.v2`. Expect `fp_xrruntime: chain resolved:
 FrameBridge`, `fp_xrruntime: xrInitializeLoaderKHR forwarded to FrameBridge: 0`,
