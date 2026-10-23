@@ -47,7 +47,7 @@ try:
 except ImportError:  # Windows: pc_revive loads this file for its VDF code only (GitHub #131)
     fcntl = None
 
-AGENT_VERSION = 109
+AGENT_VERSION = 110
 HOME = os.path.expanduser("~")
 STEAM = os.path.join(HOME, ".local/share/Steam")
 ANCHORS = os.path.join(HOME, "Applications/quest-frame")
@@ -6544,16 +6544,24 @@ def linux_run_target(base, exe_rel, appimage):
     return os.path.dirname(path), path
 
 
+SHARED_LIBRARY = re.compile(r"lib.+\.so(?:\.\d+)*")
+
+
+def app_lib_dirs(root):
+    """The folders of an app that hold shared libraries (lib*.so[.N]); Python extension modules don't count."""
+    out = set()
+    for dirpath, _dirs, files in os.walk(root):
+        if any(SHARED_LIBRARY.fullmatch(n) for n in files):
+            out.add(dirpath)
+    return sorted(out)
+
+
 def missing_libraries(root, programs):
     """Shared libraries the app's main programs need (ldd follows their dependencies) that neither the Frame nor the
     app itself has, with the app's own library folders on LD_LIBRARY_PATH as AppImages' AppRun sets it: e.g.
     libwebkit2gtk-4.1 for Venera. Only the programs that start, not every bundled module (FramePort's own build
     ships optional Python modules needing libjvm/libtcl that never load)."""
-    libdirs = set()
-    for dirpath, _dirs, files in os.walk(root):
-        if any(".so" in n for n in files):
-            libdirs.add(dirpath)
-    env = dict(os.environ, LD_LIBRARY_PATH=":".join(sorted(libdirs)))
+    env = dict(os.environ, LD_LIBRARY_PATH=":".join(app_lib_dirs(root)))
     missing = set()
     for path in programs:
         p = subprocess.run(["ldd", path], capture_output=True, text=True, env=env, timeout=30)
@@ -6698,6 +6706,13 @@ def write_linux_launcher(anchor, base, pkg, title, exe_rel, appimage, prefix, en
     command = list(prefix) + [program]
     extra = "".join(f"export {k}={shlex.quote(str(v))}\n" for k, v in (env or {}).items()
                     if re.fullmatch(r"[A-Z_][A-Z0-9_]*", k))
+    if not appimage and not prefix:
+        # an unpacked archive's own libraries (GitHub #473: Plezy's lib/libselinux.so.1, needed by its bundled GTK);
+        # AppImages' AppRun sets this itself, and missing_libraries checks with the same folders
+        dirs = app_lib_dirs(os.path.join(base, "app"))
+        if dirs:
+            extra = (f"export LD_LIBRARY_PATH={shlex.quote(':'.join(dirs))}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}\n"
+                     + extra)
     if prefix:  # fex-compat-tool exits ("No compat data path?") without it; FEX keeps its config in <it>/fex-emu
         data = shlex.quote(os.path.join(base, "compatdata"))
         extra = f"mkdir -p {data}\nexport STEAM_COMPAT_DATA_PATH={data}\n" + extra

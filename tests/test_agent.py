@@ -1480,6 +1480,28 @@ def test_appimage_programs_and_missing_libraries(monkeypatch, tmp_path):
     assert a.missing_libraries(str(root), [str(root / "usr/bin/tool")]) == []
 
 
+def test_linux_archive_launcher_puts_its_own_libraries_on_the_path(monkeypatch, tmp_path):
+    """GitHub #473: Plezy ships lib/libselinux.so.1 (needed by its bundled GTK) but launch.sh started the program
+    without it on the library path, while the install's check assumed it was there."""
+    import shutil
+
+    a = load_agent(monkeypatch, tmp_path)
+    prep = a.cmd_prepare_linux({"package": "linux.plezy", "title": "Plezy"})
+    app_in = os.path.join(prep["incoming"], "app")
+    os.makedirs(os.path.join(app_in, "lib"))
+    os.makedirs(os.path.join(app_in, "py"))
+    shutil.copy("/bin/true", os.path.join(app_in, "plezy"))
+    for rel in ("lib/libselinux.so.1", "py/_ssl.cpython-312-aarch64-linux-gnu.so"):
+        with open(os.path.join(app_in, rel), "wb") as f:
+            f.write(b"\x7fELF")
+    a.cmd_finalize_linux({"package": "linux.plezy", "title": "Plezy", "exe": "plezy", "openxr": False})
+    text = open(os.path.join(prep["anchor"], "launch.sh")).read()
+    app = os.path.join(prep["base"], "app")
+    assert f"export LD_LIBRARY_PATH={os.path.join(app, 'lib')}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}" in text
+    assert os.path.join(app, "py") not in text  # Python extension modules aren't a library folder
+    assert a.app_lib_dirs(app) == [os.path.join(app, "lib")]
+
+
 def test_power_schedules_systemctl_in_a_user_timer(monkeypatch, tmp_path):
     a = load_agent(monkeypatch, tmp_path)
     calls = []
