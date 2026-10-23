@@ -180,6 +180,18 @@ def test_obbs_next_to_the_apk_are_sent_alone(tmp_path):
     assert quest_dump.from_path(g.apk).data_files == g.data_files  # the APK file alone too
 
 
+def test_other_expansion_kinds_next_to_the_apk(tmp_path):
+    """GitHub #415: Crisis Brigade 2 ships office.<versionCode>.<package>.obb next to main/patch; it wasn't sent."""
+    game = tmp_path / "Games" / "CB2"
+    apk(game / "com.x.game_7.apk")
+    obb(game, "main.7.com.x.game.obb")
+    obb(game, "office.5.com.x.game.obb")
+    obb(game, "office.3.com.x.game.obb")  # an older one of the same kind isn't sent
+    obb(game, "office.5.com.y.other.obb")  # another package's isn't either
+    g = quest_dump.scan(tmp_path / "Games")[0]
+    assert g.data_files == ["main.7.com.x.game.obb", "office.5.com.x.game.obb"]
+
+
 def test_obb_folder_next_to_an_apk_folder_inside_a_package_folder(tmp_path):
     """<package>/apk/x.apk + <package>/obb/main.N.<package>.obb: the obb folder isn't named after the package."""
     root = tmp_path / "Quest"

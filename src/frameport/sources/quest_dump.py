@@ -198,6 +198,9 @@ def _find_data_dir(apk_dir: Path, pkg: str | None) -> Path | None:
 
 # Android's expansion file names, also CryEngine's main.<package>.obb without a versionCode (GitHub #238).
 OBB_NAME = re.compile(r"^(main|patch)\.(?:(\d+)\.)?(.+)\.obb$", re.IGNORECASE)
+# Found by name next to an APK, only with that APK's package: other kinds too, e.g. Crisis Brigade 2's
+# office.<versionCode>.<package>.obb (GitHub #415)
+NAMED_OBB = re.compile(r"^([a-z]+)\.(?:(\d+)\.)?(.+)\.obb$", re.IGNORECASE)
 
 
 def _recursive_obb_names(d: Path) -> set[str]:
@@ -219,7 +222,7 @@ def _named_obbs(d: Path, pkg: str) -> list[tuple[str, int | None, Path]]:
     """(kind, versionCode, file) of the package's expansion files directly in d."""
     out = []
     for f, is_dir in _list(d):
-        m = OBB_NAME.match(f.name)
+        m = NAMED_OBB.match(f.name)
         if m and m.group(3).lower() == pkg.lower() and not is_dir:
             out.append((m.group(1).lower(), int(m.group(2)) if m.group(2) else None, f))
     return out
@@ -256,13 +259,13 @@ def _obb_folders(apk_dir: Path, pkg: str, depth: int = 3) -> list[tuple[Path, li
 
 
 def _pick_obbs(obbs: list[tuple[str, int | None, Path]], version_code: int | None) -> list[Path]:
-    """The expansion files for this APK: per kind (main, patch) the newest one not newer than the APK's versionCode
-    (expansion files keep the versionCode they were introduced with, so that's its own one when there is one); only
+    """The expansion files for this APK: per kind (main, patch, others like office) the newest one not newer than the
+    APK's versionCode (expansion files keep the versionCode they were introduced with, so that's its own one); only
     when there is none at all, the newest ones (another version of the game's files: better than nothing).
     Versionless files are usable for any APK; a usable numbered file takes precedence."""
     usable = [o for o in obbs if version_code is None or o[1] is None or o[1] <= version_code] or obbs
     picked = []
-    for kind in ("main", "patch"):
+    for kind in ("main", "patch", *sorted({k for k, _, _ in usable} - {"main", "patch"})):
         same = sorted((vc if vc is not None else -1, f) for k, vc, f in usable if k == kind)
         if same:
             picked.append(same[-1][1])
