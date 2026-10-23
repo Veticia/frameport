@@ -666,3 +666,11 @@ def test_cryengine_init_failure_is_named():
            "text:CrySystem initialization failed!\n"
            "10-23 16:21:18.886  1170  1198 F libc    : Fatal signal 11 (SIGSEGV), code 1 (SEGV_MAPERR), fault addr 0x0\n")
     assert "cryengine-init-failed" in [f.id for f in triage(log, package="com.crytek.climb2").findings]
+
+
+def test_decoder_held_by_steam_is_named():
+    """GitHub #437: Steam's web helper kept the Iris decoder; Batman's 8K cutscenes went to software."""
+    log = "FramePort: hardware video decoder /dev/video22 in use by: steamwebhelper(2953) \n"
+    assert "video-decoder-held-by-steam" in [f.id for f in triage(log, package="com.camouflaj.manta").findings]
+    assert "video-decoder-held-by-steam" not in [f.id for f in triage(log.replace("steamwebhelper(2953)", ""),
+                                                                      package="com.camouflaj.manta").findings]

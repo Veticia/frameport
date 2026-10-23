@@ -67,7 +67,9 @@ print(json.dumps({"triangles": 1, "refine": {"kept": 1}}))
 def scanner(a, monkeypatch):
     path = Path(a.ROOM_SCANNER)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(FAKE_SCANNER.replace("PYTHON", sys.executable))
+    # a #! line can't hold a path with a space (a checkout under "Backup Data/"): go through env then
+    python = sys.executable if " " not in sys.executable else "/usr/bin/env python3"
+    path.write_text(FAKE_SCANNER.replace("PYTHON", python))
     path.chmod(0o755)
     monkeypatch.setattr(a, "room_current_universe", lambda: 7)
     return path.parent / "scanner-calls.jsonl"

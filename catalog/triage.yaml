@@ -42,6 +42,11 @@ signatures:
     severity: fatal
     diagnosis: QuestCraft's Java runtime isn't there. QuestCraft downloads it only on Wi-Fi, and the Frame's Android reports its network as Ethernet, so the download was skipped. Rebuild with the pojlib connection fix (frame.pojlib_connection), or unpack QuestCraft's JRE.zip into the game's files/runtimes/JRE with the Files tab.
     suggest: [frame.pojlib_connection]
+  - id: video-decoder-held-by-steam
+    pattern: 'FramePort: hardware video decoder \S+ in use by:[^\r\n]*steamwebhelper'
+    severity: warning
+    diagnosis: Steam's own interface had the Frame's hardware video decoder open when the game started. Large videos (8K cutscenes, e.g. Batman) then decode in software and play choppy. Restarting Steam, or the Frame, before playing frees it.
+    suggest: []
   - id: swapchain-limit-reached
     pattern: 'FrameBridge:\s+xrCreateSwapchain [^\r\n]*\bresult=-10\b'
     severity: error

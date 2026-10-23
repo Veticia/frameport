@@ -48,7 +48,7 @@ try:
 except ImportError:  # Windows: pc_revive loads this file for its VDF code only (GitHub #131)
     fcntl = None
 
-AGENT_VERSION = 115
+AGENT_VERSION = 116
 HOME = os.path.expanduser("~")
 STEAM = os.path.join(HOME, ".local/share/Steam")
 ANCHORS = os.path.join(HOME, "Applications/quest-frame")
@@ -63,6 +63,13 @@ VIDEO_CODEC_LINE = ('codec_dir="$HOME/.local/share/frameport/video-codec"\n'
                     '[[ "${FRAMEPORT_NO_HW_VIDEO:-0}" != 0 || -e "$codec_dir/disabled" || '
                     '! -x "$codec_dir/current/bin/podman" ]] || export PATH="$codec_dir/current/bin:$PATH"')
 HW_VIDEO_PATCH = "frame.hw_video_decode"
+# Who holds the Iris decoder when the game starts: it takes an 8K video only while nothing else has it open, and
+# Steam's own web helper sometimes keeps it (GitHub #437: Batman's 8K cutscenes fell back to software)
+DECODER_USERS_LINE = ('for f in /sys/class/video4linux/video*/name; do grep -qs iris-decoder "$f" && '
+                      'dec=/dev/$(basename "$(dirname "$f")"); done; [[ -z "${dec:-}" ]] || '
+                      'echo "FramePort: hardware video decoder $dec in use by: $(for p in /proc/[0-9]*; do '
+                      'ls -l "$p/fd" 2>/dev/null | grep -q " $dec\\$" && printf "%s(%s) " "$(cat "$p/comm")" '
+                      '"${p#/proc/}"; done)"')
 # earlier codec lines: agent <= 70 (per-game codec extracted from the APK, line in every launcher) and PR #128's
 # shared line (in every Lepton launcher)
 OLD_CODEC_LINES = ('[[ ! -x "$app_dir/frameport-codec/bin/podman" ]] || '
@@ -3624,7 +3631,9 @@ def wants_hw_video(anchor):
 
 
 def set_codec_line(text, want):
-    """A Lepton launcher with the current codec line where it belongs (want) or none; earlier lines are dropped."""
+    """A Lepton launcher with the current codec line (+ the decoder users line) where it belongs (want) or none;
+    earlier lines are dropped."""
+    text = text.replace(DECODER_USERS_LINE + "\n", "")
     at = -1
     for line in (VIDEO_CODEC_LINE, *OLD_CODEC_LINES):
         i = text.find(line + "\n")
@@ -3639,7 +3648,7 @@ def set_codec_line(text, want):
                     at = text.index(anchor) + 1
                     break
         if at >= 0:
-            text = text[:at] + VIDEO_CODEC_LINE + "\n" + text[at:]
+            text = text[:at] + VIDEO_CODEC_LINE + "\n" + DECODER_USERS_LINE + "\n" + text[at:]
     return text
 
 
@@ -3662,7 +3671,8 @@ def wants_gamepad(anchor):
 def wrapper_lines(hw_video, gamepad):
     """The launcher's Podman wrapper lines (empty, one or both). The gamepad line comes last, so FramePort's wrapper is
     first on PATH and hands on to the codec wrapper."""
-    return "\n".join(line for line, want in ((VIDEO_CODEC_LINE, hw_video), (GAMEPAD_LINE, gamepad)) if want)
+    return "\n".join(line for line, want in ((VIDEO_CODEC_LINE, hw_video), (DECODER_USERS_LINE, hw_video),
+                                             (GAMEPAD_LINE, gamepad)) if want)
 
 
 def set_gamepad_line(text, want):
@@ -3675,6 +3685,8 @@ def set_gamepad_line(text, want):
     i = text.find(VIDEO_CODEC_LINE + "\n")
     if i >= 0:
         at = i + len(VIDEO_CODEC_LINE) + 1
+        if text.startswith(DECODER_USERS_LINE + "\n", at):  # the codec line's companion stays next to it
+            at += len(DECODER_USERS_LINE) + 1
     else:
         at = next((text.index(a) + 1 for a in ("\nchild=''\n", "\nsetsid ") if a in text), -1)
     return text if at < 0 else text[:at] + GAMEPAD_LINE + "\n" + text[at:]
