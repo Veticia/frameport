@@ -153,6 +153,7 @@ static void flip_on_acquire(XrSwapchain handle, uint32_t index) {
 }
 
 static int flip_release_tracked;  // a release hook reports releases (flip_on_release), so held images are known
+static int flip_dumps;  // flip_dump: images saved so far (one "raw" quad per swapchain), at most flip_dump
 
 static void flip_on_release(XrSwapchain handle) {
     pthread_mutex_lock(&flip_lock);
@@ -397,9 +398,13 @@ static const XrCompositionLayerQuad *flip_quad(XrSession session, const XrCompos
                 t != NULL, t ? t->image_count : 0, index, rect.extent.width, rect.extent.height);
         goto done;
     }
-    if (t->dumped && !t->shown_dumped && ++t->frames_since_dump > 216 && vk_cmd_idle()) {
+    // flip_dump: the shown image later: ~3 s after a "raw" dump; ~1 s after the first flip of a quad that was still
+    // empty whenever it was flipped ("late": its content arrived after the flip)
+    if (flip_dump && t->logged && !t->shown_dumped && ++t->frames_since_dump > (t->dumped ? 216 : 72) && vk_cmd_idle()) {
         t->shown_dumped = 1;
-        dump_rect(t->images[index], layer, rect, t->info.format, t->dumped, "shown");
+        if (t->dumped) dump_rect(t->images[index], layer, rect, t->info.format, t->dumped, "shown");
+        else if (flip_dumps < flip_dump && dump_rect(t->images[index], layer, rect, t->info.format, flip_dumps + 1, "late"))
+            ++flip_dumps;
     }
     for (uint32_t i = 0; i < t->flipped_count[index]; ++i)
         if (t->flipped[index][i].layer == layer && !memcmp(&t->flipped[index][i].rect, &rect, sizeof rect)) goto done;
@@ -421,10 +426,9 @@ static const XrCompositionLayerQuad *flip_quad(XrSession session, const XrCompos
         goto done;
     }
     VkImage app = t->images[index];
-    static int dumps;  // one non-empty image per quad swapchain, at most flip_dump of them
     int dump = 0;
-    if (dumps < flip_dump && !t->dumped && dump_rect(app, layer, rect, t->info.format, dumps + 1, "raw")) {
-        dump = ++dumps;
+    if (flip_dumps < flip_dump && !t->dumped && dump_rect(app, layer, rect, t->info.format, flip_dumps + 1, "raw")) {
+        dump = ++flip_dumps;
         t->dumped = dump;
     }
     VkCommandBufferBeginInfo begin = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, NULL,
