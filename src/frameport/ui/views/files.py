@@ -112,7 +112,10 @@ class FilesView:
         self.locations = ft.Column(spacing=T.px(2), scroll=ft.ScrollMode.AUTO, expand=True)
         self.crumb_row = ft.Row(spacing=T.px(2), wrap=True)
         self.where = C.meta("")
-        self.listing = ft.Column(spacing=0, scroll=ft.ScrollMode.AUTO, expand=True)
+        self.listing = ft.Column(spacing=0, scroll=ft.ScrollMode.AUTO, expand=True, on_scroll=self._remember_scroll,
+                                 scroll_interval=100)
+        self.scrolled: dict[str, float] = {}  # folder -> scroll offset, restored when going back to it (GitHub #411)
+        self._restore: float | None = None
         self.status = C.meta("")
         self.toolbar = ft.Row([
             C.primary(tr("Upload files…"), ft.Icons.UPLOAD_FILE_OUTLINED, self.upload_files),
@@ -378,6 +381,12 @@ class FilesView:
         self._update_selection(render=False)
         for c in (self.crumb_row, self.where, self.listing, self.status):
             C.update(c)
+        offset, self._restore = self._restore, None
+        if offset:
+            try:
+                self.app.page.run_task(self.listing.scroll_to, offset=offset, duration=0)
+            except Exception:  # noqa: BLE001 - the view left the page meanwhile
+                pass
 
     def _row(self, e) -> ft.Control:
         if e is None:  # ".."
@@ -483,9 +492,26 @@ class FilesView:
     def cd(self, path: str) -> None:
         from ...install.files import inside
 
-        self.path = inside(self.loc["path"], path)
+        new = inside(self.loc["path"], path)
+        # going back up (the ".." row, a crumb, Backspace) returns to where that folder's list was scrolled
+        going_up = new != self.path and (self.path + "/").startswith(new.rstrip("/") + "/")
+        self._restore = self.scrolled.get(new) if going_up else None
+        if not going_up:
+            self.scrolled.pop(new, None)
+        self.path = new
         self.selected.clear()
         self.load()
+
+    def go_up(self) -> bool:
+        """Backspace: the folder above, inside the location. False at the location's top."""
+        if not self.loc or self.path == self.loc["path"]:
+            return False
+        self.cd(posixpath.dirname(self.path))
+        return True
+
+    def _remember_scroll(self, e) -> None:
+        if self.path:
+            self.scrolled[self.path] = e.pixels
 
     def _toggle(self, path: str, on: bool) -> None:
         (self.selected.add if on else self.selected.discard)(path)

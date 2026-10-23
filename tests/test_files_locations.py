@@ -114,3 +114,20 @@ def test_installed_games_are_grouped_by_kind():
 
     assert [game_section(k) for k in ("quest", None, "rift", "pcvr", "linux")] == \
         ["quest", "quest", "pcvr", "pcvr", "linux"]
+
+
+def test_back_to_a_folder_restores_its_scroll_and_backspace_goes_up(monkeypatch):
+    """GitHub #411: going back up jumped to the top of the folder's list; Backspace now goes to the folder above."""
+    v = FilesView(SimpleNamespace())
+    loaded = []
+    monkeypatch.setattr(v, "load", lambda: loaded.append((v.path, v._restore)))
+    v.loc, v.path = {"id": "drive:/sd", "path": "/sd"}, "/sd"
+    v._remember_scroll(SimpleNamespace(pixels=640.0))
+    v.cd("/sd/movies")
+    v._remember_scroll(SimpleNamespace(pixels=80.0))
+    v.cd("/sd/movies/2026")
+    assert loaded[-1] == ("/sd/movies/2026", None)  # into a folder: from the top
+    assert v.go_up() and loaded[-1] == ("/sd/movies", 80.0)
+    v.cd("/sd")  # a crumb two levels up
+    assert loaded[-1] == ("/sd", 640.0)
+    assert not v.go_up()  # the location's top

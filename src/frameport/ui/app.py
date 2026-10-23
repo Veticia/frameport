@@ -871,6 +871,9 @@ class FramePortApp:
             self.show_activity(False)
         elif e.key == "Escape" and lib and lib.search_focused and lib.search.value:
             lib.clear_search()  # Esc in the search clears it
+        elif (e.key == "Backspace" and self.route[0] == "files" and self.files_view is not None
+              and not (e.ctrl or e.alt or e.meta or e.shift) and not C.dialog_open(self.page)):
+            self.files_view.go_up()  # like a file manager: Backspace goes to the folder above (GitHub #411)
         elif e.key.upper() == "F" and (e.ctrl or e.meta) and self.route[0] == "library" and self.search_field:
             try:
                 self.page.run_task(self.search_field.focus)
