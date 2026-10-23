@@ -316,7 +316,7 @@ static int cube_copy_face(const standin_swapchain *s, int face, uint32_t index, 
             PFN_vkQueueWaitIdle idle = (PFN_vkQueueWaitIdle)vk.GetDeviceProcAddr(vk.device, "vkQueueWaitIdle");
             VkCommandBufferBeginInfo begin = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, NULL,
                 VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, NULL};
-            if (idle && vk.ResetCommandBuffer(vk.cmd, 0) == VK_SUCCESS && vk.BeginCommandBuffer(vk.cmd, &begin) == VK_SUCCESS) {
+            if (idle && vk_cmd_idle() && vk.ResetCommandBuffer(vk.cmd, 0) == VK_SUCCESS && vk.BeginCommandBuffer(vk.cmd, &begin) == VK_SUCCESS) {
                 VkImage dst = images[index].image;
                 barrier(s->image, face, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                     VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);

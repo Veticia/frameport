@@ -27,6 +27,7 @@ static struct {
     VkCommandPool pool;
     VkCommandBuffer cmd;
     VkFence fence;
+    int pending;  // vk.cmd was submitted and its fence hadn't signalled yet (vk_cmd_submit)
     int state;  // 0 = not initialized, 1 = ready, -1 = failed
     PFN_vkGetDeviceProcAddr GetDeviceProcAddr;
     PFN_vkGetDeviceQueue GetDeviceQueue;
@@ -105,6 +106,7 @@ static void flip_on_create_session(const XrSessionCreateInfo *info) {
             vk.family = b->queueFamilyIndex;
             vk.index = b->queueIndex;
             vk.state = 0;
+            vk.pending = 0;
             vk.scratch = VK_NULL_HANDLE;  // belonged to the previous session's device
             vk.scratch_memory = VK_NULL_HANDLE;
             vk.scratch_w = vk.scratch_h = 0;
@@ -208,6 +210,29 @@ static int wants_vertical_flip(const XrCompositionLayerQuad *q) {
     return 0;
 }
 
+// vk.cmd and vk.fence are free again: waits for a submission that was still running (vk.pending), at most 2 s.
+static int vk_cmd_idle(void) {
+    if (!vk.pending) return 1;
+    if (vk.WaitForFences(vk.device, 1, &vk.fence, VK_TRUE, 2000000000ull) != VK_SUCCESS) return 0;
+    vk.ResetFences(vk.device, 1, &vk.fence);
+    vk.pending = 0;
+    return 1;
+}
+
+// Submits vk.cmd and waits up to `timeout` ns: 0 = not submitted, 1 = done, 2 = still running (it still runs, so it
+// counts as done; vk_cmd_idle waits for it before vk.cmd is reused). Treating a slow blit as failed made the next frame
+// flip the same panel again: both blits ran and the panel stayed upside down (AC Nexus while the GPU was loading).
+static int vk_cmd_submit(uint64_t timeout) {
+    VkSubmitInfo submit = {VK_STRUCTURE_TYPE_SUBMIT_INFO, NULL, 0, NULL, NULL, 1, &vk.cmd, 0, NULL};
+    if (vk.QueueSubmit(vk.queue, 1, &submit, vk.fence) != VK_SUCCESS) return 0;
+    if (vk.WaitForFences(vk.device, 1, &vk.fence, VK_TRUE, timeout) == VK_SUCCESS) {
+        vk.ResetFences(vk.device, 1, &vk.fence);
+        return 1;
+    }
+    vk.pending = 1;
+    return 2;
+}
+
 // A scratch image at least w x h in this format (device-local, transfer source + destination).
 static int scratch_fit(VkFormat format, uint32_t w, uint32_t h) {
     if (vk.scratch && vk.scratch_format == format && vk.scratch_w >= w && vk.scratch_h >= h) return 1;
@@ -273,6 +298,7 @@ static int dump_rect(VkImage app, uint32_t layer, XrRect2Di rect, int64_t format
     VkMemoryAllocateInfo ai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, NULL, req.size, type};
     if (type == UINT32_MAX || vk.AllocateMemory(vk.device, &ai, NULL, &mem) != VK_SUCCESS ||
         vk.BindBufferMemory(vk.device, buf, mem, 0) != VK_SUCCESS) goto out;
+    if (!vk_cmd_idle()) goto out;
     VkCommandBufferBeginInfo begin = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, NULL,
                                       VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, NULL};
     vk.ResetCommandBuffer(vk.cmd, 0);
@@ -285,10 +311,9 @@ static int dump_rect(VkImage app, uint32_t layer, XrRect2Di rect, int64_t format
     barrier(app, layer, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
     vk.EndCommandBuffer(vk.cmd);
-    VkSubmitInfo submit = {VK_STRUCTURE_TYPE_SUBMIT_INFO, NULL, 0, NULL, NULL, 1, &vk.cmd, 0, NULL};
-    int ok = vk.QueueSubmit(vk.queue, 1, &submit, vk.fence) == VK_SUCCESS &&
-             vk.WaitForFences(vk.device, 1, &vk.fence, VK_TRUE, 1000000000ull) == VK_SUCCESS;
-    vk.ResetFences(vk.device, 1, &vk.fence);
+    int submitted = vk_cmd_submit(1000000000ull);
+    if (submitted == 2 && !vk_cmd_idle()) return 0;  // the copy still writes into buf: leave it allocated
+    int ok = submitted != 0;
     void *mapped = NULL;
     if (!ok || vk.MapMemory(vk.device, mem, 0, size, 0, &mapped) != VK_SUCCESS) goto out;
     const unsigned char *bytes = mapped;
@@ -343,6 +368,11 @@ static const XrCompositionLayerQuad *flip_quad(XrSession session, const XrCompos
         if (warned++ < 5) LOG("flip: quad swapchain=%p has no transfer usage, left as it is", (void *)(uintptr_t)q->subImage.swapchain);
         goto done;
     }
+    if (!vk_cmd_idle()) {  // the last blit hasn't finished after 2 s: try again next frame
+        static int busy;
+        if (busy++ < 5) LOG("flip: GPU busy, quad swapchain=%p waits for the next frame", (void *)(uintptr_t)q->subImage.swapchain);
+        goto done;
+    }
     uint32_t w = (uint32_t)rect.extent.width, h = (uint32_t)rect.extent.height;
     if (!scratch_fit((VkFormat)t->info.format, w, h)) {
         static int failed;
@@ -386,11 +416,12 @@ static const XrCompositionLayerQuad *flip_quad(XrSession session, const XrCompos
     barrier(app, layer, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
     vk.EndCommandBuffer(vk.cmd);
-    VkSubmitInfo submit = {VK_STRUCTURE_TYPE_SUBMIT_INFO, NULL, 0, NULL, NULL, 1, &vk.cmd, 0, NULL};
-    int ok = vk.QueueSubmit(vk.queue, 1, &submit, vk.fence) == VK_SUCCESS &&
-             vk.WaitForFences(vk.device, 1, &vk.fence, VK_TRUE, 100000000ull) == VK_SUCCESS;
-    vk.ResetFences(vk.device, 1, &vk.fence);
-    if (!ok) goto done;
+    int submitted = vk_cmd_submit(100000000ull);
+    if (!submitted) goto done;
+    if (submitted == 2) {
+        static int slow;
+        if (slow++ < 5) LOG("flip: blit for quad swapchain=%p still running after 100 ms", (void *)(uintptr_t)q->subImage.swapchain);
+    }
     if (dump) dump_rect(app, layer, rect, t->info.format, dump, "upright");
     t->flipped[index][t->flipped_count[index]].rect = rect;
     t->flipped[index][t->flipped_count[index]++].layer = layer;

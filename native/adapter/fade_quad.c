@@ -64,6 +64,7 @@ static int fade_fill_vulkan(VkImage image, float alpha) {
                                       VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, NULL};
     VkImageSubresourceRange range = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
     VkClearColorValue black = {.float32 = {0.0f, 0.0f, 0.0f, alpha}};
+    if (!vk_cmd_idle()) return 0;
     vk.ResetCommandBuffer(vk.cmd, 0);
     vk.BeginCommandBuffer(vk.cmd, &begin);
     barrier(image, 0, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
@@ -71,11 +72,7 @@ static int fade_fill_vulkan(VkImage image, float alpha) {
     barrier(image, 0, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
     vk.EndCommandBuffer(vk.cmd);
-    VkSubmitInfo submit = {VK_STRUCTURE_TYPE_SUBMIT_INFO, NULL, 0, NULL, NULL, 1, &vk.cmd, 0, NULL};
-    int ok = vk.QueueSubmit(vk.queue, 1, &submit, vk.fence) == VK_SUCCESS &&
-             vk.WaitForFences(vk.device, 1, &vk.fence, VK_TRUE, 100000000ull) == VK_SUCCESS;
-    vk.ResetFences(vk.device, 1, &vk.fence);
-    return ok;
+    return vk_cmd_submit(100000000ull) != 0;
 }
 
 static int fade_fill_gles(GLuint texture, float alpha) {
