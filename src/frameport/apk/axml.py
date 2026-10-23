@@ -459,6 +459,82 @@ def set_start_activity(manifest: bytes, activity: str) -> bytes | None:
     return x.bytes()
 
 
+def launcher_on_activity(manifest: bytes) -> bool:
+    """A real <activity> (not only an <activity-alias>) has category LAUNCHER: Lepton only starts activities."""
+    names = Axml(manifest).strings()
+    return any(el == "activity" and any(k == "category" and i < len(names) and names[i] == LAUNCHER
+                                        for k, _, i in items) for el, _, items in component_filters(manifest))
+
+
+def launcher_from_alias(manifest: bytes) -> bytes | None:
+    """When the only LAUNCHER entry is an <activity-alias> (e.g. Flycast's MainActivity -> NativeGLActivity, GitHub
+    #400), Lepton finds no activity to start ("APP_ACTIVITY is empty"). The alias's target activity gets its own
+    MAIN intent-filter with the alias's categories (inserted right after the activity's start element), and the
+    alias's LAUNCHER becomes INFO so there is one launcher. None when there's nothing to do or the target isn't
+    declared in the manifest."""
+    if launcher_on_activity(manifest):
+        return None
+    x = Axml(manifest)
+    names = x.strings()
+    alias = next((f for f in component_filters(manifest) if f[0] == "activity-alias"
+                  and any(k == "category" and i < len(names) and names[i] == LAUNCHER for k, _, i in f[2])
+                  and any(k == "action" and i < len(names) and names[i] == MAIN for k, _, i in f[2])), None)
+    if alias is None:
+        return None
+    alias_el = next(el for el in x.elements() if el.name == "activity-alias" and x.attr_str(el, "name") == alias[1])
+    target = x.attr_str(alias_el, "targetActivity") or ""
+    package = _package(x) or ""
+    full = package + target if target.startswith(".") else target
+    activity = next((el for el in x.elements() if el.name == "activity"
+                     and x.attr_str(el, "name") in (target, full)), None)
+    child = next((el for el in x.elements() if el.name in ("action", "category") and el.attrs), None)
+    filter_name = x.index("intent-filter")
+    if activity is None or child is None or filter_name is None:
+        return None
+    name_attr = next(a for a in child.attrs if a.name < len(names) and names[a.name] == "name")
+    action_el, category_el = x.index("action"), x.index("category")
+    cats = [i for k, _, i in alias[2] if k == "category" and i < len(names)]
+    # the MAIN filter's categories only (an alias can have a VIEW filter too): those up to the first non-MAIN action
+    main_cats, seen_main = [], False
+    for k, _, i in alias[2]:
+        if k == "action":
+            if seen_main and names[i] != MAIN:
+                break
+            seen_main = seen_main or names[i] == MAIN
+        elif seen_main and i in cats:
+            main_cats.append(i)
+
+    def element(name: int, value: int | None) -> bytes:
+        count = 0 if value is None else 1
+        start = struct.pack("<HHIII", RES_XML_START_ELEMENT, 16, 36 + 20 * count, 0, 0xFFFFFFFF)
+        start += struct.pack("<IIHHHHHH", 0xFFFFFFFF, name, 20, 20, count, 0, 0, 0)
+        if value is not None:
+            start += struct.pack("<IIIHBBI", name_attr.ns, name_attr.name, value, 8, 0, TYPE_STRING, value)
+        return start
+
+    def end(name: int) -> bytes:
+        return struct.pack("<HHIII", RES_XML_END_ELEMENT, 16, 24, 0, 0xFFFFFFFF) + struct.pack("<II", 0xFFFFFFFF,
+                                                                                                name)
+    chunk = element(filter_name, None)
+    chunk += element(action_el, names.index(MAIN)) + end(action_el)
+    for c in main_cats:
+        chunk += element(category_el, c) + end(category_el)
+    chunk += end(filter_name)
+    info = x.index(INFO)
+    if info is None:
+        info = x.append_string(INFO)
+    shift = len(x.data) - len(manifest)
+    for k, off, i in alias[2]:
+        if k == "category" and i < len(names) and names[i] == LAUNCHER:
+            _set_string_attr(x, off + shift, info)
+    activity = next(el for el in x.elements() if el.name == "activity"
+                    and x.attr_str(el, "name") in (target, full))
+    at = activity.offset + activity.size
+    data = x.data[:at] + chunk + x.data[at:]
+    struct.pack_into("<I", data, 4, len(data))
+    return bytes(data)
+
+
 def _set_string_attr(x: Axml, offset: int, index: int) -> None:
     struct.pack_into("<I", x.data, offset + 8, index)
     if x.data[offset + 15] == TYPE_STRING:

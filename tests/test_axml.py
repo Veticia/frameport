@@ -206,3 +206,36 @@ def test_meta_data_and_web_wrapper(tmp_path):
         z.writestr("AndroidManifest.xml", m)
     a = analyze(apk)
     assert a.extra["web_wrapper"] == {"url": "https://mahjong-vr.pages.dev/"} and a.extra["min_sdk"] == 23
+
+
+def test_launcher_moves_from_an_alias_to_its_activity():
+    """GitHub #400: Flycast's only launcher is <activity-alias MainActivity -> NativeGLActivity>; Lepton only starts
+    activities ("APP_ACTIVITY is empty")."""
+    from conftest import build_axml
+
+    def flt(action, cats):
+        out = [("start", "intent-filter", []), ("start", "action", [("name", "str", action)]), ("end", "action")]
+        for c in cats:
+            out += [("start", "category", [("name", "str", c)]), ("end", "category")]
+        return out + [("end", "intent-filter")]
+    m = build_axml([("start", "manifest", [("package", "str", "com.flycast.emulator.vr")]),
+                    ("start", "application", []),
+                    ("start", "activity", [("name", "str", "com.flycast.emulator.VrSetupActivity")]),
+                    *flt(axml.MAIN, [axml.DEFAULT]), ("end", "activity"),
+                    ("start", "activity", [("name", "str", "com.flycast.emulator.NativeGLActivity")]),
+                    ("end", "activity"),
+                    ("start", "activity-alias", [("name", "str", "com.flycast.emulator.MainActivity"),
+                                                 ("targetActivity", "str", "com.flycast.emulator.NativeGLActivity")]),
+                    *flt(axml.MAIN, [axml.LAUNCHER, axml.VR_CATEGORY]),
+                    *flt("android.intent.action.VIEW", [axml.DEFAULT]), ("end", "activity-alias"),
+                    ("end", "application"), ("end", "manifest")])
+    assert not axml.launcher_on_activity(m)
+    fixed = axml.launcher_from_alias(m)
+    assert axml.launcher_on_activity(fixed)
+    assert _filters(fixed) == {"VrSetupActivity": [axml.DEFAULT],
+                               "NativeGLActivity": sorted([axml.LAUNCHER, axml.VR_CATEGORY]),
+                               "MainActivity": sorted([axml.INFO, axml.VR_CATEGORY, axml.DEFAULT])}
+    assert axml.launcher_from_alias(fixed) is None
+    x = axml.Axml(fixed)
+    assert x.attr_str(next(e for e in x.elements() if e.name == "manifest"), "package") == "com.flycast.emulator.vr"
+    assert [e.name for e in x.elements()][6:10] == ["activity", "intent-filter", "action", "category"]

@@ -116,7 +116,7 @@ signatures:
   - id: no-launcher
     pattern: 'APP_ACTIVITY is empty'
     severity: fatal
-    diagnosis: 'Nothing starts: Lepton found no entry point in the app (an activity with category LAUNCHER).'
+    diagnosis: 'Nothing starts: Lepton found no entry point in the app (an activity with category LAUNCHER; one on an activity-alias alone does not count). Rebuild with the launcher fix (frame.launcher) and reinstall.'
     suggest: [frame.launcher]
   - id: linux-x86-no-fex
     pattern: '(cannot execute binary file: Exec format error|exec format error)'

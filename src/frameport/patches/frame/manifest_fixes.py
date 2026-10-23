@@ -16,6 +16,7 @@ class Launcher(Patch):
                    "Symptom when missing: launch.log says 'APP_ACTIVITY is empty' and nothing starts.")
     order = 20
     default_on = True
+    package_revisions = {"com.flycast.emulator.vr": 2}  # 2: a launcher on an activity-alias moves to its activity
 
     def detect(self, a):
         if a.has_info_category:
@@ -26,11 +27,17 @@ class Launcher(Patch):
         fixed = axml.fix_launcher(ctx.ws.read(MANIFEST))
         if fixed:
             ctx.ws.put(MANIFEST, fixed)
-        return bool(fixed)
+        # the only launcher is an <activity-alias>: Lepton starts activities only (GitHub #400)
+        moved = axml.launcher_from_alias(ctx.ws.read(MANIFEST))
+        if moved:
+            ctx.ws.put(MANIFEST, moved)
+            ctx.notes.append("launcher moved from an activity-alias to its target activity")
+        return bool(fixed or moved)
 
     def validate(self, ctx):
-        cats = axml.categories(ctx.ws.read(MANIFEST))
-        return [("Launchable in Lepton", axml.LAUNCHER in cats, "category LAUNCHER present")]
+        manifest = ctx.ws.read(MANIFEST)
+        return [("Launchable in Lepton", axml.launcher_on_activity(manifest),
+                 "an activity with category LAUNCHER (an activity-alias alone isn't started)")]
 
 
 class NoDebuggable(Patch):

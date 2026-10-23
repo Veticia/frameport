@@ -727,7 +727,7 @@ Makes the game start from the Frame's Steam library.
 - **Suggested (on):** Manifest uses category INFO only; Lepton needs LAUNCHER.
 - **Suggested (on):** Applied automatically if the manifest needs it.
 - **Suggested by launch-test signatures:**
-  - `no-launcher` (fatal): Nothing starts: Lepton found no entry point in the app (an activity with category LAUNCHER).
+  - `no-launcher` (fatal): Nothing starts: Lepton found no entry point in the app (an activity with category LAUNCHER; one on an activity-alias alone does not count).
 - **Source:** [patches/frame/manifest_fixes.py](../src/frameport/patches/frame/manifest_fixes.py)
 
 > Lepton only launches an activity with category LAUNCHER (Quest apps often use INFO). Symptom when missing: launch.log says 'APP_ACTIVITY is empty' and nothing starts.
