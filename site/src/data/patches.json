@@ -499,6 +499,11 @@
   "title": "Epic Online Services: stop the keychain retry loop",
   "group": "Steam Frame patches"
  },
+ "frame.gazzlers_quest_platform": {
+  "anchor": "frame-gazzlers_quest_platform",
+  "title": "GAZZLERS: take the Quest platform path",
+  "group": "Steam Frame patches"
+ },
  "frame.gl_multiview_fbo": {
   "anchor": "frame-gl_multiview_fbo",
   "title": "OpenGL ES: multiview shaders on flat panels (HUD, menus)",

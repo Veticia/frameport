@@ -535,3 +535,42 @@ def test_meta_depth_occlusion_patch_neutralises_keywords(tmp_path):
         assert b"HARD_OCCLUSION" in meta_data
         assert b"NO_OCCLUSION_X" not in meta_data
         assert other_data == b"HARD_OCCLUSION"  # non-asset left alone
+
+
+def test_gazzlers_takes_the_quest_platform_path():
+    """GAZZLERS (GitHub #404): PlatformDeterminer.GetAndroidPlatform throws "Current Platform is not supported" for
+    Lepton's device name; it returns Platform.Meta (1) instead (method start as Cpp2IL reports it for 1.4.1.7857), the
+    exception is triaged to the patch, and only GAZZLERS is offered it (catalog recipe)."""
+    import yaml
+
+    from frameport.analysis.il2cpp import parse_methods
+    from frameport.patches.frame import gazzlers_platform as G
+
+    base.load_all()
+    lib = _lib()
+    lo, _hi = U._executable(lib)[0]
+    a = (lo + 0x40) & ~3
+    cs = ("\t[Address(RVA = \"0x26A8C08\", Offset = \"0x26A8C08\", Length = \"0x8\")]\n"
+          "\t[Token(Token = \"0x6000A1D\")]\n"
+          "\tpublic PlatformDeterminer() { }\n\n"
+          f"\t[Address(RVA = \"0x{a:X}\", Offset = \"0x{a:X}\", Length = \"0xF4\")]\n"
+          "\t[Token(Token = \"0x6000A1C\")]\n"
+          "\tprivate static Platform GetAndroidPlatform() { }\n")
+    targets = G.GazzlersQuestPlatform.targets
+    found = {G.DETERMINER: parse_methods(cs, list(targets[G.DETERMINER]))}
+    assert found[G.DETERMINER] == {"GetAndroidPlatform": (a, 0xF4)}
+    out, notes = U.patch_methods(lib, found, targets)
+    assert out[a:a + 8] == bytes.fromhex("20008052c0035fd6") and len(notes) == 1  # mov w0, #1 (Meta) ; ret
+    assert U.patch_methods(out, found, targets)[0] is None  # already applied
+    assert set(targets[G.DETERMINER]) <= set(U.ALL_TARGETS[G.DETERMINER])
+    p = base.get("frame.gazzlers_quest_platform")
+    game = _analysis(package=G.PACKAGE, libs=["libil2cpp.so", "libunity.so"])
+    assert p.applies(game) and p.detect(game) is None
+    assert not p.applies(_analysis(package="com.other.game", libs=["libil2cpp.so"]))
+    log = ("E Unity   : Exception: Current Platform is not supported\n"
+           "E Unity   :   at PlatformDeterminer.GetAndroidPlatform () [0x00000] in <000>:0 \n"
+           "E Unity   :   at RecenterHandlerFactory.Create () [0x00000] in <000>:0 \n")
+    suggested = {s for f in triage(log, "RUNNING", G.PACKAGE).findings for s in f.suggest}
+    assert "frame.gazzlers_quest_platform" in suggested
+    recipe = yaml.safe_load((Path(__file__).parents[1] / f"catalog/games/{G.PACKAGE}.yaml").read_text(encoding="utf-8"))
+    assert "frame.gazzlers_quest_platform" in recipe["frame"]

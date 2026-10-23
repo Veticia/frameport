@@ -486,6 +486,12 @@ signatures:
     severity: error
     diagnosis: The game waits forever on its loading screen for an answer from Meta's platform (an org-scoped user id, used as its analytics id) that OVRPort's platform library doesn't give. The patch makes the game skip that one request, as it does without Wi-Fi.
     suggest: [frame.cortopia_org_id]
+  - id: gazzlers-platform-unsupported
+    # GAZZLERS (GitHub #404): picks Meta/PICO from SystemInfo.deviceModel and throws for Lepton's "Valve Lepton"
+    pattern: 'Exception: Current Platform is not supported[\s\S]{0,300}?PlatformDeterminer\.GetAndroidPlatform'
+    severity: fatal
+    diagnosis: The game decides whether it runs on a Meta Quest or a PICO headset from Android's device name and stops for any other name; the Frame's Android calls itself Valve Lepton. The patch makes the game take its Meta Quest path.
+    suggest: [frame.gazzlers_quest_platform]
   - id: ovr-microphone-crash
     pattern: 'ovr_Microphone_GetOutputBufferMaxSize\+'
     severity: fatal
