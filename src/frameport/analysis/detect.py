@@ -59,9 +59,7 @@ IL2CPP_METADATA = "assets/bin/Data/Managed/Metadata/global-metadata.dat"
 # 24: statically linked Khronos OpenXR loaders (frame.static_openxr_loader, GitHub #254) (2026-10)
 # 25: meta_depth_occlusion (Unity games with Meta's depth-occlusion keywords: frame.meta_depth_occlusion, PR #246)
 #     (2026-10)
-# 26: cortopia_org_id also for Cortopia's OculusPlatform outside the .Meta namespace (TMNT: Empire City, GitHub #422)
-#     (2026-10)
-ANALYSIS_VERSION = 26
+ANALYSIS_VERSION = 25  # (cortopia_org_id's TMNT layout, GitHub #422, needed no re-analysis: see the patch)
 
 
 # Android versions by API level (for messages); the Frame's Lepton container runs Android 11 (API 30)

@@ -82,6 +82,9 @@ def skip_org_id(lib: bytes, method: tuple[int, int], reachability: int, org_scop
     return bytes(out), [f"OculusPlatform start-up: skips Users.GetOrgScopedID (b.ne -> b at {br:#x})"]
 
 
+TMNT = "com.CortopiaStudios.draxPrototype"  # TMNT: Empire City (GitHub #422)
+
+
 class CortopiaOrgId(Patch):
     id = "frame.cortopia_org_id"
     title = "Cortopia games: don't wait for Meta's org-scoped id"
@@ -94,8 +97,9 @@ class CortopiaOrgId(Patch):
     order = 49
 
     def applies(self, a):
+        # TMNT's package too: analyses from before the flag covered its namespace (no re-analysis for one game)
         return (a.engine == "Unity" and "libil2cpp.so" in a.libs and "arm64-v8a" in a.abis
-                and bool((a.extra or {}).get("cortopia_org_id")))
+                and (bool((a.extra or {}).get("cortopia_org_id")) or getattr(a, "package", None) == TMNT))
 
     def detect(self, a):
         if self.applies(a) and can_rewrite_il2cpp(a):

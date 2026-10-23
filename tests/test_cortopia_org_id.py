@@ -131,11 +131,11 @@ E Unity   : Cortopia.Scripts.Platform.<Login>d__17:MoveNext() (at Assets/Cortopi
 
 
 def test_analysis_flag_with_and_without_the_meta_namespace():
-    from frameport.analysis.detect import ANALYSIS_VERSION, cortopia_org_id
+    from frameport.analysis.detect import cortopia_org_id
 
     org = b"\0GetOrgScopedID\0"
     assert cortopia_org_id(b"\0Cortopia.Scripts.Platform.Meta\0" + org)            # Escaping Wonderland
     assert cortopia_org_id(b"\0Cortopia.Scripts.Platform\0OculusPlatform\0" + org)  # TMNT: Empire City
     assert not cortopia_org_id(b"\0Cortopia.Scripts.Platform\0OculusPlatform\0")    # no org-scoped id request
     assert not cortopia_org_id(b"\0Cortopia.Scripts.Platform\0PicoPlatform\0" + org)
-    assert not cortopia_org_id(None) and ANALYSIS_VERSION >= 26
+    assert not cortopia_org_id(None)
