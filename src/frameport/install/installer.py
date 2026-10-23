@@ -840,14 +840,21 @@ def update_steam_art(frame: Frame, package: str, reporter: Reporter, title: str 
     return {**(add_to_steam(frame, [package], reporter) or {}), "library": True}
 
 
+def steam_library_mode() -> str:
+    """now / later / off. Unset, FramePort running on the Frame itself defaults to later: with now the restart waits
+    until FramePort closes (it would close Desktop Mode and FramePort too), which looked stuck (GitHub #425)."""
+    from ..core import library
+    from ..frame.local import on_frame
+
+    return library.setting("install.steam_library", "later" if on_frame() else "now")
+
+
 def add_to_steam(frame: Frame, packages: list[str], reporter: Reporter, wait: float = 120) -> dict:
     """Add library entries + artwork for installed games; Steam restarts once (a few seconds)."""
     import time
 
     reporter.stage("Add to Steam library")
-    from ..core import library
-
-    mode = library.setting("install.steam_library", "now")
+    mode = steam_library_mode()
     frame.agent("library_mode", mode=mode)
     submitted = frame.agent("shortcuts", packages=packages, restart=True, mode=mode)
     if submitted.get("disabled") or submitted.get("state") == "pending":
@@ -866,7 +873,8 @@ def add_to_steam(frame: Frame, packages: list[str], reporter: Reporter, wait: fl
             break
         if status.get("state") == "waiting":  # Steam restarts later: after the game, or back in Gaming Mode
             reporter.check("Steam library", None,
-                           "added after FramePort on the Frame closes (Steam has to restart for it)"
+                           "added after FramePort on the Frame closes (Steam has to restart for it); to add it "
+                           "now: Settings → Installing → Restart Steam now"
                            if status.get("reason") == "frameport" else
                            "added when you're back in Gaming Mode (Steam has to restart for it)"
                            if status.get("reason") == "desktop" else

@@ -98,7 +98,8 @@ class SettingsView:
 
     def installing(self) -> ft.Control:
         from ...core import library
-        from ...install.installer import upload_threads
+        from ...frame.local import on_frame
+        from ...install.installer import steam_library_mode, upload_threads
 
         def steam_changed(e):
             mode = e.control.value
@@ -123,10 +124,12 @@ class SettingsView:
                       tr("This applies pending library changes and closes Desktop Mode and FramePort on the Frame."),
                       tr("Restart Steam now"), lambda: app.run_bg(work))
 
+        here = on_frame()  # FramePort on the Frame itself: Later is the default (GitHub #425)
         steam = ft.Row([C.dropdown(label=tr("Steam library"),
-                                  value=library.setting("install.steam_library", "now"), width=T.px(360),
-                                  options=[ft.DropdownOption("now", tr("Now (default)")),
-                                           ft.DropdownOption("later", tr("Later — next Steam start")),
+                                  value=steam_library_mode(), width=T.px(360),
+                                  options=[ft.DropdownOption("now", tr("Now") if here else tr("Now (default)")),
+                                           ft.DropdownOption("later", tr("Later — next Steam start (default)") if here
+                                                             else tr("Later — next Steam start")),
                                            ft.DropdownOption("off", tr("Off — launch from FramePort"))],
                                   on_select=steam_changed), C.help_icon("steam_library")], spacing=T.S1)
         def changed(e):

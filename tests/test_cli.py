@@ -57,3 +57,17 @@ def test_restart_steam_cli_confirmation(monkeypatch):
     calls.clear()
     result = CliRunner().invoke(cli.app, ["frame", "restart-steam"], input="y\n")
     assert result.exit_code == 0 and calls == [{"confirm": False}, {"confirm": True}]
+
+
+def test_steam_library_defaults_to_later_on_the_frame(monkeypatch):
+    """GitHub #425: with Now, FramePort on the Frame waited for itself to close before Steam could restart."""
+    from frameport.core import library
+    from frameport.install import installer
+
+    monkeypatch.setattr("frameport.frame.local.on_frame", lambda: True)
+    assert installer.steam_library_mode() == "later"
+    monkeypatch.setattr("frameport.frame.local.on_frame", lambda: False)
+    assert installer.steam_library_mode() == "now"
+    library.set_setting("install.steam_library", "now")
+    monkeypatch.setattr("frameport.frame.local.on_frame", lambda: True)
+    assert installer.steam_library_mode() == "now"  # a choice the user made wins

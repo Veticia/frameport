@@ -71,10 +71,9 @@ class FrameLeptonTarget(Target):
         return self.connect().frame.agent("collect_diag", timeout=180, package=package)
 
     def launch(self, package):
-        from ..core import library
+        from ..install.installer import steam_library_mode
 
-        return self.connect().frame.agent("launch", package=package, timeout=60,
-                                          mode=library.setting("install.steam_library", "now"))
+        return self.connect().frame.agent("launch", package=package, timeout=60, mode=steam_library_mode())
 
     def set_settings(self, package, settings, *, foveation=None):
         from ..core import library

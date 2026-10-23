@@ -67,7 +67,8 @@ HELP: dict[str, str] = _Translated({
     "refine_label_rules": "Checks every box the scanner found against size and place rules (see Labels). Off keeps the "
                           "scanner's own names.",
     "steam_library":"Now waits until Steam can restart safely. Later saves shortcuts for the next Steam start. "
-                     "Off uses FramePort Play without Steam per-game integration; existing shortcuts stay.",
+                     "Off uses FramePort Play without Steam per-game integration; existing shortcuts stay. "
+                     "When FramePort runs on the Frame itself, Later is the default: a restart would close it.",
     # ---- game status / library
     "status": "How well the game runs on the Steam Frame. \"Works\" and \"Works with issues\" were tested on a Frame; "
               "\"Untested\" is a suggestion nobody has confirmed yet. \"Can't run\" means a known blocker.",
