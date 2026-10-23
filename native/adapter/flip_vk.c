@@ -71,12 +71,18 @@ typedef struct {
     uint32_t image_count;
     uint32_t last_acquired;
     uint32_t acquired[MAX_IMAGES], acquired_count, waited_count;
+    // images acquired and not yet released, oldest first (xrReleaseSwapchainImage releases the oldest), and the last
+    // released one: the image a layer shows. An image still held at xrEndFrame isn't drawn yet.
+    uint32_t held[MAX_IMAGES], held_count, last_released;
+    int released_any;
     // rectangles already turned upside down in each image since the app last acquired it (static quads are
     // submitted again without a new acquire: flipping them again would undo it)
     struct { XrRect2Di rect; uint32_t layer; } flipped[MAX_IMAGES][4];
     uint32_t flipped_count[MAX_IMAGES];
     uint32_t alpha_inverted[MAX_IMAGES];  // alpha_blend_vk.c: array layers whose alpha was inverted since the acquire
-    int dumped;  // flip_dump saved this swapchain's quad
+    int dumped;  // flip_dump saved this swapchain's quad (its dump number)
+    int shown_dumped, frames_since_dump;
+    int traced;  // layer_debug: flips logged for this swapchain  // flip_dump: the same image ~3 s later as shown ("shown")
     int logged;  // its first in-place flip was logged
 } tracked_swapchain;
 
@@ -141,8 +147,31 @@ static void flip_on_acquire(XrSwapchain handle, uint32_t index) {
         if (index < MAX_IMAGES) t->flipped_count[index] = 0;  // new content: upside down again
         if (index < MAX_IMAGES) t->alpha_inverted[index] = 0;
         if(t->acquired_count<MAX_IMAGES)t->acquired[t->acquired_count++]=index;
+        if (t->held_count < MAX_IMAGES) t->held[t->held_count++] = index;
     }
     pthread_mutex_unlock(&flip_lock);
+}
+
+static int flip_release_tracked;  // a release hook reports releases (flip_on_release), so held images are known
+
+static void flip_on_release(XrSwapchain handle) {
+    pthread_mutex_lock(&flip_lock);
+    if (!flip_release_tracked) LOG("flip: release tracking active");
+    flip_release_tracked = 1;
+    tracked_swapchain *t = find_tracked(handle, 0);
+    if (t && t->held_count) {
+        t->last_released = t->held[0];
+        t->released_any = 1;
+        memmove(t->held, t->held + 1, (--t->held_count) * sizeof(t->held[0]));
+    }
+    pthread_mutex_unlock(&flip_lock);
+}
+
+// The image a layer of this swapchain shows: the last released one. Flipping the last acquired one while the app
+// still held it turned an image upside down before the app drew it, so the drawn panel stayed upside down (AC Nexus'
+// startup notices at random). Without release reports (or before the first release) the last acquired one.
+static uint32_t shown_image(const tracked_swapchain *t) {
+    return flip_release_tracked && t->released_any ? t->last_released : t->last_acquired;
 }
 
 static void flip_on_destroy(XrSwapchain handle) {
@@ -352,13 +381,25 @@ static const XrCompositionLayerQuad *flip_quad(XrSession session, const XrCompos
     pthread_mutex_lock(&flip_lock);
     tracked_swapchain *t = find_tracked(q->subImage.swapchain, 0);
     const XrRect2Di rect = q->subImage.imageRect;
-    uint32_t layer = q->subImage.imageArrayIndex, index = t ? t->last_acquired : 0;
+    uint32_t layer = q->subImage.imageArrayIndex, index = t ? shown_image(t) : 0;
+    if (t && flip_release_tracked && t->held_count && t->held[t->held_count - 1] == t->last_acquired &&
+        (!t->released_any || t->last_released != t->last_acquired)) {
+        static int held;
+        if (held++ < 10)
+            LOG("flip: quad swapchain=%p image %u still held by the app at xrEndFrame, flipping released image %d",
+                (void *)(uintptr_t)q->subImage.swapchain, t->last_acquired, t->released_any ? (int)t->last_released : -1);
+        if (!t->released_any) goto done;  // nothing drawn and released yet
+    }
     if (!t || !t->image_count || index >= t->image_count || rect.extent.width <= 0 || rect.extent.height <= 0) {
         static int skipped;
         if (skipped++ < 10)
             LOG("flip: skipped quad swapchain=%p tracked=%d images=%u last=%u rect=%dx%d", (void *)(uintptr_t)q->subImage.swapchain,
                 t != NULL, t ? t->image_count : 0, index, rect.extent.width, rect.extent.height);
         goto done;
+    }
+    if (t->dumped && !t->shown_dumped && ++t->frames_since_dump > 216 && vk_cmd_idle()) {
+        t->shown_dumped = 1;
+        dump_rect(t->images[index], layer, rect, t->info.format, t->dumped, "shown");
     }
     for (uint32_t i = 0; i < t->flipped_count[index]; ++i)
         if (t->flipped[index][i].layer == layer && !memcmp(&t->flipped[index][i].rect, &rect, sizeof rect)) goto done;
@@ -384,7 +425,7 @@ static const XrCompositionLayerQuad *flip_quad(XrSession session, const XrCompos
     int dump = 0;
     if (dumps < flip_dump && !t->dumped && dump_rect(app, layer, rect, t->info.format, dumps + 1, "raw")) {
         dump = ++dumps;
-        t->dumped = 1;
+        t->dumped = dump;
     }
     VkCommandBufferBeginInfo begin = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, NULL,
                                       VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, NULL};
@@ -425,6 +466,10 @@ static const XrCompositionLayerQuad *flip_quad(XrSession session, const XrCompos
     if (dump) dump_rect(app, layer, rect, t->info.format, dump, "upright");
     t->flipped[index][t->flipped_count[index]].rect = rect;
     t->flipped[index][t->flipped_count[index]++].layer = layer;
+    if (layer_debug && t->traced++ < 12)  // layer_debug: its first flips, with the app's acquire/release state
+        LOG("flip: swapchain=%p %ux%u image %u (acquired %u, released %d, held %u) rect=%d,%d layer %u", (void *)(uintptr_t)q->subImage.swapchain,
+            t->info.width, t->info.height, index, t->last_acquired, t->released_any ? (int)t->last_released : -1,
+            t->held_count, rect.offset.x, rect.offset.y, layer);
     if (!t->logged++)  // once per quad swapchain
         LOG("flip: turning quad swapchain=%p (%ux%u) upright in place", (void *)(uintptr_t)q->subImage.swapchain, w, h);
 done:

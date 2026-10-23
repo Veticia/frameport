@@ -1471,10 +1471,11 @@ XRAPI_ATTR XrResult XRAPI_CALL xrReleaseSwapchainImage(XrSwapchain swapchain, co
     PFN_xrReleaseSwapchainImage fn = (PFN_xrReleaseSwapchainImage)lookup(active_instance, "xrReleaseSwapchainImage");
     if (!fn) return XR_ERROR_FUNCTION_UNSUPPORTED;
     int pooled = pool_find(swapchain);
-    if (pooled >= 0) return pool_cycle(pooled, 2, NULL);
     if (is_standin(swapchain)) return XR_SUCCESS;
-    __atomic_add_fetch(&sc_releases, 1, __ATOMIC_RELAXED);
-    return fn(swapchain, info);
+    XrResult result = pooled >= 0 ? pool_cycle(pooled, 2, NULL) : fn(swapchain, info);
+    if (pooled < 0) __atomic_add_fetch(&sc_releases, 1, __ATOMIC_RELAXED);
+    if (XR_SUCCEEDED(result)) flip_on_release(swapchain);
+    return result;
 }
 
 XRAPI_ATTR XrResult XRAPI_CALL xrAcquireSwapchainImage(XrSwapchain swapchain, const XrSwapchainImageAcquireInfo *info,
@@ -1522,6 +1523,7 @@ static XRAPI_ATTR XrResult XRAPI_CALL surf_composite_release(XrSwapchain handle,
         equirect_emul?hook_xrReleaseSwapchainImage(handle,info):
         ((PFN_xrReleaseSwapchainImage)lookup(active_instance,"xrReleaseSwapchainImage"))(handle,info);
     if(XR_SUCCEEDED(result)) {
+        if(!(pool_find(handle)>=0 && !equirect_emul))flip_on_release(handle);  // else xrReleaseSwapchainImage did
         surf_scene_release_commit(handle);
         pthread_mutex_lock(&flip_lock);t=find_tracked(handle,0);
         if(t && t->acquired_count) {
@@ -1853,8 +1855,8 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEndFrame(XrSession session, const XrFrameEndInf
         info->layerCount > 64)
         return fn(session, info);
     if (layer_debug) {  // the submitted layer list (order, flags, eyes, chained structs) whenever its shape changes
-        static char last[1024];
-        char now[1024];
+        static char last[3000];
+        char now[3000];
         size_t used = 0;
         for (uint32_t i = 0; i < info->layerCount && used < sizeof(now) - 64; ++i) {
             const XrCompositionLayerBaseHeader *l = info->layers[i];
@@ -1865,6 +1867,13 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEndFrame(XrSession session, const XrFrameEndInf
             if (l->type == XR_TYPE_COMPOSITION_LAYER_EQUIRECT2_KHR) eye = ((const XrCompositionLayerEquirect2KHR *)l)->eyeVisibility;
             used += (size_t)snprintf(now + used, sizeof(now) - used, " [%d f=0x%llx e=%d", l->type,
                                      (unsigned long long)l->layerFlags, eye);
+            if (l->type == XR_TYPE_COMPOSITION_LAYER_QUAD) {  // which image and part of it: stereo panels, flips
+                const XrCompositionLayerQuad *q = (const XrCompositionLayerQuad *)l;
+                used += (size_t)snprintf(now + used, sizeof(now) - used, " sc=%p i=%u rect=%d,%d %dx%d",
+                                         (void *)(uintptr_t)q->subImage.swapchain, q->subImage.imageArrayIndex,
+                                         q->subImage.imageRect.offset.x, q->subImage.imageRect.offset.y,
+                                         q->subImage.imageRect.extent.width, q->subImage.imageRect.extent.height);
+            }
             if (l->type == XR_TYPE_COMPOSITION_LAYER_EQUIRECT2_KHR) {  // mapping + source size: 360 vs 180, SBS halves
                 const XrCompositionLayerEquirect2KHR *q = (const XrCompositionLayerEquirect2KHR *)l;
                 used += (size_t)snprintf(now + used, sizeof(now) - used, " h=%.2f u=%.2f l=%.2f r=%.1f rect=%d,%d %dx%d",
@@ -2631,6 +2640,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrGetInstanceProcAddr(XrInstance instance, const 
         HOOK(xrWaitSwapchainImage)
         HOOK(xrReleaseSwapchainImage)
     }
+    if (flip_emul || flip_emul_setting) HOOK(xrReleaseSwapchainImage)  // flips need the released (shown) image: flip_on_release
     if (cube_standin && (!strcmp(name, "xrUpdateSwapchainFB") || !strcmp(name, "xrGetSwapchainStateFB"))) {
         XrResult result = next_gipa(instance, name, function);  // only wrapped where the runtime has it
         if (XR_FAILED(result) || !*function) return result;

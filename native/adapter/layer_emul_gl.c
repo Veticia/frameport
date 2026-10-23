@@ -317,6 +317,7 @@ static XRAPI_ATTR XrResult XRAPI_CALL hook_xrReleaseSwapchainImage(XrSwapchain s
     pthread_mutex_unlock(&emul_lock);
     XrResult result = pooled >= 0 ? pool_cycle(pooled, 2, NULL) :
                       emul_is_virtual(swapchain) ? XR_SUCCESS : fn(swapchain, info);
+    if (XR_SUCCEEDED(result)) flip_on_release(swapchain);
     pthread_mutex_lock(&emul_lock);
     s = emul_active() ? emul_find_source(swapchain, 0) : NULL;
     if (s && XR_SUCCEEDED(result) && s->acquired_count) {

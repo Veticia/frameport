@@ -44,6 +44,7 @@ static XRAPI_ATTR XrResult XRAPI_CALL eye_hook_xrReleaseSwapchainImage(XrSwapcha
     if (release_wait_active()) eye_wait_for_gpu();
     int pooled = pool_find(swapchain);
     XrResult result = pooled >= 0 ? pool_cycle(pooled, 2, NULL) : fn(swapchain, info);
+    if (XR_SUCCEEDED(result)) flip_on_release(swapchain);
     if (eye_debug) {
         int64_t now = monotonic_ns();
         pthread_mutex_lock(&eye_lock);

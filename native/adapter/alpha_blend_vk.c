@@ -221,7 +221,7 @@ static int ab_invert_view(const XrSwapchainSubImage *sub) {
     int ok = 0;
     pthread_mutex_lock(&flip_lock);
     tracked_swapchain *t = find_tracked(sub->swapchain, 0);
-    uint32_t index = t ? t->last_acquired : 0, layer = sub->imageArrayIndex;
+    uint32_t index = t ? shown_image(t) : 0, layer = sub->imageArrayIndex;
     XrRect2Di rect = sub->imageRect;
     if (!t || !t->image_count || index >= t->image_count || layer >= 32 || rect.extent.width <= 0 ||
         rect.extent.height <= 0 || t->info.sampleCount > 1 ||
