@@ -204,6 +204,8 @@ def gen_imports_host(imports, out):
              "#pragma clang diagnostic ignored \"-Wdeprecated-declarations\"",
              "#include <android/asset_manager_jni.h>", "#include <android/configuration.h>", "#include <android/input.h>", "#include <android/looper.h>",
              "#include <android/native_window_jni.h>", "#include <android/sensor.h>",
+             "#include <media/NdkMediaCodec.h>", "#include <media/NdkMediaExtractor.h>",
+             "#include <media/NdkMediaFormat.h>",
              '#include "../imports_internal.h"', ""]
     for name, ret, args, manual in imports:
         if manual:

@@ -13,6 +13,8 @@
 #include <sys/mman.h>
 #include "a32bridge.h"
 #include "fakejni.h"
+#include "fakemedia.h"
+#include <media/NdkMediaExtractor.h>
 
 static int failures;
 
@@ -274,6 +276,28 @@ static void test_cxx(const char *dir, const char *name)
     CHECK(r == 303, "%s: C++ exceptions and static constructors in a guest library (%d)", name, r);
 }
 
+static void test_media(const char *dir)
+{
+    char stub[512];
+    snprintf(stub, sizeof stub, "%s/libbtest4.so", dir);
+    uint32_t h = a32b_load(stub);
+    uint32_t fn = h ? a32b_sym(h, "media_test") : 0;
+    int r = fn ? (int)a32b_call(fn, NULL, 0) : -1;
+    CHECK(r >= 0 && (r & 1), "libmediandk: every function Unity's video player looks up resolves (0x%x)", r);
+    CHECK(r >= 0 && (r & 2), "AMediaFormat: values both ways, host-owned string, buffer and toString copied in");
+    CHECK(fake_media.buffers_high, "the fake codec's buffers lie above 4 GiB");
+    CHECK(r >= 0 && (r & 4) && fake_media.configured && fake_media.queued_guest_data == 1,
+          "AMediaCodec input buffer: the guest's writes reach the codec at queueInputBuffer");
+    CHECK(r >= 0 && (r & 8), "AMediaCodec output buffer: buffer info and the codec's bytes reach the guest");
+    CHECK(r >= 0 && (r & 16) && fake_media.queued_extractor_data == 1 && fake_media.last_timeout == -1,
+          "AMediaExtractor_readSampleData into a mirrored input buffer, queued again (same buffer reused)");
+    CHECK(fake_media.fd == 5 && fake_media.fd_offset == 1ll << 33 && fake_media.fd_length == 77 &&
+              fake_media.seek_pos == 5000000000ll && fake_media.seek_mode == AMEDIAEXTRACTOR_SEEK_CLOSEST_SYNC,
+          "64-bit arguments: setDataSourceFd, seekTo");
+    CHECK(r >= 0 && (r & 32) && fake_media.formats_deleted == 2 && fake_media.codecs_deleted == 1,
+          "getOutputFormat, AMediaFormat_delete, AMediaCodec_delete");
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 2) {
@@ -290,6 +314,7 @@ int main(int argc, char **argv)
     test_cxx(argv[1], "libbtest3");
     test_cxx(argv[1], "libbtest3_android");
     test_cxx(argv[1], "libbtest3_standard");
+    test_media(argv[1]);
     CHECK(mprotect(taken, 4 << 20, PROT_NONE) == 0, "the host's low mapping is still there");
     if (failures) {
         printf("%d FAILED\n", failures);

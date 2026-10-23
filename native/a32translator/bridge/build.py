@@ -22,7 +22,7 @@ OUT = ROOT / "out" / "bridge"
 TRANSLATOR = ["dispatch.c", "mem.c", "loader.c", "syscall.c", "signals.c", "threads.c", "interp.c", "interp_vfp.c",
               "interp_neon.c", "a32_decode.c", "t32_decode.c", "vfp_neon_decode.c", "jit.c", "jit_vfp.c",
               "jit_glue.S"]
-HOST = ["bridge.c", "handles.c", "jni.c", "natives.c", "native_activity.c", "android.c", "vrapi.c", "input.c", "tramp.S", "gen/jni_gen.c",
+HOST = ["bridge.c", "handles.c", "jni.c", "natives.c", "native_activity.c", "android.c", "vrapi.c", "input.c", "media.c", "tramp.S", "gen/jni_gen.c",
         "gen/imports.c"]
 HOST_GL = ["gl.c", "gen/gl.c"]  # not in the PC harness (no GLES there)
 GUEST = ["main.c", "loader.c", "compat.c", "log.c", "gl.c", "opensles.c", "hc.S", "gen/stubs.S", "gen/gl_stubs.S", "gen/exports.S"]
@@ -71,7 +71,7 @@ def main():
     src = ROOT / "src"
     common = [*opt, *prefix, *WARN, "-march=armv8-a+crypto", "-std=gnu11", "-fno-strict-aliasing", "-fPIC"]
     run([cc64, *common, "-shared", "-fvisibility=hidden", *[src / s for s in TRANSLATOR], *[h / s for s in HOST + HOST_GL],
-         "-llog", "-landroid", "-laaudio", "-lEGL", "-lGLESv3", "-ldl", "-lm", "-Wl,--no-undefined", "-Wl,-soname,liba32bridge.so", "-o", OUT / "liba32bridge.so"])
+         "-llog", "-landroid", "-laaudio", "-lmediandk", "-lEGL", "-lGLESv3", "-ldl", "-lm", "-Wl,--no-undefined", "-Wl,-soname,liba32bridge.so", "-o", OUT / "liba32bridge.so"])
     run([cc64, *common, "-shared", "-fvisibility=hidden", h / "stub.c", "-L", OUT, "-la32bridge",
          "-Wl,--no-undefined", "-o", OUT / "liba32stub.so"])
 
@@ -82,12 +82,14 @@ def main():
         # the harness is static (runs under qemu-aarch64 or on any arm64 Linux): high image base keeps the
         # low 4 GiB free, like a32run's
         run([cc64, *common, "-DA32B_STDERR_LOG", "-DA32B_TEST", "-static", "-Wl,--image-base=0x7000000000", "-I", h,
-             t / "harness.c", t / "fakejni.c", *[src / s for s in TRANSLATOR], *[h / s for s in HOST], "-lm", "-ldl",
+             t / "harness.c", t / "fakejni.c", t / "fakemedia.c", *[src / s for s in TRANSLATOR], *[h / s for s in HOST], "-lm", "-ldl",
              "-o", to / "harness"])
         run([cc32, *opt, *prefix, *WARN, "-mthumb", "-mfpu=neon-vfpv4", "-shared", "-fPIC", t / "libbtest.c",
              "-Wl,-soname,libbtest.so", "-llog", "-o", to / "libbtest.a32.so"])
         run([cc32, *opt, *prefix, *WARN, "-marm", "-mfpu=neon-vfpv4", "-shared", "-fPIC", t / "libbtest2.c",
              to / "libbtest.a32.so", "-landroid", "-llog", "-o", to / "libbtest2.a32.so"])
+        run([cc32, *opt, *prefix, *WARN, "-mthumb", "-mfpu=neon-vfpv4", "-shared", "-fPIC", "-I", t,
+             t / "libbtest4.c", "-ldl", "-o", to / "libbtest4.a32.so"])
         run([bin_ / "armv7a-linux-androideabi30-clang++", *opt, *prefix, *WARN, "-mthumb", "-shared", "-fPIC",
              "-static-libstdc++", t / "libbtest3.cpp", "-o", to / "libbtest3.a32.so"])
         # Exercise both RELR tag families through the real guest loader. C++ constructors,

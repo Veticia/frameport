@@ -525,6 +525,7 @@ Runs a 32-bit game (Gear VR, Oculus Go, early Quest) on the Frame, which only ru
 - **Catalog games (6):** AFFECTED: The Manor, Gunjack, Journey of the Gods, Shadow Point, Sports Scramble (Santa Cruz), Spunky Dungeon.
 - **Suggested by launch-test signatures:**
   - `a32-jit-overflow` (fatal): The 32-bit bridge's translator stopped the game on a long run of instructions it hands to its interpreter, for example OpenSSL's ARMv8 SHA-1 code in Pinball FX2 VR.
+  - `a32-video-ndk` (error): A 32-bit game on the bridge can't play its videos through Unity's video player (Ghost Giant's intro stays black).
   - `no-arm64` (fatal): 32-bit-only APK (e.g. a Gear VR or Oculus Go game).
 - **Source:** [patches/frame/a32_bridge.py](../src/frameport/patches/frame/a32_bridge.py)
 

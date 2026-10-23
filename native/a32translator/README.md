@@ -141,6 +141,12 @@ python native/a32translator/bridge/build.py [--test]
   `vrapi_GetPredictedTracking`). The runtime exports it itself (`libvrapi.so` is a system library; the game's copy is
   Oculus' loader and is dropped) and translates it to FramePort's 64-bit VrApi -> OpenXR bridge (shipped as
   `libfp_vrapi64.so`, with OVRPort's OpenXR dispatcher and the FrameBridge adapter). Layouts are VrApi 1.5's.
+- **NDK media** (`host/media.c`, imports.txt): libmediandk's AMediaFormat/AMediaCodec/AMediaExtractor as Unity's
+  video player looks them up (it drops NDK playback if one is missing, and its JNI fallback needs
+  `GetDirectBufferAddress` of codec buffers above 4 GiB). Format strings/buffers get guest copies freed with the
+  format; codec buffers get a guest mirror per (codec, input/output, index): input mirrors go to the codec at
+  `queueInputBuffer` (the queued range), output buffers come in at `getOutputBuffer` (the range
+  `dequeueOutputBuffer` reported). `AMediaCodecBufferInfo` has the same layout on both sides.
 - **OpenSL ES** (`guest/opensles.c`): engine, output mix and PCM players with an Android buffer queue, implemented in
   the guest (OpenSL objects are function tables); a guest thread per player writes to AAudio on the host.
 - **Signals**: host handlers never use SA_RESTART; a blocking system call interrupted by a guest signal is
@@ -165,7 +171,8 @@ Tests:
   with a fake JVM (`fakejni.c`) for three guest libraries: RegisterNatives and `Java_*` exports, 12-argument
   natives (stack arguments on both sides), floats/doubles/bytes, strings, arrays below and above 4 GiB, every
   Call*Method style, NewObject, nested calls, guest threads that attach, several host threads, exceptions, a
-  NativeActivity with a DT_NEEDED library, and C++ exceptions in guest libraries using ordinary REL,
+  NativeActivity with a DT_NEEDED library, NDK media against a fake libmediandk whose buffers lie above 4 GiB
+  (`fakemedia.c`, `libbtest4.c`), and C++ exceptions in guest libraries using ordinary REL,
   standard RELR and Android's older RELR tags (with APS2). Runs under qemu-aarch64 or
   natively (passes on the Frame with JIT and interpreter).
 - `uv run python bridge/test/make_apk.py`: `org.frameport.a32test`, a NativeActivity APK without Java code whose
@@ -214,7 +221,8 @@ up to ±30 % between runs), against the same source built natively for AArch64:
 2. A FramePort patch that converts an APK (libraries moved, stubs, bridge, runtime, `extractNativeLibs=true`) +
    triage signature + PLAYBOOK row.
 3. Bridge gaps: guest threads of host threads that exit are never freed; `Java_*` functions of libraries the guest
-   dlopens itself aren't registered; `GetDirectBufferAddress` of buffers above 4 GiB returns 0; signals the guest
+   dlopens itself aren't registered; `GetDirectBufferAddress` of buffers above 4 GiB returns 0 (Java-side writes would need syncing at JNI
+   calls; NDK media avoids it for Unity's video); signals the guest
    handles are only delivered to guest threads.
 4. JIT: VLDn single-lane/all-lanes forms, flag liveness (skip unused C/V computations), keeping the VFP cache
    across a loop's back edge, and VRECPS/VRSQRTS/VCVTR natively.

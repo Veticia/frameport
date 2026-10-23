@@ -135,6 +135,14 @@ signatures:
       interpreter, for example OpenSSL's ARMv8 SHA-1 code in Pinball FX2 VR. Fixed in newer FramePort versions;
       update FramePort and rebuild the game ("Update on Frame").
     suggest: [frame.a32_bridge]
+  - id: a32-video-ndk
+    pattern: 'AndroidMediaNDK could not load symbol AMedia\w+|GetDirectBufferAddress: buffer at 0x[0-9a-f]+ is outside the guest''s reach'
+    severity: error
+    diagnosis: A 32-bit game on the bridge can't play its videos through Unity's video player (Ghost Giant's intro
+      stays black). Older bridges lacked the NDK media functions (libmediandk), and Unity's Java fallback hands the 32-bit
+      code decoder buffers it can't reach. Fixed in newer FramePort versions; update FramePort and rebuild the game
+      ("Update on Frame").
+    suggest: [frame.a32_bridge]
   - id: android-too-new
     pattern: '(NoClassDefFoundError|ClassNotFoundException|NoSuchMethodError)\b.*(Landroid/window/|android\.window\.|(storeStoreFence|loadLoadFence)\(\)V in class Ljava/lang/invoke/VarHandle)'
     severity: fatal
