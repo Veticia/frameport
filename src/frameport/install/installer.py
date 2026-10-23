@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import os
 import posixpath
 import threading
 import time
@@ -595,12 +596,44 @@ def transfer_link(frame: Frame, reporter: Reporter, need: int):
             xfer.close()
 
 
+def _link_local(frame, items: list[tuple[Path, str, int]], remote_root: str, reporter: Reporter
+                ) -> tuple[list[tuple[Path, str, int]], int]:
+    """FramePort running on the Frame itself (GitHub #433): files on the same drive as the install are hardlinked into
+    it instead of copied over SSH, so a 30 GB game doesn't take 60 GB (the original stays the source for rebuilds).
+    Returns (the items still to upload, bytes linked). The agent moves them into place with os.replace, which keeps
+    the link."""
+    from ..frame.local import on_frame
+
+    host = getattr(getattr(frame, "target", None), "host", None)
+    if not items or host not in ("127.0.0.1", "localhost") or not on_frame():
+        return items, 0
+    rest, linked = [], 0
+    for local, rel, size in items:
+        dest = Path(posixpath.join(remote_root, rel))
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if dest.exists() and dest.stat().st_size == size:
+                linked += size
+                continue
+            dest.unlink(missing_ok=True)
+            os.link(local, dest)
+            linked += size
+        except OSError:  # another drive (EXDEV), a filesystem without hardlinks: copy it as before
+            rest.append((local, rel, size))
+    if linked:
+        reporter.log(f"linked {len(items) - len(rest)} file(s) on this Frame instead of copying them "
+                     f"({linked / 2**30:.1f} GiB)")
+    return rest, linked
+
+
 def upload_files(frame: Frame, items: list[tuple[Path, str, int]], remote_root: str, reporter: Reporter,
                  total: int, sent: int = 0, speed: Speed | None = None, workers: int | None = None,
                  prefer_native: bool = True) -> int:
     """Upload (local, relative path, size) items under remote_root. Interruptible (Cancel, dropped connection) and
     resumable: finished files are skipped next time (the agent counts files already in incoming/), a cut-off big file
     continues from its .part. Returns bytes sent."""
+    items, linked = _link_local(frame, items, remote_root, reporter)
+    sent += linked
     big = sorted((i for i in items if i[2] >= BIG_FILE), key=lambda item: item[2], reverse=True)
     small = [i for i in items if i[2] < BIG_FILE]
     reporter.check_cancel()
