@@ -18,11 +18,12 @@ engine: Unity
 xr: OpenXR
 frame:
 - frame.unity_text_input
+- frame.pojlib_connection
 device:
 - device.text_input_window
 lepton_env:
   LEPTON_ENV_LIBGL_NOERROR: '1'
 verified:
   date: '2026-10-05'
-updated: '2026-10-05'
+updated: '2026-10-23'
 source_hint: QuestCraft

@@ -609,6 +609,11 @@
   "title": "Photon Voice: skip Android 12 audio routing",
   "group": "Steam Frame patches"
  },
+ "frame.pojlib_connection": {
+  "anchor": "frame-pojlib_connection",
+  "title": "QuestCraft: count the Frame's network as online",
+  "group": "Steam Frame patches"
+ },
  "frame.sdl_clipboard": {
   "anchor": "frame-sdl_clipboard",
   "title": "SDL apps: start without a clipboard service",

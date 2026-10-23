@@ -2,7 +2,7 @@
 
 # Patches
 
-Every patch and game setting FramePort knows: 194 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
+Every patch and game setting FramePort knows: 195 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
 
 Each entry says what the patch does, whether it changes the APK or only the install, when FramePort suggests it, its options, the catalog games whose recipe names it and the launch-test signatures that suggest it. Patches that are on by default are on for every game, so the catalog rarely names them.
 
@@ -11,7 +11,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 ## Groups
 
 - [Patches from OVRPort](#group-overport) (25)
-- [Steam Frame patches](#group-frame) (65)
+- [Steam Frame patches](#group-frame) (66)
 - [Game settings](#group-adapter) (81)
 - [Files and settings on the Frame](#group-device) (10)
 - [PC VR (Proton and Revive)](#group-pcvr) (13)
@@ -76,6 +76,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Stub missing Meta platform functions](#frame-ovrstubs) | `frame.ovrstubs` | Steam Frame patches | default |
 | [Unpaired pointer-authentication checks](#frame-pac_hints) | `frame.pac_hints` | Steam Frame patches | 1 |
 | [Photon Voice: skip Android 12 audio routing](#frame-photon_voice_audio_route) | `frame.photon_voice_audio_route` | Steam Frame patches | 2 |
+| [QuestCraft: count the Frame's network as online](#frame-pojlib_connection) | `frame.pojlib_connection` | Steam Frame patches | 1 |
 | [SDL apps: start without a clipboard service](#frame-sdl_clipboard) | `frame.sdl_clipboard` | Steam Frame patches | 8 |
 | [Stress Level Zero: let Unity start Vulkan itself](#frame-slz_vulkan_hooks) | `frame.slz_vulkan_hooks` | Steam Frame patches | 1 |
 | [Start straight in VR (skip the 2D launcher)](#frame-start_activity) | `frame.start_activity` | Steam Frame patches |  |
@@ -926,6 +927,20 @@ Stops games with Photon Voice chat from crashing on the Frame when voice chat st
 - **Source:** [patches/frame/photon_voice_audio_route.py](../src/frameport/patches/frame/photon_voice_audio_route.py)
 
 > Photon Voice's microphone plugin (for example Table Troopers) picks the audio device with Android 12 methods (AudioManager communication devices) without checking the Android version; Lepton runs Android 11, so the game crashes with a NoSuchMethodError when voice chat starts. That method returns at once instead (an in-place edit of classes.dex); the microphone keeps Android's default audio route.
+
+### <a id="frame-pojlib_connection"></a>QuestCraft: count the Frame's network as online
+
+Lets QuestCraft download its Java runtime: it waits for Wi-Fi, and the Frame's Android reports its network as Ethernet.
+
+- `frame.pojlib_connection` · also for 2D apps
+- **Changes:** Changes the APK (a rebuild and reinstall apply it).
+- **Suggested (on):** QuestCraft only downloads its Java runtime on Wi-Fi; the Frame's Android reports its network as Ethernet.
+- **Catalog games (1):** QuestCraft.
+- **Suggested by launch-test signatures:**
+  - `questcraft-no-java-runtime` (fatal): QuestCraft's Java runtime isn't there.
+- **Source:** [patches/frame/pojlib_connection.py](../src/frameport/patches/frame/pojlib_connection.py)
+
+> QuestCraft downloads its Java runtime only when Android reports a Wi-Fi connection; the Frame's Android reports Ethernet, so the download is skipped and Minecraft can't start. The connection check answers yes instead (an in-place edit of classes.dex).
 
 ### <a id="frame-sdl_clipboard"></a>SDL apps: start without a clipboard service
 

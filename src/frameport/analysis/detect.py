@@ -311,6 +311,9 @@ def analyze(path: Path, deep: bool = True, data_bytes: int | None = None) -> Ana
         # bHaptics asks for an Android 12 permission; the prompt interrupts the game (frame.bhaptics_permission)
         bhaptics_permission = any(b"Lcom/bhaptics/commons/PermissionUtils;" in d and b"requestBluetoothPermission" in d
                                   for d in dexes)
+        # QuestCraft's pojlib downloads its Java runtime only on Wi-Fi; Lepton reports Ethernet
+        # (frame.pojlib_connection; no ANALYSIS_VERSION bump: the patch also applies to QuestCraft's package)
+        pojlib_connection = any(b"Lpojlib/API;" in d and b"hasConnection" in d for d in dexes)
         # video through Android's decoders (frame.hw_video_decode): Java MediaCodec, ExoPlayer/Media3, or libVLC
         media_codec = any(m in d for d in dexes for m in MEDIA_CODEC_MARKERS) or "libvlc.so" in libs
         # Google VR's Java side (GvrLayout / GvrView, the Cardboard SDK): a Daydream / Cardboard app (google_vr)
@@ -462,6 +465,7 @@ def analyze(path: Path, deep: bool = True, data_bytes: int | None = None) -> Ana
             "usb_midi_watcher": usb_midi_watcher,
             "eos_keychain": eos_keychain,
             "bhaptics_permission": bhaptics_permission,
+            "pojlib_connection": pojlib_connection,
             "media_codec": media_codec,
             # declares gamepad support (SDL's manifest template has both): device.steam_gamepad
             "gamepad": "android.hardware.gamepad" in features or axml.LEANBACK_LAUNCHER in cats,
