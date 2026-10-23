@@ -443,6 +443,115 @@ static int vk_session_counts(int *pooled) {
     if (pool_create(pool_session, &ci, &h, 1)) return -1;
     return live + 3;
 }
+// frame_adapter.c's xrCreateSwapchain order against a runtime that refuses the 16th live swapchain (-10).
+static int vk_live;
+static int vk_flow(const XrSwapchainCreateInfo *ci, XrSwapchain *h) {
+    if (pool_should_create(pool_session) && pool_create(pool_session, ci, h, 0)) return 1;  // pooled
+    int atlases = (pool_atlas[0].handle != XR_NULL_HANDLE) + (pool_atlas[1].handle != XR_NULL_HANDLE);
+    if (vk_live + atlases >= 15) return pool_create(pool_session, ci, h, 1) ? 1 : -10;
+    *h = (XrSwapchain)(uintptr_t)(5000 + vk_live++);
+    pool_note_runtime(pool_session, *h);
+    flip_on_create_swapchain(*h, ci);  // runtime quads are flip-tracked too (flip_wants_transfer adds 0x30)
+    return 0;
+}
+// The device run of 3f5210fa (AC Nexus, Quest 3): nothing was pooled. Usage 0x39 panels, foveation/META chains and
+// mipmapped panels must pool; the 2592x2256 eye set must then fit under the cap.
+static int vk_device_sequence(void) {
+    XrGraphicsBindingVulkanKHR binding = {XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR};
+    XrSessionCreateInfo sci = {XR_TYPE_SESSION_CREATE_INFO, &binding};
+    pool_on_create_session((XrSession)9, &sci);
+    vk_live = 0;
+    XrSwapchainCreateInfo ci = {XR_TYPE_SWAPCHAIN_CREATE_INFO};
+    ci.faceCount = ci.sampleCount = ci.mipCount = 1;
+    XrSwapchain h;
+    int64_t eye_formats[] = {VK_FORMAT_R8G8B8A8_SRGB, 97, 129};
+    ci.arraySize = 2;
+    ci.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
+    for (int k = 0; k < 3; ++k) {
+        ci.format = eye_formats[k];
+        ci.width = ci.height = k ? 384 : 1728;
+        CHECK(vk_flow(&ci, &h) == 0);
+    }
+    ci.arraySize = 1;
+    ci.format = VK_FORMAT_R8G8B8A8_SRGB;
+    ci.usageFlags = 0x39;  // COLOR_ATTACHMENT | TRANSFER_SRC | TRANSFER_DST | SAMPLED
+    ci.width = ci.height = 2;
+    CHECK(vk_flow(&ci, &h) == 0);
+    ci.width = ci.height = 1024;
+    CHECK(vk_flow(&ci, &h) == 0);
+    ci.arraySize = 2;
+    ci.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
+    for (int k = 0; k < 3; ++k) {
+        ci.format = eye_formats[k];
+        ci.width = k ? 384 : 2016;
+        ci.height = k ? 384 : 1728;
+        CHECK(vk_flow(&ci, &h) == 0);
+    }
+    CHECK(vk_live == 8);
+    ci.arraySize = 1;
+    ci.format = VK_FORMAT_R8G8B8A8_SRGB;
+    ci.usageFlags = 0x39;
+    XrSwapchainCreateInfoFoveationFB foveation = {XR_TYPE_SWAPCHAIN_CREATE_INFO_FOVEATION_FB};
+    XrVulkanSwapchainCreateInfoMETA meta = {XR_TYPE_VULKAN_SWAPCHAIN_CREATE_INFO_META, &foveation,
+                                            VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT, VK_IMAGE_USAGE_STORAGE_BIT};
+    static const int panels[][2] = {{512, 512},  {2457, 1152}, {1875, 1500}, {1875, 1500}, {855, 1500}, {855, 1500},
+                                    {1075, 1382}, {1459, 1228}, {768, 153},   {1200, 1020}, {691, 153},  {360, 360}};
+    int pooled = 0;
+    for (int k = 0; k < 12; ++k) {
+        ci.width = panels[k][0];
+        ci.height = panels[k][1];
+        ci.next = k == 1 ? (const void *)&meta : k == 2 ? (const void *)&foveation : NULL;
+        ci.mipCount = k == 3 ? 4 : 1;
+        int r = vk_flow(&ci, &h);
+        CHECK(r == 1);
+        ++pooled;
+        if (k == 1)
+            CHECK((vk_last_image.flags & VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT) &&
+                  (vk_last_image.usage & VK_IMAGE_USAGE_STORAGE_BIT));
+        if (k == 3) CHECK(vk_last_image.mipLevels == 4);
+    }
+    ci.next = NULL;
+    ci.mipCount = 1;
+    CHECK(pooled == 12 && vk_live == 8);
+    // The Quest 3 eye set fits: 8 app swapchains + atlases + 3.
+    ci.arraySize = 2;
+    for (int k = 0; k < 3; ++k) {
+        ci.format = eye_formats[k];
+        ci.width = k ? 384 : 2592;
+        ci.height = k ? 384 : 2256;
+        CHECK(vk_flow(&ci, &h) == 0 && pool_last_decline == POOL_SHAPE);  // offered to the pool, never pooled
+    }
+    int atlases = (pool_atlas[0].handle != XR_NULL_HANDLE) + (pool_atlas[1].handle != XR_NULL_HANDLE);
+    CHECK(vk_live == 11 && atlases >= 1 && vk_live + atlases <= 13);
+    // A mipmapped panel copies level 0 and keeps every level's layout (barriers cover all levels).
+    int i = -1;
+    for (int k = 0; k < POOL_MAX; ++k)  // the last 1875x1500 one has 4 mip levels
+        if (pool_images[k].handle && pool_images[k].rect.w == 1875) i = k;
+    uint32_t index;
+    CHECK(i >= 0 && pool_cycle(i, 0, &index) == XR_SUCCESS && pool_cycle(i, 1, NULL) == XR_SUCCESS &&
+          pool_cycle(i, 2, NULL) == XR_SUCCESS);
+    XrSwapchainSubImage sub = {pool_images[i].handle, {{0, 0}, {1875, 1500}}, 0};
+    pool_begin_frame_locked();
+    CHECK(pool_subimage_locked(&sub) && pool_finish_locked() && !vk_bad_layouts);
+    CHECK(vk_last_copy.srcSubresource.mipLevel == 0 && vk_last_copy.dstSubresource.mipLevel == 0);
+    // Every decline reason is reported: an unknown chained struct, no mip level.
+    XrBaseInStructure unknown = {(XrStructureType)1000999000};
+    ci.arraySize = 1;
+    ci.format = VK_FORMAT_R8G8B8A8_SRGB;
+    ci.width = ci.height = 64;
+    ci.next = &unknown;
+    CHECK(!pool_create(pool_session, &ci, &h, 1) && pool_last_decline == POOL_CHAIN);
+    ci.next = NULL;
+    ci.mipCount = 0;
+    CHECK(!pool_create(pool_session, &ci, &h, 1) && pool_last_decline == POOL_MIPS);
+    ci.mipCount = 1;
+    ci.format = VK_FORMAT_B8G8R8A8_SRGB;
+    CHECK(!pool_create(pool_session, &ci, &h, 1) && pool_last_decline == POOL_FORMAT);
+    CHECK(!pool_create((XrSession)77, &ci, &h, 1) && pool_last_decline == POOL_NO_SESSION);
+    pool_cleanup(pool_session);
+    CHECK(vk_images_alive == 0 && vk_memory_alive == 0 && vk_fences_alive == 0);
+    return 0;
+}
 static int vk_main(void) {
     // Session detection: only bindings with a pool path, only with the setting.
     XrGraphicsBindingVulkanKHR binding = {XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR};
@@ -577,7 +686,7 @@ static int vk_main(void) {
     CHECK(live > 0 && live <= 14 && pooled >= 5);
     pool_cleanup(pool_session);
     CHECK(vk_images_alive == 0 && vk_memory_alive == 0 && vk_fences_alive == 0);
-    return 0;
+    return vk_device_sequence();
 }
 static int released(XrSwapchain h) {
     int i = pool_find(h);

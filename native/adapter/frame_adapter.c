@@ -783,9 +783,11 @@ XRAPI_ATTR XrResult XRAPI_CALL xrCreateSwapchain(XrSession session, const XrSwap
     if (pool_should_create(session) && pool_create(session, &fixed, swapchain, 0)) return XR_SUCCESS;
     clear_gl_errors("xrCreateSwapchain");
     XrResult result = fn(session, &fixed, swapchain);
-    LOG("xrCreateSwapchain %ux%u format=%lld samples=%u array=%u faces=%u usage=0x%llx flags=0x%llx result=%d handle=%p",
+    LOG("xrCreateSwapchain %ux%u format=%lld samples=%u array=%u faces=%u usage=0x%llx flags=0x%llx mips=%u next=%d "
+        "result=%d handle=%p",
         fixed.width, fixed.height, (long long)fixed.format, fixed.sampleCount, fixed.arraySize, fixed.faceCount,
-        (unsigned long long)fixed.usageFlags, (unsigned long long)fixed.createFlags, result,
+        (unsigned long long)fixed.usageFlags, (unsigned long long)fixed.createFlags, fixed.mipCount,
+        fixed.next ? (int)((const XrBaseInStructure *)fixed.next)->type : 0, result,
         (void *)(uintptr_t)(XR_SUCCEEDED(result) && swapchain ? *swapchain : 0));
     if (XR_SUCCEEDED(result)) {
         pool_note_runtime(session, *swapchain);

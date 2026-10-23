@@ -78,8 +78,35 @@ static void pool_forget_runtime_locked(XrSwapchain handle) {
             return;
         }
 }
+// Why a create was not pooled: logged once per reason (the first device run of #424 pooled nothing, silently).
+enum {
+    POOL_NO_SESSION, POOL_SHAPE, POOL_SAMPLES, POOL_MIPS, POOL_USAGE, POOL_FLAGS, POOL_SIZE, POOL_FORMAT, POOL_CHAIN,
+    POOL_DEVICE, POOL_GL, POOL_SLOTS, POOL_FULL, POOL_ATLAS, POOL_IMAGE
+};
+static unsigned pool_declined;
+static int pool_last_decline = -1;  // for the host harness
+#define POOL_DECLINE(reason, ...)                                                                                      \
+    do {                                                                                                               \
+        pool_last_decline = (reason);                                                                                  \
+        if (!(pool_declined & (1u << (reason)))) {                                                                     \
+            pool_declined |= 1u << (reason);                                                                           \
+            LOG(__VA_ARGS__);                                                                                          \
+        }                                                                                                              \
+        return 0;                                                                                                      \
+    } while (0)
 static int pool_should_create_locked(XrSession session) {
-    return swapchain_pool && session == pool_session && pool_runtime_count >= 8;
+    if (!swapchain_pool) return 0;
+    if (session != pool_session) {
+        static int logged;
+        if (!logged++)
+            LOG("swapchain_pool: create in session %p, not the pooled session %p", (void *)(uintptr_t)session,
+                (void *)(uintptr_t)pool_session);
+        return 0;
+    }
+    static unsigned announced;
+    if (pool_runtime_count >= 8 && !announced++)
+        LOG("swapchain_pool: %u live runtime swapchains: pooling further panels", pool_runtime_count);
+    return pool_runtime_count >= 8;
 }
 static int pool_find_locked(XrSwapchain h) {
     for (int i = 0; h && i < POOL_MAX; ++i)
@@ -149,7 +176,8 @@ static int pool_vk_submit_locked(VkCommandBuffer cmd, VkFence fence) {
 static void pool_vk_barrier(VkCommandBuffer cmd, VkImage image, VkImageLayout from, VkImageLayout to,
                             VkAccessFlags src, VkAccessFlags dst) {
     VkImageMemoryBarrier b = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, NULL, src, dst, from, to, VK_QUEUE_FAMILY_IGNORED,
-                              VK_QUEUE_FAMILY_IGNORED, image, {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+                              VK_QUEUE_FAMILY_IGNORED, image,
+                              {VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, 1}};  // every mip level
     pvk.CmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 0,
                            NULL, 1, &b);
 }
@@ -200,12 +228,16 @@ static VkImageUsageFlags pool_vk_usage(XrSwapchainUsageFlags u) {
     if (u & XR_SWAPCHAIN_USAGE_INPUT_ATTACHMENT_BIT_KHR) v |= VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
     return v;
 }
-static int pool_vk_image_locked(const XrSwapchainCreateInfo *ci, VkImage *image, VkDeviceMemory *memory) {
+// The app's mip levels are kept (it may render or generate them); level 0 is what goes into the atlas. Flags and usage
+// an XrVulkanSwapchainCreateInfoMETA asked for are added.
+static int pool_vk_image_locked(const XrSwapchainCreateInfo *ci, VkImageCreateFlags extra_flags,
+                                VkImageUsageFlags extra_usage, VkImage *image, VkDeviceMemory *memory) {
     VkImageCreateInfo ii = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, NULL,
-                            (ci->usageFlags & XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT) ? VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT
-                                                                                     : 0,
-                            VK_IMAGE_TYPE_2D, (VkFormat)ci->format, {ci->width, ci->height, 1}, 1, 1,
-                            VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_TILING_OPTIMAL, pool_vk_usage(ci->usageFlags),
+                            extra_flags | ((ci->usageFlags & XR_SWAPCHAIN_USAGE_MUTABLE_FORMAT_BIT)
+                                               ? VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT
+                                               : 0),
+                            VK_IMAGE_TYPE_2D, (VkFormat)ci->format, {ci->width, ci->height, 1}, ci->mipCount, 1,
+                            VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_TILING_OPTIMAL, pool_vk_usage(ci->usageFlags) | extra_usage,
                             VK_SHARING_MODE_EXCLUSIVE, 0, NULL, VK_IMAGE_LAYOUT_UNDEFINED};
     *image = VK_NULL_HANDLE;
     *memory = VK_NULL_HANDLE;
@@ -276,18 +308,52 @@ static int pool_vk_copy_locked(int i, int a) {
 }
 
 static int pool_create_locked(XrSession session, const XrSwapchainCreateInfo *ci, XrSwapchain *out, int limited) {
-    if (!swapchain_pool || session != pool_session || !out || ci->next || ci->faceCount != 1 || ci->arraySize != 1 ||
-        ci->sampleCount != 1 || ci->mipCount != 1 || !(ci->usageFlags & XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT) ||
-        (ci->createFlags & ~XR_SWAPCHAIN_CREATE_STATIC_IMAGE_BIT) || !ci->width || !ci->height ||
-        ci->width > POOL_SIDE || ci->height > POOL_SIDE)
-        return 0;
+    if (!swapchain_pool || !out) return 0;
+    if (session != pool_session)
+        POOL_DECLINE(POOL_NO_SESSION, "swapchain_pool: not pooled: session %p is not the pooled session %p",
+                     (void *)(uintptr_t)session, (void *)(uintptr_t)pool_session);
+    if (ci->faceCount != 1 || ci->arraySize != 1)  // eye images (arraySize 2) and cube maps stay runtime swapchains
+        POOL_DECLINE(POOL_SHAPE, "swapchain_pool: not pooled: %ux%u array=%u faces=%u (eye images stay runtime)",
+                     ci->width, ci->height, ci->arraySize, ci->faceCount);
+    if (ci->sampleCount != 1)
+        POOL_DECLINE(POOL_SAMPLES, "swapchain_pool: not pooled: %ux%u samples=%u", ci->width, ci->height,
+                     ci->sampleCount);
+    if (ci->mipCount < 1 || (ci->mipCount != 1 && !pool_vulkan))
+        POOL_DECLINE(POOL_MIPS, "swapchain_pool: not pooled: %ux%u mips=%u", ci->width, ci->height, ci->mipCount);
+    if (!(ci->usageFlags & XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT))
+        POOL_DECLINE(POOL_USAGE, "swapchain_pool: not pooled: %ux%u usage=0x%llx (no colour attachment)", ci->width,
+                     ci->height, (unsigned long long)ci->usageFlags);
+    if (ci->createFlags & ~XR_SWAPCHAIN_CREATE_STATIC_IMAGE_BIT)
+        POOL_DECLINE(POOL_FLAGS, "swapchain_pool: not pooled: %ux%u flags=0x%llx", ci->width, ci->height,
+                     (unsigned long long)ci->createFlags);
+    if (!ci->width || !ci->height || ci->width > POOL_SIDE || ci->height > POOL_SIDE)
+        POOL_DECLINE(POOL_SIZE, "swapchain_pool: not pooled: %ux%u (atlas side %d)", ci->width, ci->height,
+                     POOL_SIDE);
+    if (pool_vulkan ? ci->format != VK_FORMAT_R8G8B8A8_SRGB  // vkCmdCopyImage: the atlas format only
+                    : ci->format != GL_RGBA8 && ci->format != GL_SRGB8_ALPHA8)
+        POOL_DECLINE(POOL_FORMAT, "swapchain_pool: not pooled: %ux%u format=%lld (%s)", ci->width, ci->height,
+                     (long long)ci->format, pool_vulkan ? "Vulkan pools format 43 only" : "GLES pools RGBA8/SRGB8_ALPHA8");
+    // Chained structs: foveation requests don't matter for a private image the app only renders into; Meta's extra
+    // Vulkan flags/usage are honoured (Vulkan). Anything else keeps a runtime swapchain.
+    VkImageCreateFlags extra_flags = 0;
+    VkImageUsageFlags extra_usage = 0;
+    for (const XrBaseInStructure *n = ci->next; n; n = n->next) {
+        if (n->type == XR_TYPE_SWAPCHAIN_CREATE_INFO_FOVEATION_FB && pool_vulkan) continue;
+        if (n->type == XR_TYPE_VULKAN_SWAPCHAIN_CREATE_INFO_META && pool_vulkan) {
+            extra_flags |= ((const XrVulkanSwapchainCreateInfoMETA *)n)->additionalCreateFlags;
+            extra_usage |= ((const XrVulkanSwapchainCreateInfoMETA *)n)->additionalUsageFlags;
+            continue;
+        }
+        POOL_DECLINE(POOL_CHAIN, "swapchain_pool: not pooled: %ux%u chains struct type %d", ci->width, ci->height,
+                     (int)n->type);
+    }
     if (pool_vulkan) {
-        if (ci->format != VK_FORMAT_R8G8B8A8_SRGB) return 0;  // vkCmdCopyImage: the atlas format only
-        if (!pool_vk_load_locked()) return 0;
+        if (!pool_vk_load_locked())
+            POOL_DECLINE(POOL_DEVICE, "swapchain_pool: not pooled: no Vulkan device functions");
     } else {
-        if (ci->format != GL_RGBA8 && ci->format != GL_SRGB8_ALPHA8) return 0;
-        if (!p_eglCreateContext && !emul_load_gl()) return 0;
-        if (p_eglGetCurrentContext() == EGL_NO_CONTEXT) return 0;
+        if (!p_eglCreateContext && !emul_load_gl()) POOL_DECLINE(POOL_GL, "swapchain_pool: not pooled: no GLES");
+        if (p_eglGetCurrentContext() == EGL_NO_CONTEXT)
+            POOL_DECLINE(POOL_GL, "swapchain_pool: not pooled: no current EGL context");
         // Like emul_virtual_create: stale application GL errors must not look like allocation failures.
         for (int i = 0; i < 8 && p_glGetError() != GL_NO_ERROR; ++i) {
         }
@@ -298,7 +364,7 @@ static int pool_create_locked(XrSession session, const XrSwapchainCreateInfo *ci
             slot = i;
             break;
         }
-    if (slot < 0) return 0;
+    if (slot < 0) POOL_DECLINE(POOL_SLOTS, "swapchain_pool: not pooled: all %d pool slots in use", POOL_MAX);
     for (int a = 0; a < 2; ++a) {
         PoolRect used[POOL_MAX], rect;
         int n = 0;
@@ -317,9 +383,8 @@ static int pool_create_locked(XrSession session, const XrSwapchainCreateInfo *ci
             XrResult created = create(session, &ai, &pool_atlas[a].handle);
             if (XR_FAILED(created)) {
                 pool_atlas[a].handle = XR_NULL_HANDLE;
-                LOG("swapchain_pool: atlas %d %dx%d format %lld refused (%d)", a, POOL_SIDE, POOL_SIDE,
-                    (long long)ai.format, created);
-                return 0;
+                POOL_DECLINE(POOL_ATLAS, "swapchain_pool: not pooled: atlas %d %dx%d format %lld refused (%d)", a,
+                             POOL_SIDE, POOL_SIDE, (long long)ai.format, created);
             }
             int ok;
             if (pool_vulkan) {
@@ -338,15 +403,15 @@ static int pool_create_locked(XrSession session, const XrSwapchainCreateInfo *ci
             if (!ok) {
                 ((PFN_xrDestroySwapchain)lookup(active_instance, "xrDestroySwapchain"))(pool_atlas[a].handle);
                 memset(&pool_atlas[a], 0, sizeof pool_atlas[a]);
-                return 0;
+                POOL_DECLINE(POOL_ATLAS, "swapchain_pool: not pooled: atlas %d images not enumerated", a);
             }
             if (pool_vulkan) LOG("swapchain_pool: Vulkan atlas %d (%u images)", a, pool_atlas[a].count);
         }
         if (pool_vulkan) {
-            if (!pool_vk_image_locked(ci, &pool_images[slot].vk_image, &pool_images[slot].vk_memory)) {
-                LOG("swapchain_pool: no Vulkan image for %ux%u; runtime swapchain instead", ci->width, ci->height);
-                return 0;
-            }
+            if (!pool_vk_image_locked(ci, extra_flags, extra_usage, &pool_images[slot].vk_image,
+                                      &pool_images[slot].vk_memory))
+                POOL_DECLINE(POOL_IMAGE, "swapchain_pool: not pooled: no Vulkan image for %ux%u mips=%u", ci->width,
+                             ci->height, ci->mipCount);
             pool_images[slot].vk_ready = 0;
         } else {
             GLint old;
@@ -359,7 +424,8 @@ static int pool_create_locked(XrSession session, const XrSwapchainCreateInfo *ci
             p_glBindTexture(GL_TEXTURE_2D, old);
             if (err != GL_NO_ERROR) {
                 p_glDeleteTextures(1, &tex);
-                return 0;
+                POOL_DECLINE(POOL_IMAGE, "swapchain_pool: not pooled: GL texture %ux%u failed (0x%x)", ci->width,
+                             ci->height, err);
             }
             pool_images[slot].tex = tex;
         }
@@ -379,7 +445,7 @@ static int pool_create_locked(XrSession session, const XrSwapchainCreateInfo *ci
             limited ? "runtime limit reached" : "runtime limit proactively avoided");
         return 1;
     }
-    return 0;
+    POOL_DECLINE(POOL_FULL, "swapchain_pool: not pooled: %ux%u fits in neither atlas", ci->width, ci->height);
 }
 static void pool_destroy_locked(int i) {
     emul_on_destroy_swapchain(pool_images[i].handle);
