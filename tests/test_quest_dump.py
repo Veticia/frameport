@@ -805,3 +805,15 @@ def test_install_recovers_versionless_obb_skipped_by_older_scan(tmp_path, monkey
     out = pipeline._find_late_data({"package": "com.crytek.climb", "apk": str(a), "data_dir": None})
     assert out["data_dir"] == str(backup / "obb")
     assert saved["data_files"] is None and saved["data_bytes"] == 1
+
+
+def test_obb_named_for_another_package_is_flagged():
+    """GitHub #129: a renamed build's OBB next to the original APK; the game looks for its own name."""
+    from frameport import pipeline
+
+    entry = {"package": "com.beatgames.beatsaber", "data_manifest": {
+        "main.1716.com.beatgames.beatsaber.lj369vr.obb": 1, "patch.1716.com.beatgames.beatsaber.obb": 1,
+        "extra.bundle": 1}}
+    assert pipeline.misnamed_obbs(entry) == [("main.1716.com.beatgames.beatsaber.lj369vr.obb",
+                                              "main.1716.com.beatgames.beatsaber.obb")]
+    assert pipeline.misnamed_obbs({"package": "com.x", "kind": "rift", "data_manifest": entry["data_manifest"]}) == []

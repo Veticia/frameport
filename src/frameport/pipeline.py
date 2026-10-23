@@ -596,6 +596,29 @@ def analysis_warnings(entry: dict) -> list[str]:
     out = engine.blocker_notes(library.analysis_from_dict(entry["analysis"]))
     if missing_obb(entry):
         out.append(MISSING_OBB_NOTE.format(package=entry.get("package", "<package>")))
+    for name, wanted in misnamed_obbs(entry):
+        out.append(MISNAMED_OBB_NOTE.format(name=name, wanted=wanted))
+    return out
+
+
+MISNAMED_OBB_NOTE = ("The data file {name} is named for another app, so the game won't find it: rename it to {wanted} "
+                     "(or use the .obb that belongs to this APK), scan again and install it again.")
+
+
+def misnamed_obbs(entry: dict) -> list[tuple[str, str]]:
+    """[(file, the name the game looks for)] for expansion files named for another package than the APK's, e.g. a
+    renamed build's main.1716.com.beatgames.beatsaber.lj369vr.obb next to com.beatgames.beatsaber (GitHub #129).
+    Library fields only (no disk access)."""
+    pkg = entry.get("package") or ""
+    if is_rift(entry) or is_linux(entry) or not pkg:
+        return []
+    out = []
+    for rel in sorted((entry.get("data_manifest") or {}) or (entry.get("data_files") or [])):
+        name = rel.rsplit("/", 1)[-1]
+        m = quest_dump.OBB_NAME.match(name)
+        if m and m.group(3).lower() != pkg.lower():
+            version = f"{m.group(2)}." if m.group(2) else ""
+            out.append((name, f"{m.group(1).lower()}.{version}{pkg}.obb"))
     return out
 
 
