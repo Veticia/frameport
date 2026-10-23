@@ -1079,8 +1079,10 @@ def test_swapchain_pool_is_opt_in_for_gles_and_vulkan():
     assert "Vulkan" in patch.description and "eye images never" in patch.description
 
 
-def test_ac_nexus_uses_the_vulkan_panel_pool_with_quest_3(monkeypatch):
-    """GitHub #424: the pool frees the swapchain slots its Quest 3 eye images need; older apps keep their entry."""
+def test_ac_nexus_uses_the_vulkan_panel_pool(monkeypatch):
+    """GitHub #424: the Vulkan panel pool frees the swapchain slots its Quest 3 eye images need (headless on the dev
+    Frame, 2026-10-23). Until the release with it reaches users the catalog keeps the Quest 2 identity, since 1.3.0
+    apps (GLES-only pool) read the same remote entry: at that release, drop frame_remove and update this test."""
     from pathlib import Path
 
     import yaml
@@ -1090,11 +1092,8 @@ def test_ac_nexus_uses_the_vulkan_panel_pool_with_quest_3(monkeypatch):
 
     path = Path(__file__).resolve().parents[1] / "catalog/games/com.Ubisoft.ACNexusVR.yaml"
     entry = yaml.safe_load(path.read_text())
-    assert entry["adapter"] == {"swapchain_pool": 1}
-    assert "device.headset_model" not in (entry.get("frame_remove") or [])
-    assert "Quest 2" not in entry["notes"] and "#424" in entry["notes"]
+    assert entry["adapter"] == {"swapchain_pool": 1} and "#424" in entry["notes"]
+    assert entry.get("frame_remove") == ["device.headset_model"]
     assert base.get("frame.adapter").revision_for("com.Ubisoft.ACNexusVR") == 3
-    monkeypatch.setattr(frameport, "__version__", "1.3.0")  # its pool is GLES only: Quest 3 would stop drawing
-    assert catalog.unusable_reason(entry) == "needs FramePort 1.3.1"
-    monkeypatch.setattr(frameport, "__version__", "1.3.1")
+    monkeypatch.setattr(frameport, "__version__", "1.3.0")  # 1.3.0 knows swapchain_pool: the entry stays usable
     assert catalog.unusable_reason(entry) is None
