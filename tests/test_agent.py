@@ -1073,7 +1073,7 @@ def test_shared_folder_links_the_other_games_folder(monkeypatch, tmp_path):
     (own / "old.txt").write_text("x")  # the companion's own folder from before: kept beside the link
     text = a.set_share_lines("x=1\nchild=''\nrest\n", True)
     assert a.set_share_lines(text, True) == text and a.set_share_lines("child=''", False) == "child=''"
-    script = "app_dir=%s\n" % comp + text.split("child=''")[0] + 'echo "LIB=$STEAM_COMPAT_LIBRARY_PATHS"\n'
+    script = f"app_dir={comp}\n" + text.split("child=''")[0] + 'echo "LIB=$STEAM_COMPAT_LIBRARY_PATHS"\n'
     out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, env={
         "HOME": str(home), "PATH": os.environ["PATH"], "FRAMEPORT_SHARE": "com.drbeef.jkxr:JKXR",
         "STEAM_COMPAT_LIBRARY_PATHS": str(comp)}).stdout
