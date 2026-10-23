@@ -48,13 +48,17 @@ def plain_reason(reason: str, default_on: bool = False) -> str:
 
 
 def should_ask_to_share(g: dict, installed: bool) -> bool:
-    """Invite the user to share a recipe the built-in catalog doesn't have yet: an untested Quest/Android game that
-    they have installed, launch-tested or played, and haven't shared (or dismissed) already."""
+    """Invite the user to share a recipe: an untested Quest/Android game that they have installed, launch-tested or
+    played, or a catalog recipe still marked unknown / with issues once they have played it or it passed a launch
+    test (it may work now: GitHub #310/#329 asked how to say so). Not after sharing or dismissing it."""
     r = g.get("recipe") or {}
-    if g.get("kind") in ("rift", "linux") or r.get("status", "unknown") != "unknown" or \
-            str(r.get("source", "")).startswith("catalog") or g.get("shared_config") or g.get("share_dismissed"):
+    if g.get("kind") in ("rift", "linux") or g.get("shared_config") or g.get("share_dismissed"):
         return False
-    return installed or (g.get("last_test") or {}).get("verdict") == "pass" or bool(g.get("last_played"))
+    tried = (g.get("last_test") or {}).get("verdict") == "pass" or bool(g.get("last_played"))
+    status = r.get("status", "unknown")
+    if str(r.get("source", "")).startswith("catalog"):
+        return status in ("unknown", "issues") and tried
+    return status == "unknown" and (installed or tried)
 
 
 def _ago(t: float | None) -> str:
