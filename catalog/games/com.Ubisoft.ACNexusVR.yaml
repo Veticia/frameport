@@ -6,7 +6,8 @@ engine: Unity
 xr: OpenXR
 status: works
 notes: 'FrameBridge turns its upside-down UI panels upright (flip emulation, in place since FramePort 1.2.0). Ubisoft
-  login may not work. frame.unity_text_input and device.text_input_window added from detection (not headset-verified).
+  login may not work. frame.unity_text_input added from detection (not headset-verified); no device.text_input_window:
+  its Android window took the controllers'' input (owner, 2026-10-23).
 
   Keeps the Quest 2 headset identity for now: as a Quest 3 it switches to larger eye images after the intro, which
   the Frame''s swapchain limit refused (GitHub #424). With the Vulkan panel pool (swapchain_pool) it runs as a Quest
@@ -17,10 +18,9 @@ overport_extra:
 - patch_ac_nexus_no_appsw_90
 frame:
 - frame.unity_text_input
-device:
-- device.text_input_window
 frame_remove:
 - device.headset_model
+- device.text_input_window
 verified:
   date: '2026-09-28'
   overport_cli: 1.2.3
