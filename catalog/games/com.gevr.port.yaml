@@ -1,0 +1,16 @@
+package: com.gevr.port
+title: GoldenEye VR
+status: issues
+notes: No sound; otherwise works great.
+tested_version: 0.5.8
+engine: Other
+xr: OpenXR
+frame:
+- frame.sdl_clipboard
+verified:
+  date: '2026-10-18'
+  known_good_sha256: 5bd0d5ad71368178f8478193c215459a670d22ca6828bb155d76c5255908759b
+  app: 1.2.1
+  overport_cli: 1.2.5
+  issue: 412
+source_hint: GoldenEye-VR-v0.5.8
