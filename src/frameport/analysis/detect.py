@@ -59,7 +59,9 @@ IL2CPP_METADATA = "assets/bin/Data/Managed/Metadata/global-metadata.dat"
 # 24: statically linked Khronos OpenXR loaders (frame.static_openxr_loader, GitHub #254) (2026-10)
 # 25: meta_depth_occlusion (Unity games with Meta's depth-occlusion keywords: frame.meta_depth_occlusion, PR #246)
 #     (2026-10)
-ANALYSIS_VERSION = 25
+# 26: cortopia_org_id also for Cortopia's OculusPlatform outside the .Meta namespace (TMNT: Empire City, GitHub #422)
+#     (2026-10)
+ANALYSIS_VERSION = 26
 
 
 # Android versions by API level (for messages); the Frame's Lepton container runs Android 11 (API 30)
@@ -108,6 +110,15 @@ def unreal_binned3(engine: bytes) -> bool:
     builds only name its console variables). It reserves its whole range while the library loads (GitHub #349)."""
     return (b"/HAL/MallocBinned3.cpp\0" in engine
             or "FMallocBinned3 Attempt to free".encode("utf-16-le") in engine)
+
+
+def cortopia_org_id(il2cpp_meta: bytes | None) -> bool:
+    """Cortopia's Meta platform start-up awaits an org-scoped user id OVRPort never answers (frame.cortopia_org_id):
+    its OculusPlatform in Cortopia.Scripts.Platform.Meta (Escaping Wonderland, GitHub #360) or directly in
+    Cortopia.Scripts.Platform (TMNT: Empire City, GitHub #422)."""
+    m = il2cpp_meta or b""
+    return b"\0GetOrgScopedID\0" in m and (b"\0Cortopia.Scripts.Platform.Meta\0" in m or (
+        b"\0Cortopia.Scripts.Platform\0" in m and b"\0OculusPlatform\0" in m))
 
 
 def unreal_verify_obb(meta: dict) -> bool:
@@ -454,8 +465,7 @@ def analyze(path: Path, deep: bool = True, data_bytes: int | None = None) -> Ana
             "ovr_runtime_msaa": bool(il2cpp_meta) and b"\0useRecommendedMSAALevel\0" in il2cpp_meta,
             # Cortopia's Meta platform start-up awaits an org-scoped user id OVRPort never answers
             # (frame.cortopia_org_id, GitHub #360)
-            "cortopia_org_id": bool(il2cpp_meta) and b"\0Cortopia.Scripts.Platform.Meta\0" in il2cpp_meta
-            and b"\0GetOrgScopedID\0" in il2cpp_meta,
+            "cortopia_org_id": cortopia_org_id(il2cpp_meta),
             "sdl_java": sdl_java,
             "godot_clipboard": godot_clipboard,
             "vivox_api31": vivox_api31,

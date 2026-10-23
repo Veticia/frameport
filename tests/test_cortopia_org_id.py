@@ -80,3 +80,62 @@ def test_suggested_only_for_cortopia_platform_code():
     assert p.applies(A) and p.detect(A).recommended
     A.extra = {"cortopia_org_id": False}
     assert not p.applies(A) and p.detect(A) is None
+
+
+def test_login_state_machine_is_found_by_nested_type():
+    """TMNT: Empire City (GitHub #422): the platform class has another async method first (FetchEntitlements), so a
+    plain "MoveNext" is the wrong one; "<Login>d__.MoveNext" is Login's state machine, whatever its number."""
+    cs = '''	private struct <FetchEntitlements>d__18 : IAsyncStateMachine
+	{
+		[Address(RVA = "0x43C9BC8", Offset = "0x43C9BC8", Length = "0xA3C")]
+		[Token(Token = "0x6000EB2")]
+		private override void MoveNext() { }
+
+	}
+
+	[CompilerGenerated]
+	[Token(Token = "0x200026C")]
+	private struct <Login>d__17 : IAsyncStateMachine
+	{
+		[FieldOffset(Offset = "0x0")]
+		public int <>1__state; //Field offset: 0x0
+
+		[Address(RVA = "0x43CAC38", Offset = "0x43CAC38", Length = "0xE8C")]
+		[Token(Token = "0x6000EB6")]
+		private override void MoveNext() { }
+
+		[Address(RVA = "0x43CBE78", Offset = "0x43CBE78", Length = "0x58")]
+		private override void SetStateMachine(IAsyncStateMachine stateMachine) { }
+
+	}
+
+	[Address(RVA = "0x43C915C", Offset = "0x43C915C", Length = "0xF0")]
+	public virtual UniTask<Int64> Login() { }
+'''
+    assert parse_methods(cs, [C.LOGIN, "MoveNext", "Login", "<Initialize>d__.MoveNext"]) == {
+        C.LOGIN: (0x43CAC38, 0xE8C), "MoveNext": (0x43C9BC8, 0xA3C), "Login": (0x43C915C, 0xF0)}
+    assert C.START_UP == [(C.PLATFORM, "MoveNext"), (C.PLATFORM_LOGIN, C.LOGIN)]
+
+
+def test_triage_finds_the_login_wait():
+    from frameport.validate.triage import triage
+
+    log = """E Unity   : An unknown error occurred. Request failed.
+E Unity   : UnityEngine.DebugLogHandler:Internal_Log(LogType, LogOption, String, Object)
+E Unity   : Oculus.Platform.Request`1:OnComplete(Callback) (at Scripts/Request.cs:31)
+E Unity   : Cortopia.Scripts.Platform.PlatformExtensions:ToUniTask(Request`1, String) (at PlatformExtensions.cs:29)
+E Unity   : Cortopia.Scripts.Platform.<Login>d__17:MoveNext() (at Assets/Cortopia/Scripts/Platform/OculusPlatform.cs:70)
+"""
+    ids = {f.id for f in triage(log, "RUNNING").findings}
+    assert "cortopia-org-id-wait" in ids
+
+
+def test_analysis_flag_with_and_without_the_meta_namespace():
+    from frameport.analysis.detect import ANALYSIS_VERSION, cortopia_org_id
+
+    org = b"\0GetOrgScopedID\0"
+    assert cortopia_org_id(b"\0Cortopia.Scripts.Platform.Meta\0" + org)            # Escaping Wonderland
+    assert cortopia_org_id(b"\0Cortopia.Scripts.Platform\0OculusPlatform\0" + org)  # TMNT: Empire City
+    assert not cortopia_org_id(b"\0Cortopia.Scripts.Platform\0OculusPlatform\0")    # no org-scoped id request
+    assert not cortopia_org_id(b"\0Cortopia.Scripts.Platform\0PicoPlatform\0" + org)
+    assert not cortopia_org_id(None) and ANALYSIS_VERSION >= 26

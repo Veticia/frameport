@@ -627,7 +627,7 @@ Gets Cortopia games (for example Escaping Wonderland) past their loading screen.
   - `cortopia-org-id-wait` (error): The game waits forever on its loading screen for an answer from Meta's platform (an org-scoped user id, used as its analytics id) that OVRPort's platform library doesn't give.
 - **Source:** [patches/frame/cortopia_org_id.py](../src/frameport/patches/frame/cortopia_org_id.py)
 
-> Cortopia Studios' games (e.g. Escaping Wonderland) ask Meta's platform for an org-scoped user id at start when on Wi-Fi, only to use it as their analytics id. OVRPort's platform library doesn't answer that request ("An unknown error occurred. Request failed."), so the game waits forever on its loading screen. Makes the game take its own offline path for that one request (the analytics id stays empty); the licence check and the logged-in user before it are unchanged. Found with Cpp2IL in libil2cpp.so.
+> Cortopia Studios' games (e.g. Escaping Wonderland, TMNT: Empire City) ask Meta's platform for an org-scoped user id at start when on Wi-Fi, only to use it as their analytics id. OVRPort's platform library doesn't answer that request ("An unknown error occurred. Request failed."), so the game waits forever on its loading screen. Makes the game take its own offline path for that one request (the analytics id stays empty); the licence check and the logged-in user before it are unchanged. Found with Cpp2IL in libil2cpp.so.
 
 ### <a id="frame-eos_keychain_loop"></a>Epic Online Services: stop the keychain retry loop
 

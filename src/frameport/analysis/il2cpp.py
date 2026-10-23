@@ -22,14 +22,27 @@ _ADDRESS = re.compile(r'Offset = "0x([0-9A-Fa-f]+)", Length = "0x([0-9A-Fa-f]+)"
 
 def parse_methods(cs_text: str, names: list[str]) -> dict[str, tuple[int, int]]:
     """{method name: (file offset, length)} for the named methods of one Cpp2IL diffable-C# class file. A name
-    "field:<f>" gives the instance field's offset instead: (offset, 0)."""
+    "field:<f>" gives the instance field's offset instead: (offset, 0). A name "<Nested>.Method" is that method of
+    the first nested type whose name starts with "<Nested>" (e.g. "<Login>d__.MoveNext" = the async method Login's
+    state machine, whatever number the compiler gave it); a plain name is its first occurrence in the file."""
     lines = cs_text.splitlines()
     found: dict[str, tuple[int, int]] = {}
     for name in [n for n in names if n.startswith("field:")]:
         m = re.search(rf"\s{re.escape(name[6:])};\s*//Field offset: 0x([0-9A-Fa-f]+)", cs_text)
         if m:
             found[name] = (int(m.group(1), 16), 0)
-    names = [n for n in names if not n.startswith("field:")]
+    for name in [n for n in names if "." in n and not n.startswith("field:")]:
+        nested, method = name.rsplit(".", 1)
+        start = next((i for i, line in enumerate(lines)
+                      if re.search(rf"\b(?:struct|class)\s+{re.escape(nested)}\S*\s*(?::|$)", line)), None)
+        if start is None:
+            continue
+        end = next((i for i in range(start + 1, len(lines)) if re.search(r"\b(?:struct|class)\s+\S", lines[i])),
+                   len(lines))
+        hit = parse_methods("\n".join(lines[start + 1:end]), [method]).get(method)
+        if hit:
+            found[name] = hit
+    names = [n for n in names if not n.startswith("field:") and "." not in n]
     for i, line in enumerate(lines):
         for name in names:
             if name in found or not re.search(rf"\s{re.escape(name)}\s*\(", line) or "Token" in line:

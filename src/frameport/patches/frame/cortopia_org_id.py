@@ -1,4 +1,5 @@
-"""Cortopia Studios' Meta platform start-up waits forever for an org-scoped user id (Escaping Wonderland, GitHub #360).
+"""Cortopia Studios' Meta platform start-up waits forever for an org-scoped user id (Escaping Wonderland, GitHub #360;
+TMNT: Empire City, GitHub #422).
 
 Cortopia's games start Meta's platform in `Cortopia.Scripts.Platform.Meta.OculusPlatform.Initialize` (an async
 method, `<Initialize>d__13.MoveNext`): Core.AsyncInitialize, Entitlements.IsUserEntitledToApplication,
@@ -6,7 +7,9 @@ Users.GetLoggedInUser, and then, only when `Application.internetReachability` is
 Users.GetOrgScopedID(user id), whose answer only becomes the game's AnalyticsID. OVRPort's platform library has no
 `ovr_User_GetOrgScopedID` (an export that returns request id 0, runtimes 3.4.3-23204ea and -aa54c3f); Meta's C#
 wrapper then logs "An unknown error occurred. Request failed." and never calls the callback, so the awaited task never
-finishes and the game stays on its loading screen with frames still paced.
+finishes and the game stays on its loading screen with frames still paced. TMNT: Empire City has the same sequence
+(and the same Wi-Fi check) in `Cortopia.Scripts.Platform.OculusPlatform.Login` (`<Login>d__17.MoveNext`, no `.Meta`
+namespace; its error names `PlatformExtensions:ToUniTask` and `<Login>d__17`).
 
 The game's own code skips that request when the device isn't on Wi-Fi/LAN (then the analytics id stays empty, as it
 does for offline players). This patch takes that path always: the `b.ne` after `cmp w0, #2` that follows the call to
@@ -19,9 +22,14 @@ from ..base import ApkContext, Patch, Suggestion, register
 from .unity_text_input import ALL_TARGETS, METADATA, Il2cppReturnPatch, _executable, can_rewrite_il2cpp
 
 PLATFORM = "Assembly-CSharp/Cortopia/Scripts/Platform/Meta/OculusPlatform.cs"
+PLATFORM_LOGIN = "Assembly-CSharp/Cortopia/Scripts/Platform/OculusPlatform.cs"  # TMNT: Empire City (GitHub #422)
+LOGIN = "<Login>d__.MoveNext"  # Login's async state machine (<Login>d__17 in 1.0.7)
 APPLICATION = "UnityEngine.CoreModule/UnityEngine/Application.cs"
 USERS = "Oculus.Platform/Oculus/Platform/Users.cs"
-WANTED = {PLATFORM: ["MoveNext"], APPLICATION: ["get_internetReachability"], USERS: ["GetOrgScopedID"]}
+WANTED = {PLATFORM: ["MoveNext"], PLATFORM_LOGIN: [LOGIN], APPLICATION: ["get_internetReachability"],
+          USERS: ["GetOrgScopedID"]}
+# where each layout starts Meta's platform: (class file, method name)
+START_UP = [(PLATFORM, "MoveNext"), (PLATFORM_LOGIN, LOGIN)]
 for _cls, _names in WANTED.items():  # one Cpp2IL run (and cache entry) serves every IL2CPP patch
     ALL_TARGETS.setdefault(_cls, [])
     ALL_TARGETS[_cls] += [n for n in _names if n not in ALL_TARGETS[_cls]]
@@ -47,7 +55,7 @@ def skip_org_id(lib: bytes, method: tuple[int, int], reachability: int, org_scop
     displacement is the same in the file). Returns (patched library or None, notes); raises when the code differs."""
     start, length = method
     if start % 4 or not any(a <= start and start + length <= b for a, b in _executable(lib)):
-        raise RuntimeError(f"OculusPlatform.Initialize: offset {start:#x} isn't code in libil2cpp.so")
+        raise RuntimeError(f"OculusPlatform start-up: offset {start:#x} isn't code in libil2cpp.so")
     sites, done = [], []
     for off in range(start, start + length - 8, 4):
         if _bl_target(_word(lib, off), off) != reachability or _word(lib, off + 4) != CMP_W0_2:
@@ -64,25 +72,25 @@ def skip_org_id(lib: bytes, method: tuple[int, int], reachability: int, org_scop
             done.append(br)
     if not sites:
         if done:
-            return None, ["OculusPlatform.Initialize: org-scoped id request already skipped"]
-        raise RuntimeError("OculusPlatform.Initialize: the network check before GetOrgScopedID wasn't found")
+            return None, ["OculusPlatform start-up: org-scoped id request already skipped"]
+        raise RuntimeError("OculusPlatform start-up: the network check before GetOrgScopedID wasn't found")
     if len(sites) > 1:
-        raise RuntimeError(f"OculusPlatform.Initialize: {len(sites)} candidate checks; not guessing which one")
+        raise RuntimeError(f"OculusPlatform start-up: {len(sites)} candidate checks; not guessing which one")
     br, target = sites[0]
     out = bytearray(lib)
     out[br:br + 4] = (0x14000000 | (((target - br) >> 2) & 0x3FFFFFF)).to_bytes(4, "little")
-    return bytes(out), [f"OculusPlatform.Initialize: skips Users.GetOrgScopedID (b.ne -> b at {br:#x})"]
+    return bytes(out), [f"OculusPlatform start-up: skips Users.GetOrgScopedID (b.ne -> b at {br:#x})"]
 
 
 class CortopiaOrgId(Patch):
     id = "frame.cortopia_org_id"
     title = "Cortopia games: don't wait for Meta's org-scoped id"
-    description = ("Cortopia Studios' games (e.g. Escaping Wonderland) ask Meta's platform for an org-scoped user id "
-                   "at start when on Wi-Fi, only to use it as their analytics id. OVRPort's platform library doesn't "
-                   "answer that request (\"An unknown error occurred. Request failed.\"), so the game waits forever "
-                   "on its loading screen. Makes the game take its own offline path for that one request (the "
-                   "analytics id stays empty); the licence check and the logged-in user before it are unchanged. "
-                   "Found with Cpp2IL in libil2cpp.so.")
+    description = ("Cortopia Studios' games (e.g. Escaping Wonderland, TMNT: Empire City) ask Meta's platform for an "
+                   "org-scoped user id at start when on Wi-Fi, only to use it as their analytics id. OVRPort's "
+                   "platform library doesn't answer that request (\"An unknown error occurred. Request failed.\"), "
+                   "so the game waits forever on its loading screen. Makes the game take its own offline path for "
+                   "that one request (the analytics id stays empty); the licence check and the logged-in user "
+                   "before it are unchanged. Found with Cpp2IL in libil2cpp.so.")
     order = 49
 
     def applies(self, a):
@@ -111,7 +119,7 @@ class CortopiaOrgId(Patch):
         ctx.reporter.log(f"{check}: finding the code (Cpp2IL; the first time can take a minute)")
         try:
             found = find_methods(lib, ws.read(METADATA), version, ALL_TARGETS)
-            method = found.get(PLATFORM, {}).get("MoveNext")
+            method = next((found[c][m] for c, m in START_UP if m in found.get(c, {})), None)
             reach = found.get(APPLICATION, {}).get("get_internetReachability")
             org = found.get(USERS, {}).get("GetOrgScopedID")
             if not (method and reach and org):
