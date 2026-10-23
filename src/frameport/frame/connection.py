@@ -370,7 +370,7 @@ def install_key_command(pub: str) -> str:
 def bundled_agent_version() -> int | None:
     """AGENT_VERSION of the agent this app ships (it's uploaded to the Frame whenever it differs)."""
     try:
-        m = re.search(r"^AGENT_VERSION = (\d+)", agent_file().read_text(), re.M)
+        m = re.search(r"^AGENT_VERSION = (\d+)", agent_file().read_text(encoding="utf-8"), re.M)
         return int(m.group(1)) if m else None
     except OSError:
         return None

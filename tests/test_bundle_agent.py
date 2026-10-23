@@ -60,3 +60,19 @@ def test_pc_shortcut_code_loads_without_fcntl(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "fcntl", None)  # import fails as on Windows
     assert callable(pc_revive._vdf().vdf_decode)
+
+
+def test_bundled_agent_version_ignores_an_ascii_locale(monkeypatch):
+    """GitHub #349: Python with an ASCII default encoding couldn't read the agent (it has non-ASCII text), so the
+    diagnostics zip failed."""
+    import pathlib
+
+    from frameport.frame.connection import bundled_agent_version
+
+    real = pathlib.Path.read_text
+
+    def ascii_default(self, encoding=None, errors=None, **kw):
+        return real(self, encoding=encoding or "ascii", errors=errors, **kw)
+
+    monkeypatch.setattr(pathlib.Path, "read_text", ascii_default)
+    assert bundled_agent_version() and bundled_agent_version() > 30

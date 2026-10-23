@@ -265,7 +265,7 @@ class PairingServer:
                         server.stop_soon()
                     return self._send(b"wrong or missing pairing code\n", status=403)
                 if path == "/bootstrap.sh":
-                    text = (bootstrap_dir() / "bootstrap.sh").read_text()
+                    text = (bootstrap_dir() / "bootstrap.sh").read_text(encoding="utf-8")
                     text = text.replace("__PC_URL__", server.url).replace("__PAIR_CODE__", server.code)
                     return self._send(text.encode(), "text/x-shellscript")
                 if path == "/key":
