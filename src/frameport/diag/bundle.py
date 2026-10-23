@@ -35,7 +35,8 @@ Created by FramePort {version} on {created}. Personal data was replaced by place
 | app/app.log, app/jobs/*.log | the app's log and recent GUI job logs (build, install, launch test, ...) |
 | app/settings.json | library settings and catalog sources |
 | app/display.json | GUI versions, window state; Windows display modes, GPU drivers and display/device event metadata |
-| frame/info.json, frame/host.json | the Frame: SteamOS build, Lepton/Proton, OpenXR runtime + layers, podman, kernel"""
+| app/usb.json | the USB cable link from this PC: its addresses next to the Frame's USB address, its network adapters |
+| frame/info.json, frame/host.json | the Frame: SteamOS build, Lepton/Proton, OpenXR runtime, podman, kernel, USB"""
 """ keys |
 | games/<pkg>/entry.json | the library entry: analysis, recipe, build checks, installs, last launch test |
 | games/<pkg>/recipe.yaml | the recipe in catalog form (catalog/games/<pkg>.yaml) |
@@ -379,6 +380,12 @@ def collect(packages: list[str] | None, target=None, reporter: Reporter | None =
         w.json("app/display.json", display.collect())
     except Exception as exc:  # noqa: BLE001
         w.warnings.append(f"display diagnostics: {exc}")
+    try:  # the USB cable link's PC side (GitHub #398): its addresses next to the Frame's USB one, and its adapters
+        from ..frame import usb
+
+        w.json("app/usb.json", usb.pc_report())
+    except Exception as exc:  # noqa: BLE001
+        w.warnings.append(f"usb: {exc}")
     for p in sorted(applog.logs_dir().glob("app.log*"))[:2]:
         w.text("app/" + p.name, _read_tail(p, 2 << 20))
     jobs = sorted(applog.jobs_dir().glob("*.log"))

@@ -432,15 +432,25 @@ class FrameView:
             app._usb_setup = token
 
             def watch():
-                for _ in range(600):  # up to 20 minutes
+                from ...core import applog
+
+                applog.log.info("USB setup: waiting for the Frame at %s (this PC's USB addresses: %s)",
+                                usb.FRAME_USB_IP, usb.pc_usb_addresses(usb.FRAME_USB_IP) or "none")
+                for attempt in range(600):  # up to 20 minutes
                     if app._usb_setup is not token or app.route[0] != "frame":
+                        applog.log.info("USB setup: stopped waiting after %d tries", attempt)
                         return
                     # the Frame answering over the cable is what counts: this PC's address on it can be listed
                     # differently (or not at all) by ipconfig, which kept the wait going forever (GitHub #398)
                     if server_key(usb.FRAME_USB_IP, timeout=3):
+                        applog.log.info("USB setup: the Frame answered over the cable after %d tries", attempt)
                         break
+                    if attempt and attempt % 30 == 0:  # every ~2.5 minutes: what this PC sees meanwhile
+                        applog.log.info("USB setup: no answer yet (%d tries; this PC's USB addresses: %s)", attempt,
+                                        usb.pc_usb_addresses(usb.FRAME_USB_IP) or "none")
                     time.sleep(2)
                 else:
+                    applog.log.info("USB setup: no answer from %s in 20 minutes", usb.FRAME_USB_IP)
                     return
                 status.controls = [ft.Icon(ft.Icons.USB_ROUNDED, size=T.px(16), color=T.OK),
                                    C.meta(tr("Cable connected."), T.OK)]

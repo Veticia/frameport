@@ -48,7 +48,7 @@ try:
 except ImportError:  # Windows: pc_revive loads this file for its VDF code only (GitHub #131)
     fcntl = None
 
-AGENT_VERSION = 113
+AGENT_VERSION = 114
 HOME = os.path.expanduser("~")
 STEAM = os.path.join(HOME, ".local/share/Steam")
 ANCHORS = os.path.join(HOME, "Applications/quest-frame")
@@ -8303,6 +8303,26 @@ def game_threads(pkg, proc=None, samples=3, gap=1.0, sleep=time.sleep):
     return "\n".join(lines) + "\n"
 
 
+def usb_report():
+    """The USB cable link's Frame side for diagnostics (GitHub #398): usb0's address and state, the USB controller's
+    attach state, the gadget's functions and its services (Developer Mode turns them on)."""
+    def read(path):
+        try:
+            return open(path).read().strip()
+        except OSError:
+            return None
+    udcs = {os.path.basename(d): read(os.path.join(d, "state")) for d in glob.glob("/sys/class/udc/*")}
+    gadgets = {os.path.basename(g): {"udc": read(os.path.join(g, "UDC")),
+                                     "functions": sorted(os.listdir(os.path.join(g, "functions")))
+                                     if os.path.isdir(os.path.join(g, "functions")) else []}
+               for g in glob.glob("/sys/kernel/config/usb_gadget/*")}
+    units = run(["systemctl", "--no-pager", "--plain", "--no-legend", "list-units", "--all",
+                 "usb-gadget*", "usb-ncm*"]).stdout.strip().splitlines()
+    return {"usb0": run(["ip", "-br", "addr", "show", "usb0"]).stdout.strip(),
+            "operstate": read("/sys/class/net/usb0/operstate"), "udc": udcs, "gadgets": gadgets,
+            "units": [" ".join(u.split()) for u in units][:20]}
+
+
 def cmd_collect_diag(args):
     """Everything useful for debugging without the game or the PC app: host runtime facts and, with a package, the
     game's launcher, settings, deployment, logs (launch, Lepton logcat, Proton/Revive/Unreal) and its file listing.
@@ -8338,6 +8358,10 @@ def cmd_collect_diag(args):
             files["steam-console.txt"] = console[-max_bytes:]
     except Exception as exc:  # noqa: BLE001 (diagnostics must not fail on it)
         host["steam_library"] = {"error": str(exc)}
+    try:
+        host["usb"] = usb_report()
+    except Exception as exc:  # noqa: BLE001 (diagnostics must not fail on it)
+        host["usb"] = {"error": str(exc)}
     out = {"agent_version": AGENT_VERSION, "host": host, "files": files}
     pkg = args.get("package")
     if not pkg:

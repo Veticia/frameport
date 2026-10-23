@@ -16,6 +16,24 @@ FRAME_USB_IP, PC_USB_IP = "10.86.200.233", "10.86.200.234"  # fixed by the Frame
 TEST_BYTES = 128 << 20
 
 
+def pc_report() -> dict:
+    """This PC's side of the USB cable link for diagnostics (GitHub #398): its addresses next to the Frame's USB one
+    and its network adapters (Windows: name, description, status, no MAC addresses; else `ip -br link`)."""
+    hidden = {"creationflags": 0x08000000} if sys.platform == "win32" else {}
+    adapters = ""
+    for cmd in (["powershell.exe", "-NoProfile", "-Command",
+                 "Get-NetAdapter -IncludeHidden | Select-Object Name,InterfaceDescription,Status,LinkSpeed | "
+                 "Format-Table -AutoSize | Out-String -Width 200"], ["ip", "-br", "link"]):
+        try:
+            adapters = subprocess.run(cmd, capture_output=True, text=True, timeout=20, **hidden).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if adapters:
+            break
+    return {"usb_addresses": pc_usb_addresses(FRAME_USB_IP), "frame_usb_ip": FRAME_USB_IP,
+            "adapters": adapters[-8000:]}
+
+
 def pc_usb_addresses(frame_ip: str) -> list[str]:
     """This PC's IPv4 addresses in the same /24 as the Frame's USB address (Windows via ipconfig, else `ip`)."""
     prefix = frame_ip.rsplit(".", 1)[0] + "."
