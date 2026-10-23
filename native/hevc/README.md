@@ -100,7 +100,12 @@ decoders. Actual-session admission can still fail (including Iris's concurrent
 session-accounting issue: while any other decoder session is open, 8K is
 refused with ENOMEM). SteamVR's link (`vrlinkrunthread`) holds a session for
 about 12 s around every game start, when the plugin loads too (measured on the
-dev Frame, 2026-10-09), so a refused session is retried every 250 ms until 20 s
+dev Frame, 2026-10-09). On SteamOS 0.5.6 (build 20261022) Steam's own web helper
+(`steamwebhelper`, the CEF zygote) keeps `/dev/video22` (qcom-iris-decoder) open, and Batman's
+8192x4096 `DRM2.mp4` was refused even with no other FramePort session open (dev Frame, 2026-10-23,
+`hold_probe.cpp` + `media_codec_probe.cpp` in Batman's container; GitHub #437): 8K then always decodes in
+software. Videos up to 640x480 decode in software anyway (codec revision 11), so a game's small UI loops never
+hold Iris themselves, so a refused session is retried every 250 ms until 20 s
 after the plugin loaded (later: for 2 s); initialization then falls back to
 FFmpeg software decoding inside the already-selected component. VP9 is limited
 to 4096x2304 (codec list and component; larger VP9 decodes in software): at

@@ -69,6 +69,8 @@ static const DecoderKind kinds[]={
     {"OMX.frameport.vp9.decoder","video_decoder.vp9","video/x-vnd.on2.vp9","vp9_v4l2m2m","vp9",
         OMX_VIDEO_CodingVP9,V4L2_PIX_FMT_VP9,vp9_profiles,1,4096,2304}};
 static constexpr unsigned kind_count=sizeof(kinds)/sizeof(kinds[0]);
+// Up to 640x480 (e.g. a game's looping UI videos) decodes in software, leaving Iris free.
+static constexpr uint64_t kSmallVideoPixels=640ull*480;
 // When the media service loaded the plugin (= the container's start).
 static int64_t plugin_loaded_ns=0;
 class ColorWorkers {
@@ -312,6 +314,16 @@ class FramePortVideo final : public SoftVideoDecoderOMXComponent {
                 ALOGW("HEVC profile %d is beyond Iris's 8-bit Main; using software decoding",profile);
                 prefer_software=true;
             }
+        }
+        // Small videos (UI loops, icons) decode in software at almost no cost and
+        // never hold an Iris session: Iris takes an 8K video only while no other
+        // session is open, and games keep small players open (Batman's 192x192
+        // H.264 loops left its 8192x4096 HEVC cutscenes in software: GitHub #437).
+        if(!prefer_software && size.nFrameWidth && size.nFrameHeight &&
+                (uint64_t)size.nFrameWidth*size.nFrameHeight<=kSmallVideoPixels) {
+            ALOGI("%s %ux%u is small; decoding in software to keep Iris free for large videos",kind.mime,
+                (unsigned)size.nFrameWidth,(unsigned)size.nFrameHeight);
+            prefer_software=true;
         }
         if(size.nFrameWidth>kind.max_width || size.nFrameHeight>kind.max_height)
             ALOGW("%s %ux%u is above what Iris decodes (%ux%u); using software decoding",kind.mime,
