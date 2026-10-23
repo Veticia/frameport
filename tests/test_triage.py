@@ -658,3 +658,11 @@ def test_swapchain_count_limit_signature():
     for other in (line.replace("result=-10", "result=0"), line.replace("result=-10", "result=-100"),
                   line.replace("FrameBridge:", "Other:"), "FrameBridge: xrEndFrame result=-10"):
         assert "swapchain-limit-reached" not in {f.id for f in triage(other, "RUNNING").findings}
+
+
+def test_cryengine_init_failure_is_named():
+    # GitHub #432/#449: The Climb 2 on FramePort 1.3.0, then SIGSEGV in CSystem::ShutDown
+    log = ("10-23 16:21:18.880  1170  1198 I Cry     : Messagebox: cap: Engine initialization failed!  "
+           "text:CrySystem initialization failed!\n"
+           "10-23 16:21:18.886  1170  1198 F libc    : Fatal signal 11 (SIGSEGV), code 1 (SEGV_MAPERR), fault addr 0x0\n")
+    assert "cryengine-init-failed" in [f.id for f in triage(log, package="com.crytek.climb2").findings]

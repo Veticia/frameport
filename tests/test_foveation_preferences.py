@@ -201,3 +201,23 @@ def test_installed_only_dialog_reads_supported_level(monkeypatch, level, expecte
     app = SimpleNamespace(target=target, run_bg=lambda fn: fn())
     ad.show_adapter_dialog(app, "test.game")
     assert received == [{"mode": "tracked", "level": expected, "test": False}]
+
+
+def test_dormant_diagnostic_stays_out_of_cryengine_renderers(monkeypatch):
+    # GitHub #432/#449: linked into libCryRenderVulkan.so, The Climb 2 failed CrySystem initialization at start
+    from frameport.patches.frame import adapter, foveation
+
+    class Ws:
+        abi = "arm64-v8a"
+        written = []
+
+        def read_lib(self, name):
+            raise AssertionError(f"read {name}")
+
+        def put(self, *a):
+            self.written.append(a)
+
+    monkeypatch.setattr(foveation, "engine_lib", lambda ws: "libCryRenderVulkan.so")
+    ws = Ws()
+    assert foveation.diagnostic_support(ws) is False and not ws.written
+    assert adapter.FrameBridgeAdapter().revision_for("com.crytek.climb2") > adapter.FrameBridgeAdapter.revision
