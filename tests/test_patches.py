@@ -1067,12 +1067,34 @@ def test_hide_fb_foveation_setting():
     assert UI["hide_fb_foveation"]["level"] == "advanced"
 
 
-def test_swapchain_pool_is_opt_in_and_gles_only():
+def test_swapchain_pool_is_opt_in_for_gles_and_vulkan():
     patch = base.get("adapter.swapchain_pool")
     assert patch.default == 0 and patch.revision == 1
     assert "swapchain_pool" not in adapter_settings({})
     assert adapter_settings({"adapter.swapchain_pool": {"value": "1"}})["swapchain_pool"] == 1
     gles = _analysis(graphics="GLES or unknown (no Vulkan declaration)")
     assert patch.applies(gles) and patch.detect(gles) is None
-    assert not patch.applies(_analysis(graphics="Vulkan"))
-    assert "Vulkan" in patch.description
+    vulkan = _analysis(graphics="Vulkan")
+    assert patch.applies(vulkan) and patch.detect(vulkan) is None  # GitHub #424: offered, never suggested
+    assert "Vulkan" in patch.description and "eye images never" in patch.description
+
+
+def test_ac_nexus_uses_the_vulkan_panel_pool_with_quest_3(monkeypatch):
+    """GitHub #424: the pool frees the swapchain slots its Quest 3 eye images need; older apps keep their entry."""
+    from pathlib import Path
+
+    import yaml
+
+    import frameport
+    from frameport.recommend import catalog
+
+    path = Path(__file__).resolve().parents[1] / "catalog/games/com.Ubisoft.ACNexusVR.yaml"
+    entry = yaml.safe_load(path.read_text())
+    assert entry["adapter"] == {"swapchain_pool": 1}
+    assert "device.headset_model" not in (entry.get("frame_remove") or [])
+    assert "Quest 2" not in entry["notes"] and "#424" in entry["notes"]
+    assert base.get("frame.adapter").revision_for("com.Ubisoft.ACNexusVR") == 3
+    monkeypatch.setattr(frameport, "__version__", "1.3.0")  # its pool is GLES only: Quest 3 would stop drawing
+    assert catalog.unusable_reason(entry) == "needs FramePort 1.3.1"
+    monkeypatch.setattr(frameport, "__version__", "1.3.1")
+    assert catalog.unusable_reason(entry) is None

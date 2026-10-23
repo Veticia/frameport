@@ -162,6 +162,17 @@ The new catalog key already makes older apps reject the recipe via `unusable_rea
 Headset check: repeatedly open/close all 4XVR submenus while playing stereo and 360 video, verify both eyes, panel crops,
 curved strips, alpha and frame pacing; confirm no new -10 errors or menu closures and reuse after closing panels.
 
+**Issue #424 (2026-10-23, host-tested only): Vulkan panel pool.** AC Nexus (Unity, Vulkan) creates ~12 single-layer
+format-43 panels (1200x1020, 768x153, 1459x1228, 855x1500, 1875x1500, 2457x1152, 512x512, 460x102, 691x153, 360x360,
+…) plus a 3-swapchain eye set (arraySize 2: colour 43, 384x384 formats 97/129). With the Quest 3 identity it creates a
+2592x2256 eye set while the old one lives: the runtime refuses it (-10) and the game stops drawing (the catalog kept
+the Quest 2 identity until now). `swapchain_pool` now also covers Vulkan sessions: from eight live app swapchains,
+format-43 panels get private VkImages copied into one or two 4096² atlases at xrEndFrame (no CPU wait on this frame's
+GPU work; a 3-deep fence ring). Host harness: 8 app runtime swapchains + 1 atlas + the new eye set = 12 live, 7 panels
+pooled. Catalog: AC Nexus back to Quest 3 with `swapchain_pool: 1` (`min_app` 1.3.1). Device check (headless first):
+the 2592x2256 create succeeds, `pacing` continues, no `atlas update failed`; then the headset: panels upright, crisp and
+in place, menus, frame time.
+
 
 ## Companion apps / intents (Stremio + 4XVR)
 

@@ -9,8 +9,16 @@ swapchains, eligible single-layer colour images use private GL textures packed i
 runtime atlases. EndFrame copies each referenced source once and rewrites the final quads (including cylinder
 strips), cylinders and stereo projection views after existing layer fixes. OpenXR image ownership, GL bindings,
 scissor state, source fences, rectangle reuse and session cleanup are covered by `tests/test_swapchain_pool.py`
-(`FRAMEPORT_NATIVE_TESTS=1`, host compiler + cached OpenXR and GLES/EGL headers). Vulkan is unaffected. Host-tested;
+(`FRAMEPORT_NATIVE_TESTS=1`, host compiler + cached OpenXR and GLES/EGL/Vulkan headers). Host-tested;
 4XVR submenu interaction, visual correctness and copy cost still need a headset check.
+Vulkan sessions (#424, AC Nexus) use the same setting: format-43 (sRGB RGBA8) single-layer colour panels get private
+device-local VkImages (app usage + transfer src/dst, returned as `XrSwapchainImageVulkanKHR`), moved to
+COLOR_ATTACHMENT_OPTIMAL at their first acquire; xrEndFrame records one command buffer per frame (a 3-deep fence ring
+on the binding's queue, submits under `flip_lock`) with vkCmdCopyImage into the waited atlas image (COLOR_ATTACHMENT ->
+TRANSFER_DST -> COLOR_ATTACHMENT) before releasing it. Pooled panels stay tracked by `flip_vk.c`, so flipped quads are
+still turned upright in place. Other formats and every arraySize-2 (eye) image keep runtime swapchains. The harness
+checks layouts, copy regions, the ring and AC Nexus' swapchain count with a recording Vulkan double; the real queue,
+layouts on Turnip and the picture need the device.
 
 Sources of the prebuilt binaries in `../artifacts/` (committed, with `SHA256SUMS`). End users never compile anything;
 developers rebuild with `python native/build.py` (downloads NDK r27c, OpenXR headers at pinned commits, d8 into

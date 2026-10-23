@@ -1362,10 +1362,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrCreateSession(XrInstance instance, const XrSess
         scene_on_create_session(*session);
         session_fixes_on_create_session(*session);
         emul_on_create_session(*session, info);
-        if (swapchain_pool) {
-            for (const XrBaseInStructure *p = info->next; p; p = p->next)
-                if (p->type == XR_TYPE_GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR) pool_session = *session;
-        }
+        pool_on_create_session(*session, info);  // GLES and Vulkan bindings (swapchain_pool only)
         fade_on_create_session(*session, info);
     }
     return result;
@@ -1437,7 +1434,10 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEnumerateSwapchainImages(XrSwapchain swapchain,
     int pooled = pool_find(swapchain);
     if (pooled >= 0) {
         XrResult r = pool_enumerate(pooled, capacity, count, images);
-        if (XR_SUCCEEDED(r) && capacity && images) emul_on_enumerate(swapchain, 1, images);
+        if (XR_SUCCEEDED(r) && capacity && images) {
+            flip_on_enumerate_images(swapchain, 1, images);  // Vulkan panels: flips stay in place in the private image
+            emul_on_enumerate(swapchain, 1, images);
+        }
         return r;
     }
     if (is_standin(swapchain)) return standin_enumerate(swapchain, capacity, count, images);
@@ -1482,7 +1482,10 @@ XRAPI_ATTR XrResult XRAPI_CALL xrAcquireSwapchainImage(XrSwapchain swapchain, co
     int pooled = pool_find(swapchain);
     if (pooled >= 0) {
         XrResult r = pool_cycle(pooled, 0, index);
-        if (XR_SUCCEEDED(r)) emul_on_acquire(swapchain, *index);
+        if (XR_SUCCEEDED(r)) {
+            flip_on_acquire(swapchain, *index);  // tracked only for Vulkan panels
+            emul_on_acquire(swapchain, *index);
+        }
         return r;
     }
     if (is_standin(swapchain)) {  // adapter-served cube stand-in: one image

@@ -180,7 +180,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Native video surfaces (Batman renderer)](#adapter-surface_native) | `adapter.surface_native` | Game settings | 1 |
 | [Swap eyes](#adapter-swap_eyes) | `adapter.swap_eyes` | Game settings |  |
 | [Retry refused picture formats](#adapter-swapchain_fix) | `adapter.swapchain_fix` | Game settings |  |
-| [Share panel images (swapchain limit)](#adapter-swapchain_pool) | `adapter.swapchain_pool` | Game settings | 1 |
+| [Share panel images (swapchain limit)](#adapter-swapchain_pool) | `adapter.swapchain_pool` | Game settings | 2 |
 | [Steady controller input after focus](#adapter-sync_guard) | `adapter.sync_guard` | Game settings | 3 |
 | [Hide Vulkan foveation](#adapter-vk_hide_fdm) | `adapter.vk_hide_fdm` | Game settings | 1 |
 | [Without Steam's shader cache layer](#adapter-vk_no_fossilize) | `adapter.vk_no_fossilize` | Game settings | 1 |
@@ -2422,7 +2422,7 @@ Lets OpenGL ES games start when the Frame refuses their picture format. Leave it
 
 ### <a id="adapter-swapchain_pool"></a>Share panel images (swapchain limit)
 
-Keeps extra menus and panels working when the Frame reaches its image count limit. GLES apps only; Vulkan apps are unaffected.
+Keeps extra menus, panels and new eye images working when the Frame reaches its image count limit.
 
 - `adapter.swapchain_pool`
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
@@ -2430,10 +2430,10 @@ Keeps extra menus and panels working when the Frame reaches its image count limi
 - **Options:**
   - Value: int, default `0`.
   - Game settings → Troubleshooting → "Share panel images (swapchain limit)" (advanced).
-- **Catalog games (1):** 4XVR Video Player.
+- **Catalog games (2):** 4XVR Video Player, Assassin's Creed Nexus.
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
 
-> Share GLES panel images in runtime atlases to avoid the Frame's swapchain count limit (about 15 per session). Useful when opening extra menus closes them or leaves panels gray. Vulkan apps are unaffected.
+> Share panel images in runtime atlases to avoid the Frame's swapchain count limit (about 15 per session). Useful when opening extra menus closes them or leaves panels gray, or when a game stops drawing because a new set of eye images was refused. GLES and Vulkan apps; on Vulkan only sRGB panels are shared, eye images never.
 
 ### <a id="adapter-sync_guard"></a>Steady controller input after focus
 

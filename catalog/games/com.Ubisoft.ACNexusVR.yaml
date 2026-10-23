@@ -8,7 +8,9 @@ status: works
 notes: 'FrameBridge turns its upside-down UI panels upright (flip emulation, in place since FramePort 1.2.0). Ubisoft
   login may not work. frame.unity_text_input and device.text_input_window added from detection (not headset-verified).
 
-  Keeps the Quest 2 headset identity: with Quest 3 it stops drawing after the start (GitHub #424).'
+  Its many UI panels share runtime images (adapter swapchain_pool, Vulkan panel pool), so the Quest 3 eye images fit
+  under the Frame''s swapchain limit; before, the Quest 3 identity stopped drawing after the start (GitHub #424;
+  pending device confirmation).'
 details: Ubisoft online login may not work. Data folder holds raw assets (start0..2, .climb, bundles), not .obb
   files; install to obb as-is.
 overport_extra:
@@ -17,8 +19,8 @@ frame:
 - frame.unity_text_input
 device:
 - device.text_input_window
-frame_remove:
-- device.headset_model
+adapter:
+  swapchain_pool: 1
 verified:
   date: '2026-09-28'
   overport_cli: 1.2.3
@@ -27,4 +29,4 @@ verified:
   no_appsw_90: '2026-10-02, OVRPort 1.2.5 (owner: 90 Hz felt better than 72 Hz; same known issues)'
   flip_in_place: '2026-10-14, owner in the headset: launch warnings and tutorial pop-ups upright (GitHub #138)'
 updated: '2026-10-23'
-min_app: 1.3.0
+min_app: 1.3.1
