@@ -1037,6 +1037,27 @@ def test_clipboard_get_reads_the_frames_displays(monkeypatch, tmp_path):
     assert a.cmd_clipboard_get({})["reasons"] == [":0: can't open the display"]
 
 
+def test_launchers_give_lepton_the_resolved_time_zone(monkeypatch, tmp_path):
+    """GitHub #429: Lepton turned SteamOS' relative /etc/localtime link into an invalid zone (games ran on UTC). A
+    readlink shim first on the launcher's PATH answers its bare `readlink /etc/localtime` with the resolved path."""
+    import subprocess
+
+    a = load_agent(monkeypatch, tmp_path)
+    monkeypatch.setattr(a, "LEPTON_SHIMS", str(tmp_path / "shims"))
+    assert a.ensure_lepton_shims() and not a.ensure_lepton_shims()
+    shim = tmp_path / "shims" / "readlink"
+    out = subprocess.run([str(shim), "/etc/localtime"], capture_output=True, text=True).stdout.strip()
+    if os.path.islink("/etc/localtime"):
+        assert out == os.path.realpath("/etc/localtime")
+    link = tmp_path / "rel"
+    link.symlink_to("../x/y")
+    assert subprocess.run([str(shim), str(link)], capture_output=True, text=True).stdout.strip() == "../x/y"
+    text = "#!/bin/bash\nexport IS_PARENT=true\nchild=''\n"
+    once = a.set_tz_line(text)
+    assert a.TZ_LINE in once and a.set_tz_line(once) == once
+    assert a.set_tz_line("#!/bin/bash\n# a Linux app\n") == "#!/bin/bash\n# a Linux app\n"
+
+
 def test_keyboard_session_reports_a_refused_device(monkeypatch, tmp_path):
     import io
 

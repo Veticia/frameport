@@ -48,7 +48,7 @@ try:
 except ImportError:  # Windows: pc_revive loads this file for its VDF code only (GitHub #131)
     fcntl = None
 
-AGENT_VERSION = 112
+AGENT_VERSION = 113
 HOME = os.path.expanduser("~")
 STEAM = os.path.join(HOME, ".local/share/Steam")
 ANCHORS = os.path.join(HOME, "Applications/quest-frame")
@@ -726,6 +726,10 @@ def ensure_host_fixes():
         changed.append("podman keyring=false")
     try:
         ensure_podman_wrapper()  # used only by launchers with the gamepad line (device.steam_gamepad)
+    except OSError:
+        pass
+    try:
+        ensure_lepton_shims()  # the readlink launchers' time zone line uses (written quietly, GitHub #429)
     except OSError:
         pass
     try:
@@ -3448,6 +3452,38 @@ def snapshot_line(pkg):
             f"{shlex.quote(pkg)} >>\"$app_dir/save-snapshot.log\" 2>&1 || true")
 
 
+LEPTON_SHIMS = os.path.join(HOME, ".local/share/frameport/lepton-shims")
+# Lepton sets the container's time zone from a bare `readlink /etc/localtime` minus "/usr/share/zoneinfo/", but on
+# SteamOS that link is relative (../usr/share/zoneinfo/Zone): every game got an invalid zone and ran on UTC (GitHub
+# #429). Launchers put this folder first on PATH; its readlink answers that one call with the resolved path.
+TZ_LINE = 'export PATH="$HOME/.local/share/frameport/lepton-shims:$PATH"  # time zone for Lepton (GitHub #429)'
+READLINK_SHIM = """#!/bin/sh
+# FramePort (GitHub #429): Lepton reads the time zone with a bare readlink of /etc/localtime, which is relative here
+if [ "$#" = 1 ] && [ "$1" = /etc/localtime ]; then exec /usr/bin/readlink -f /etc/localtime; fi
+exec /usr/bin/readlink "$@"
+"""
+
+
+def ensure_lepton_shims():
+    """Write the readlink shim TZ_LINE puts first on Lepton launchers' PATH."""
+    path = os.path.join(LEPTON_SHIMS, "readlink")
+    if os.path.isfile(path) and open(path).read() == READLINK_SHIM:
+        return False
+    os.makedirs(LEPTON_SHIMS, exist_ok=True)
+    with open(path + ".tmp", "w") as f:
+        f.write(READLINK_SHIM)
+    os.chmod(path + ".tmp", 0o755)
+    os.replace(path + ".tmp", path)
+    return True
+
+
+def set_tz_line(text):
+    """A Lepton launcher with the time zone PATH line after `export IS_PARENT=true` (once)."""
+    if TZ_LINE in text or "\nexport IS_PARENT=true\n" not in text:
+        return text
+    return text.replace("\nexport IS_PARENT=true\n", "\nexport IS_PARENT=true\n" + TZ_LINE + "\n", 1)
+
+
 def upgrade_launchers():
     """Give launchers written by older agents the parent watchdog, the dashboard closer and the play-session log (in
     place: a new file, so a running launcher keeps reading the old one). Returns the packages changed."""
@@ -3465,6 +3501,7 @@ def upgrade_launchers():
             if cloud not in new:
                 new = new.replace("\nfix_perms\n", "\n" + cloud + "\nfix_perms\n", 1)
             new = set_codec_line(new, wants_hw_video(os.path.dirname(path)))
+            new = set_tz_line(new)
             new = set_gamepad_line(new, wants_gamepad(os.path.dirname(path)))
             pkg = os.path.basename(os.path.dirname(path))
             dep = deployment(pkg) or {}
@@ -3950,6 +3987,11 @@ def write_launcher(anchor, base, pkg, title, appid, lepton, env, hw_video=False,
                             plays_start=plays_lines(anchor)[0],
                             plays_end=plays_lines(anchor)[1], save_snapshot=snapshot_line(pkg),
                             restart=restart_block(pkg, lepton))
+    text = set_tz_line(text)
+    try:
+        ensure_lepton_shims()
+    except OSError:
+        pass
     text = set_openxr_manifest_line(text, pkg, static_openxr)
     text = set_config_sync_line(text, pkg, config_sync)
     text = set_room_sync_line(text, pkg, scene_room)
