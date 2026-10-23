@@ -981,6 +981,45 @@ def test_virtual_keyboard_events_text_and_release(monkeypatch, tmp_path):
     assert replies[0] == {"ready": True} and replies[1] == {"typed": True, "skipped": ""} and closed
 
 
+def test_keys_whose_release_never_came_are_released(monkeypatch, tmp_path):
+    """GitHub #411: a lost key release left Up held on the Frame, which repeated it through a whole shell history."""
+    a = load_agent(monkeypatch, tmp_path)
+    kb = a.VirtualKeyboard(fd="fake", write=lambda fd, data: None)
+    now = a.time.monotonic()
+    kb.key(103, 1)  # Up: down, then nothing
+    kb.key(42, 1)  # Shift held (modifiers send no repeats)
+    kb.key(30, 1)
+    kb.key(30, 2)  # 'a' held: the PC keeps sending repeats
+    assert kb.release_stale(now + 0.3) == []
+    kb.seen[30] = (now + 1.2, 2)
+    assert kb.release_stale(now + 1.4) == []  # still refreshed
+    assert kb.release_stale(now + a.KEY_HOLD_TIMEOUT + 0.1) == [103]
+    assert kb.release_stale(now + 1.2 + a.KEY_REPEAT_TIMEOUT + 0.1) == [30]
+    assert kb.held == {42}
+
+
+def test_keyboard_session_on_a_pipe_releases_stale_keys(monkeypatch, tmp_path):
+    import io
+    import threading
+
+    a = load_agent(monkeypatch, tmp_path)
+    monkeypatch.setattr(a, "KEY_HOLD_TIMEOUT", 0.2)
+    events = []
+    kb = a.VirtualKeyboard(fd="fake", write=lambda fd, data: None)
+    real = kb.key
+    kb.key = lambda code, value: (events.append((code, value)), real(code, value))
+    r, w = os.pipe()
+    out = io.StringIO()
+    t = threading.Thread(target=a.keyboard_session, args=(os.fdopen(r, "rb", buffering=0), out),
+                         kwargs={"keyboard": kb})
+    t.start()
+    os.write(w, b'{"k": 103, "v": 1}\n')
+    a.time.sleep(0.6)  # no release: the agent lets go of Up itself
+    os.close(w)
+    t.join(5)
+    assert events[:2] == [(103, 1), (103, 0)]
+
+
 def test_keyboard_session_reports_a_refused_device(monkeypatch, tmp_path):
     import io
 

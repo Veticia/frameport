@@ -30,6 +30,7 @@ import json
 import math
 import os
 import re
+import select
 import shlex
 import shutil
 import signal
@@ -47,7 +48,7 @@ try:
 except ImportError:  # Windows: pc_revive loads this file for its VDF code only (GitHub #131)
     fcntl = None
 
-AGENT_VERSION = 110
+AGENT_VERSION = 111
 HOME = os.path.expanduser("~")
 STEAM = os.path.join(HOME, ".local/share/Steam")
 ANCHORS = os.path.join(HOME, "Applications/quest-frame")
@@ -8564,6 +8565,9 @@ def text_keys():
 
 
 TEXT_KEYS = text_keys()
+# OS key repeat starts 0.25-1 s after a press (Windows/macOS/GNOME settings) and then comes 2.5-30 times a second
+KEY_HOLD_TIMEOUT, KEY_REPEAT_TIMEOUT = 1.5, 0.6
+MODIFIER_KEYS = {29, 97, 42, 54, 56, 100, 125, 126, 58, 69, 70}  # Ctrl, Shift, Alt, Meta, Caps/Num/Scroll Lock
 
 
 class VirtualKeyboard:
@@ -8571,6 +8575,7 @@ class VirtualKeyboard:
 
     def __init__(self, fd=None, write=os.write, settle=0.8):
         self.write, self.held = write, set()
+        self.seen = {}  # held key -> (time of its last down/repeat, value)
         self.fd = fd
         if fd is None:
             self.fd = os.open(UINPUT, os.O_WRONLY | os.O_NONBLOCK)
@@ -8592,6 +8597,21 @@ class VirtualKeyboard:
         self._event(EV_KEY, int(code), value)
         self._event(EV_SYN, SYN_REPORT, 0)
         (self.held.add if value else self.held.discard)(int(code))
+        if value:
+            self.seen[int(code)] = (time.monotonic(), value)
+        else:
+            self.seen.pop(int(code), None)
+
+    def release_stale(self, now=None, hold=KEY_HOLD_TIMEOUT, repeat=KEY_REPEAT_TIMEOUT):
+        """Release held keys the PC stopped refreshing: while a key is held the PC sends its OS key repeats, so a key
+        with no repeat or release for a while lost its release on the way, and the Frame would repeat it without end
+        (GitHub #411: one Up ran through a terminal's whole history). Modifiers repeat nothing and stay held."""
+        now = time.monotonic() if now is None else now
+        stale = [code for code, (t, value) in self.seen.items() if code not in MODIFIER_KEYS
+                 and now - t > (repeat if value == 2 else hold)]
+        for code in stale:
+            self.key(code, 0)
+        return stale
 
     def type_text(self, text, delay=0.008):
         """Type characters of the US layout; returns the characters it couldn't type."""
@@ -8633,18 +8653,39 @@ def keyboard_session(stdin, stdout, keyboard=None):
         return 1
     stdout.write(json.dumps({"ready": True}) + "\n")
     stdout.flush()
+
+    def handle(line):
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            return
+        if "k" in msg:
+            kb.key(msg["k"], msg.get("v", 1))
+        elif "text" in msg:
+            skipped = kb.type_text(str(msg["text"]))
+            stdout.write(json.dumps({"typed": True, "skipped": skipped}) + "\n")
+            stdout.flush()
     try:
-        for line in stdin:
-            try:
-                msg = json.loads(line)
-            except ValueError:
-                continue
-            if "k" in msg:
-                kb.key(msg["k"], msg.get("v", 1))
-            elif "text" in msg:
-                skipped = kb.type_text(str(msg["text"]))
-                stdout.write(json.dumps({"typed": True, "skipped": skipped}) + "\n")
-                stdout.flush()
+        try:
+            fd = stdin.fileno()
+        except (AttributeError, OSError, ValueError):  # tests: a StringIO
+            fd = None
+        if fd is None:
+            for line in stdin:
+                handle(line)
+        else:  # a real pipe: wake up between lines too, to release keys whose release never came (GitHub #411)
+            buf = b""
+            while True:
+                ready, _, _ = select.select([fd], [], [], 0.1)
+                if ready:
+                    chunk = os.read(fd, 65536)
+                    if not chunk:
+                        break
+                    buf += chunk
+                    while b"\n" in buf:
+                        line, buf = buf.split(b"\n", 1)
+                        handle(line.decode("utf-8", "replace"))
+                kb.release_stale()
     except (OSError, ValueError):
         pass
     finally:
