@@ -14,6 +14,7 @@ and unpack it anywhere. No installer or admin rights are needed.
 | macOS (Apple Silicon) | `FramePort-macos-arm64.zip` | `FramePort.app` |
 | Linux (x64, Ubuntu 22.04 or newer) | `FramePort-linux-x64.tar.gz` | `FramePort/FramePort` |
 | Linux (ARM64, Ubuntu 22.04 or newer) | `FramePort-linux-arm64.tar.gz` | `FramePort/FramePort` |
+| Arch Linux (AUR, community package) | [`frameport-bin`](https://aur.archlinux.org/packages/frameport-bin) | `frameport` |
 
 On first start FramePort downloads the tools it uses (Settings → Tools shows them).
 
@@ -26,7 +27,7 @@ FramePort isn't signed with a paid certificate, so the first start shows a warni
 
 - **Windows:** "Windows protected your PC" → **More info** → **Run anyway**.
 - **macOS:** right-click `FramePort.app` → **Open** → **Open** (once).
-- **Linux:** `tar xzf FramePort-linux-x64.tar.gz && ./FramePort/FramePort`.
+- **Linux:** `tar xzf FramePort-linux-x64.tar.gz && ./FramePort/FramePort`. On Arch Linux, install the community AUR package [`frameport-bin`](https://aur.archlinux.org/packages/frameport-bin) (`yay -S frameport-bin`).
 
 ## Connecting the Steam Frame
 
@@ -235,6 +236,8 @@ FramePort downloads it, checks it, restarts and keeps your games and settings. *
   PC**).
 - **Dev builds:** if you're asked to test a change before its release, use Settings → Updates → **Install the latest
   dev build…**. The next release then arrives as a normal update.
+- **Installed from the AUR?** Update with your AUR helper (`yay -Syu`); FramePort can't update itself in `/opt` and
+  opens the release page instead. New releases reach the AUR once the community package is updated.
 
 ## PC VR games
 

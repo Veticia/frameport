@@ -52,7 +52,7 @@ Details for each: [Install and first steps](docs/INSTALL.md).
 ## Quick start
 
 1. [Download](https://github.com/spoopyghosty0/frameport/releases/latest) the build for Windows, macOS (Apple
-   Silicon) or Linux, unpack it and start FramePort.
+   Silicon) or Linux (Arch Linux: [AUR package](docs/INSTALL.md)), unpack it and start FramePort.
 2. In FramePort click **Steam Frame → Start setup**. The Frame and your PC must be on the same Wi-Fi (or use a USB
    cable).
 3. On the Frame open the **SteamVR dashboard → Launch a program → Desktop**, then the app menu → **System →
