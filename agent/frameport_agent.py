@@ -48,7 +48,7 @@ try:
 except ImportError:  # Windows: pc_revive loads this file for its VDF code only (GitHub #131)
     fcntl = None
 
-AGENT_VERSION = 119
+AGENT_VERSION = 120
 HOME = os.path.expanduser("~")
 STEAM = os.path.join(HOME, ".local/share/Steam")
 ANCHORS = os.path.join(HOME, "Applications/quest-frame")
@@ -3537,6 +3537,70 @@ def set_tz_line(text):
     return text.replace("\nexport IS_PARENT=true\n", "\nexport IS_PARENT=true\n" + TZ_LINE + "\n", 1)
 
 
+# GitHub #480: games were ended with `podman kill` (and Lepton's own teardown `reboot -p` + `podman stop -t 0`) while
+# their activity was still resumed, so Android never paused them: Unity's OnApplicationPause(true) and the saves games
+# write there never ran (Just Dance VR lost all progress; a Quest always pauses an app before it closes). Before a
+# FramePort game is stopped, its activity is sent to the background inside the container: `am start` of the HOME
+# intent (Lepton's Launcher3; `input keyevent HOME` does nothing in Lepton's headless Android) pauses it at once and
+# stops it ~0.3 s later. The script waits for STOPPED, gives the app PAUSE_SETTLE s more, and is cut off after
+# PAUSE_LIMIT s in total (a hung container is never kept waiting longer). A game that isn't in front any more (its own
+# exit, the launcher already pressed) is left alone.
+PAUSE_LIMIT = 3
+PAUSE_SETTLE = 0.4
+PAUSE_SCRIPT = (
+    "p={pkg}; "
+    "st() {{ dumpsys activity activities | grep -E 'Hist #|state=' | grep -F -A1 \" $p/\" "
+    "| grep -o 'state=[A-Z_]*' | head -n 1; }}; "
+    "s=$(st); "
+    "case \"$s\" in state=RESUMED|state=PAUSING|state=PAUSED|state=STARTED|state=INITIALIZING) ;; "
+    "*) echo \"not in front (${{s:-no activity}})\"; exit 0;; esac; "
+    "am start -a android.intent.action.MAIN -c android.intent.category.HOME >/dev/null 2>&1; "
+    "i=0; while [ $i -lt {polls} ]; do sleep 0.1; s=$(st); "
+    "case \"$s\" in state=STOPPED|state=DESTROYED|state=FINISHING|'') "
+    "echo \"${{s:-gone}} after $i polls\"; sleep {settle}; exit 0;; esac; i=$((i+1)); done; "
+    "echo \"still $s\"")
+PAUSE_LINE = ('pause_game() {{ [[ -n "$child" ]] && kill -0 "$child" 2>/dev/null || return 0; '
+              '{{ echo "$(date +%T.%N) pausing"; timeout -k 1 {limit} podman exec "lepton-steamlaunch-$SteamAppId" '
+              'sh -c {script_q}; echo "$(date +%T.%N) done"; }} >"$app_dir/stop-pause.log" 2>&1 9>&- || true; }}'
+              '  # Android pauses the game before it ends (GitHub #480)')
+PAUSE_CALL = "    pause_game\n"
+
+
+def pause_script(pkg):
+    """The shell script (Android's sh, run in the game's container) that pauses `pkg`'s activity."""
+    if not re.fullmatch(r"[A-Za-z0-9._]+", pkg or ""):
+        raise AgentError(f"bad package name {pkg!r}")
+    return PAUSE_SCRIPT.format(pkg=shlex.quote(pkg), polls=20, settle=PAUSE_SETTLE)
+
+
+def pause_line(pkg):
+    return PAUSE_LINE.format(limit=PAUSE_LIMIT, script_q=shlex.quote(pause_script(pkg)))
+
+
+def set_pause_lines(text, pkg):
+    """A Lepton launcher whose stop() pauses the game (pause_game) before Lepton and the container are ended: the
+    function before stop(), its call before the `kill -TERM` of Lepton. Idempotent; the line follows the template."""
+    text = "\n".join(ln for ln in text.split("\n") if not ln.startswith("pause_game() {"))
+    text = text.replace("\n" + PAUSE_CALL, "\n")
+    term = '\n    [[ -n "$child" ]] && kill -TERM'
+    if "\nstop() {\n" not in text or term not in text:
+        return text
+    text = text.replace("\nstop() {\n", "\n" + pause_line(pkg) + "\nstop() {\n", 1)
+    return text.replace(term, "\n" + PAUSE_CALL + term[1:], 1)
+
+
+def pause_app(appid, pkg, limit=PAUSE_LIMIT):
+    """Pause a Lepton game's activity before it is stopped (see PAUSE_SCRIPT). Returns the script's last line, or
+    None when the container didn't answer (not running, hung: cut off after `limit` s)."""
+    try:
+        p = run(["podman", "exec", f"lepton-steamlaunch-{int(appid)}", "sh", "-c", pause_script(pkg)],
+                timeout=limit)
+    except (OSError, subprocess.TimeoutExpired, AgentError, ValueError):
+        return None
+    lines = p.stdout.strip().splitlines()
+    return lines[-1] if p.returncode == 0 and lines else None
+
+
 # device.shared_folder (GitHub #440): FRAMEPORT_SHARE="<other package>:<folder>". On a Quest every app sees one
 # /sdcard; in Lepton each game has its own. The folder becomes a link to the other game's copy, and that path joins
 # STEAM_COMPAT_LIBRARY_PATHS, which Lepton bind-mounts at the same path (as it does for ~/Documents behind its own
@@ -3639,6 +3703,11 @@ def upgrade_launchers():
             # The end log follows podman kill in stop(), while the launcher still owns fd 9.
             end = plays_lines(os.path.dirname(path))[1]
             new = new.replace(end, end + "\n    " + snapshot_line(os.path.basename(os.path.dirname(path))), 1)
+        if "export LEPTON_ENV_FRAMEBRIDGE_CONFIG=" in new:
+            try:  # the game is paused before it is stopped (GitHub #480, agent v120)
+                new = set_pause_lines(new, os.path.basename(os.path.dirname(path)))
+            except AgentError:
+                pass
         if new == text:
             continue
         tmp = path + ".tmp"
@@ -4092,6 +4161,7 @@ def write_launcher(anchor, base, pkg, title, appid, lepton, env, hw_video=False,
     text = set_room_sync_line(text, pkg, scene_room)
     text = set_refresh_rate_line(text, pkg)
     text = set_theater_line(text, pkg)
+    text = set_pause_lines(text, pkg)
     path = os.path.join(anchor, "launch.sh")
     with open(path + ".tmp", "w") as f:
         f.write(text)
@@ -7830,8 +7900,14 @@ def _remove_owned(path):
 
 # ------------------------------------------------------------------------------------------ launch tests
 def cmd_stop(args):
-    dep = deployment(check_pkg(args["package"]))
+    pkg = check_pkg(args["package"])
+    dep = deployment(pkg)
+    out = {"stopped": bool(dep)}
     if dep:
+        if dep.get("kind") not in ("pcvr", "linux") and container_running(dep["appid"]):
+            # before the launch-test unit is stopped: systemd's TERM reaches Lepton too, whose teardown ends the
+            # container at once (GitHub #480)
+            out["paused"] = pause_app(dep["appid"], pkg)
         run(["systemctl", "--user", "stop", f"frameport-test-{dep['appid']}"])
         if dep.get("kind") == "pcvr":
             stop_pcvr(dep)
@@ -7840,7 +7916,7 @@ def cmd_stop(args):
                 run(["kill", "-TERM", pid])
         else:
             run(["podman", "kill", f"lepton-steamlaunch-{dep['appid']}"])
-    return {"stopped": bool(dep)}
+    return out
 
 
 def stop_pcvr(dep):
@@ -10171,6 +10247,8 @@ def monitor_end_game(pkg, wait=6.0):
     if not running():
         return {"ended": True, "via": None, "package": pkg, "note": "not running"}
     via = None
+    if dep.get("kind") not in ("pcvr", "linux"):
+        pause_app(dep["appid"], pkg)  # Android pauses the game first, whatever Steam ends next (GitHub #480)
     devkit = devkit_gameid(pkg)
     appid = (devkit_appid(devkit) if devkit else None) or dep.get("appid")
     try:

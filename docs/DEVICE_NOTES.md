@@ -1217,3 +1217,63 @@ Facts for later: `vrcmd --overlays` lists every overlay with visible/not_visible
 did nothing); `vrcmd --dock-overlay dashboard|theater|world <overlay key>`. Headless sessions never reach FOCUSED,
 so whether the controllers reach the game, and whether Steam's keyboard still opens for a text field with the
 window kept in the dashboard, needs the headset.
+
+## Graceful stop: the game is paused before it ends (GitHub #480, agent v120)
+
+Just Dance VR lost all progress on the Frame: its log shows `OfflineSave |WARN |OfflineSaveDico_FromString - NeedLoad:
+False` at every start and no save write ever, and its session logs end with the game still running (no
+`[OVRManager] OnApplicationPause(true)`). On a Quest an app is always paused before it closes; on the Frame nothing
+paused it: launch.sh's `stop()` ran `podman kill`, and Lepton's own teardown (it traps TERM/INT) runs
+`podman exec … /system/bin/reboot -p` + `podman stop -t 0` (Lepton 3.0.5, `liblepton.sh kill_container`). `reboot -p`
+goes through init, not the activity manager, so no `onPause`/`onStop` either. Games that save in
+`OnApplicationPause`/`onPause` (and Unity's own PlayerPrefs flush on pause) never saved.
+
+What works in Lepton's Android 11 (checked 2026-10-24 on the dev Frame, AC Nexus = Unity, headless):
+- `input keyevent 3` (HOME) does **nothing** (headless: no focused display); the activity stays RESUMED.
+- `am start -a android.intent.action.MAIN -c android.intent.category.HOME` starts Lepton's Launcher3: the game's
+  activity is PAUSED at once and STOPPED ~0.3 s later; Unity logs `[OVRManager] OnApplicationPause(true)` ~20 ms
+  after the START and `OnApplicationFocus(false)` right after. Lepton's `LeptonProcessObserver` logs the foreground
+  change but doesn't react to it.
+- `dumpsys activity activities` (~10-30 ms) lists each record as `* Hist #N: ActivityRecord{… <pkg>/<activity> tN}`
+  followed a few lines later by `state=RESUMED|PAUSED|STOPPING|STOPPED …`.
+
+FramePort (`PAUSE_SCRIPT`, run in the container with `podman exec … sh -c`): if the game's activity is in front, start
+the HOME intent, poll its state every 0.1 s until STOPPED (or gone), wait 0.4 s more, give up after 3 s in total. A
+game busy loading can't pause sooner (Unity's main thread doesn't answer, the activity sits in STOPPING: `still
+state=STOPPING`). A game that isn't in front (it ended itself, or was already sent home) is left alone.
+- launch.sh: `pause_game` runs first in `stop()` (before Lepton gets its TERM and before `podman kill`, so before
+  Lepton's teardown), only while Lepton still runs (a game that ended or crashed adds no delay); output with times in
+  `<base>/stop-pause.log`. The play log + `_snapshot_close` still follow `podman kill` under the launch lock, so
+  automatic save snapshots now include what the game saved on pause. `upgrade_launchers` adds it to existing Lepton
+  launchers (foveation exports and other lines untouched).
+- agent `stop` pauses before it stops the launch-test unit (systemd's stop TERMs every process in the unit, Lepton
+  included, at the same moment) and kills the container; result field `paused`. The Monitor's End game pauses before
+  Steam's Exit game, whatever Steam then signals.
+- Not covered: stopping Steam / restarting the Frame (systemd ends launch.sh and Lepton together and Lepton's
+  teardown races the pause) and launch tests (their own `systemctl stop` also ends the pause's processes).
+
+**Steam's own Exit game is not covered** (the Steam menu's Exit game = `SteamClient.Apps.TerminateApp`). Steam's
+`reaper` is only `prctl(PR_SET_CHILD_SUBREAPER)` + fork/exec + wait (no kill logic); Steam itself signals every
+process in the game's process tree at once. podman's `conmon` double-forks and is re-parented to the reaper, so the
+container's processes (Android init, system_server, the game: `game ← main(zygote) ← init ← conmon ← reaper ←
+steam`) are part of that tree, although their cgroup is podman's `libpod-<id>.scope`, not Steam's
+`app-steam-app<appid>-<pid>.scope`. Measured: TerminateApp with no pre-pause → launch.sh's `pause_game` starts 0.2 s
+later and finds `Can't find service: activity` (system_server already gone), container gone after 0.65-0.8 s; the same
+after moving Lepton, `podman run` and conmon out of Steam's scope into another scope (so Steam kills by process tree,
+not by cgroup). Lepton itself never logged a TERM (`Exited!` only): `podman run`'s signal proxy killed the container
+(journal: `container kill` from Lepton's `podman run`). Ideas, not done: start Lepton outside Steam's process tree
+(a `systemd-run --user` service; launch.sh then only waits, Steam would TERM just launch.sh and its helpers; needs a
+headset check that SteamVR still attributes the game to its shortcut: bindings, refresh rate, overlay), or hook
+Steam's TerminateApp through the CEF devtools connection the agent already uses (log a marker, delay the real call
+~1.5 s while an agent worker pauses the game). FrameBridge can't help: Steam's TERM reaches system_server too.
+
+Timings on the dev Frame (AC Nexus, Unity, headless, 2026-10-24):
+
+| path | OnApplicationPause(true) after the stop request | stop request → container gone |
+|---|---|---|
+| launch.sh TERM (parent watchdog, Steam stopping only the launcher) | 0.11 s | 1.36 s (pause done after 0.97 s; Lepton's teardown alone ~0.4 s) |
+| agent `stop` | 0.31 s (agent start + `podman ps` + exec) | 1.59 s (`stop` returns after 1.47 s) |
+| Monitor End game (`monitor_end_game`: pause, then Steam's Exit game) | 0.23 s | 2.06 s |
+| a game that doesn't answer (4 of 9 runs: once during its shader warm-up, three times with Unity's main thread already silent before the stop; one Steam run of the same setup had a render-thread crash in Valve's FDM layer with Eye-tracked foveation) | none | capped: pause gives up after 3 s (`still state=STOPPING`), agent `stop` 4.2-4.3 s |
+| Steam's own Exit game | none (see above) | 0.65-0.8 s, unchanged |
+

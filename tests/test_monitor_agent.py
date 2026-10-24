@@ -267,7 +267,10 @@ def test_end_game_steam_then_stop(fa, monkeypatch):
         state["running"] = False
         return {"stopped": True}
     monkeypatch.setattr(fa, "cmd_stop", stop)
+    monkeypatch.setattr(fa, "pause_app", lambda appid, pkg: calls.append(("pause", appid, pkg)))
     res = fa.monitor_end_game(GAME, wait=0.2)
+    assert calls[0] == ("pause", APPID, GAME)  # Android pauses the game before Steam ends it (GitHub #480)
+    calls.pop(0)
     assert calls[0] == f"SteamClient.Apps.TerminateApp('{fa.steam_gameid(APPID)}', false)"
     assert calls[1] == ("stop", GAME) and res == {"ended": True, "via": "stop", "package": GAME}
     # Steam's Exit game was enough: no podman kill

@@ -28,6 +28,15 @@
   200 keys, so ~200 launches after boot every container fails ("create keyring … Disk quota exceeded"). FramePort sets
   `keyring = false` in `~/.config/containers/containers.conf`; a reboot clears already-leaked keys.
 - Picks the activity with category LAUNCHER (`APP_ACTIVITY`). Game data is visible at `/sdcard/Android/{obb,data}/<pkg>`.
+- Ending a game: Lepton traps TERM/INT and tears down with `podman exec … reboot -p` + `podman stop -t 0`; neither
+  pauses the app (no `onPause`, no Unity `OnApplicationPause(true)`). `input keyevent` HOME does nothing in the
+  headless container; `am start -a android.intent.action.MAIN -c android.intent.category.HOME` (Launcher3) pauses the
+  game at once and stops it ~0.3 s later. FramePort does that before its own stops (GitHub #480, DEVICE_NOTES
+  "Graceful stop").
+- Steam's Exit game (`Apps.TerminateApp`) signals the game's whole process tree at once. `conmon` is re-parented to
+  Steam's `reaper` (a bare child subreaper), so the container's Android processes are in that tree although their
+  cgroup is podman's `libpod-<id>.scope`; moving processes out of Steam's `app-steam-app<appid>-<pid>.scope` doesn't
+  shield them. The container is gone ~0.7 s after the call; nothing in launch.sh can run before that.
 - 64-bit only (no AArch32): 32-bit-only APKs run through FramePort's a32 bridge (`frame.a32_bridge`).
 - `<install>/lepton-shaders/` holds Mesa's shader cache (Lepton sets `mesa.shader.cache.dir=/data/shaders`):
   `foz_cache.foz` + `foz_cache_idx.foz` per graphics driver (Turnip Vulkan, zink GL), typically 4–6 files and 7–19 MB
