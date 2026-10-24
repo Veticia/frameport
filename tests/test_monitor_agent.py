@@ -271,7 +271,8 @@ def test_end_game_steam_then_stop(fa, monkeypatch):
     res = fa.monitor_end_game(GAME, wait=0.2)
     assert calls[0] == ("pause", APPID, GAME)  # Android pauses the game before Steam ends it (GitHub #480)
     calls.pop(0)
-    assert calls[0] == f"SteamClient.Apps.TerminateApp('{fa.steam_gameid(APPID)}', false)"
+    # past FramePort's Exit game hook (the game is paused already): no second pause
+    assert calls[0] == fa.terminate_app_js(fa.steam_gameid(APPID)) and "__fpExit.unhooked" in calls[0]
     assert calls[1] == ("stop", GAME) and res == {"ended": True, "via": "stop", "package": GAME}
     # Steam's Exit game was enough: no podman kill
     calls.clear()

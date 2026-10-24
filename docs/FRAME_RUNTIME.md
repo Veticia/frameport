@@ -36,7 +36,13 @@
 - Steam's Exit game (`Apps.TerminateApp`) signals the game's whole process tree at once. `conmon` is re-parented to
   Steam's `reaper` (a bare child subreaper), so the container's Android processes are in that tree although their
   cgroup is podman's `libpod-<id>.scope`; moving processes out of Steam's `app-steam-app<appid>-<pid>.scope` doesn't
-  shield them. The container is gone ~0.7 s after the call; nothing in launch.sh can run before that.
+  shield them. The container is gone ~0.7 s after the call; nothing in launch.sh can run before that. Every Exit
+  game path in Steam's UI (the in-headset frame menu, Quick Access, "exit the running game?" dialogs) is
+  `SteamClient.Apps.TerminateApp(gameid, false)` in SharedJSContext's code (the menus are popups without scripts of
+  their own; each popup window has its own `SteamClient` object, unused), and `SteamClient.Apps.TerminateApp` is a
+  writable property there. FramePort hooks it while a game runs (agent v121 `_exit_hook`, DEVICE_NOTES "Graceful
+  stop"). CDP `Runtime.addBinding` works on Steam's CEF (calls arrive as `Runtime.bindingCalled` on the connection
+  that added it; the function stays on the page after that connection closes, calls then go nowhere).
 - 64-bit only (no AArch32): 32-bit-only APKs run through FramePort's a32 bridge (`frame.a32_bridge`).
 - `<install>/lepton-shaders/` holds Mesa's shader cache (Lepton sets `mesa.shader.cache.dir=/data/shaders`):
   `foz_cache.foz` + `foz_cache_idx.foz` per graphics driver (Turnip Vulkan, zink GL), typically 4–6 files and 7–19 MB

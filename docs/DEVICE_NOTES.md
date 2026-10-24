@@ -1252,7 +1252,8 @@ state=STOPPING`). A game that isn't in front (it ended itself, or was already se
 - Not covered: stopping Steam / restarting the Frame (systemd ends launch.sh and Lepton together and Lepton's
   teardown races the pause) and launch tests (their own `systemctl stop` also ends the pause's processes).
 
-**Steam's own Exit game is not covered** (the Steam menu's Exit game = `SteamClient.Apps.TerminateApp`). Steam's
+**Steam's own Exit game** (the Steam menu's Exit game = `SteamClient.Apps.TerminateApp`; covered since agent v121, see
+"Steam's Exit game hook" below). Steam's
 `reaper` is only `prctl(PR_SET_CHILD_SUBREAPER)` + fork/exec + wait (no kill logic); Steam itself signals every
 process in the game's process tree at once. podman's `conmon` double-forks and is re-parented to the reaper, so the
 container's processes (Android init, system_server, the game: `game ← main(zygote) ← init ← conmon ← reaper ←
@@ -1261,11 +1262,9 @@ steam`) are part of that tree, although their cgroup is podman's `libpod-<id>.sc
 later and finds `Can't find service: activity` (system_server already gone), container gone after 0.65-0.8 s; the same
 after moving Lepton, `podman run` and conmon out of Steam's scope into another scope (so Steam kills by process tree,
 not by cgroup). Lepton itself never logged a TERM (`Exited!` only): `podman run`'s signal proxy killed the container
-(journal: `container kill` from Lepton's `podman run`). Ideas, not done: start Lepton outside Steam's process tree
-(a `systemd-run --user` service; launch.sh then only waits, Steam would TERM just launch.sh and its helpers; needs a
-headset check that SteamVR still attributes the game to its shortcut: bindings, refresh rate, overlay), or hook
-Steam's TerminateApp through the CEF devtools connection the agent already uses (log a marker, delay the real call
-~1.5 s while an agent worker pauses the game). FrameBridge can't help: Steam's TERM reaches system_server too.
+(journal: `container kill` from Lepton's `podman run`). The other idea, starting Lepton outside Steam's process tree (a `systemd-run --user` service), wasn't taken: it
+needs a headset check that SteamVR still attributes the game to its shortcut (bindings, refresh rate, overlay).
+FrameBridge can't help: Steam's TERM reaches system_server too.
 
 Timings on the dev Frame (AC Nexus, Unity, headless, 2026-10-24):
 
@@ -1275,7 +1274,43 @@ Timings on the dev Frame (AC Nexus, Unity, headless, 2026-10-24):
 | agent `stop` | 0.31 s (agent start + `podman ps` + exec) | 1.59 s (`stop` returns after 1.47 s) |
 | Monitor End game (`monitor_end_game`: pause, then Steam's Exit game) | 0.23 s | 2.06 s |
 | a game that doesn't answer (4 of 9 runs: once during its shader warm-up, three times with Unity's main thread already silent before the stop; one Steam run of the same setup had a render-thread crash in Valve's FDM layer with Eye-tracked foveation) | none | capped: pause gives up after 3 s (`still state=STOPPING`), agent `stop` 4.2-4.3 s |
-| Steam's own Exit game | none (see above) | 0.65-0.8 s, unchanged |
+| Steam's own Exit game, before agent v121 | none (see above) | 0.65-0.8 s |
+| Steam's own Exit game with the hook (agent v121, Steam launch, `TerminateApp` called in SharedJSContext) | 0.18 s / 0.29 s | 1.50 s / 1.72 s (worker's pause 0.86-0.89 s, `state=STOPPED after 2 polls`) |
+| ... a game that doesn't answer (1 of 3 runs, Unity silent before the stop) | none | 3.24 s (pause gave up after 2.56 s, `still state=STOPPING`) |
+
+### Steam's Exit game hook (agent v121)
+
+Every Exit game path in Steam's UI is `SteamClient.Apps.TerminateApp(gameid, false)` in `sp.js`, run in
+SharedJSContext: the in-headset frame menu (`valve.steam.gamepadui.frame.menu`, a popup without scripts of its own; it
+has its own `SteamClient` object, which Steam's code doesn't use), the exit dialog (`#GameAction_ConfirmExitGameTitle`;
+SteamVR itself → `OpenVR.QuitAllVR`), "exit the running game and start this one", CANCEL while waiting for a VR game
+window, `ExitRunningGames`. `SteamClient.Apps.TerminateApp` is a writable, configurable property there. SteamVR's own
+dashboard (vrwebhelper, `/opt/steamvr/resources/webinterface/dashboard`) has `VRHTML.QuitSceneApp()` ("Exit %1$s")
+and a `RequestAppQuit` that goes to Steam's quit dialog; on the Frame the menus are Steam's gamepadui overlays.
+
+Design: launch.sh (Lepton launchers; `upgrade_launchers` adds the line, foveation exports and other lines untouched)
+starts `_exit_hook <pkg> "$SteamAppId" $$` (log `<base>/exit-hook.log`, opt out `FRAMEPORT_NO_EXIT_HOOK=1`). The
+worker holds one CEF devtools connection (`SteamDevtools`, stdlib websocket), adds a CDP binding of its own
+(`Runtime.addBinding fpExitPause<pid>`) and evaluates `EXIT_HOOK_JS` every 2 s: the first run wraps TerminateApp
+(`window.__fpExit` = {orig, hook, games, pending, log}), later runs only renew the game's registration (its ids:
+`steam_gameid` of the shortcut appid, the devkit entry's, `SteamGameId`; lease 10 s). A reloaded UI or restarted
+Steam lost the hook: the next refresh (or reconnect, every 3 s) puts it back. The hook, for a registered id whose
+binding exists and whose lease is fresh, calls the binding and holds Steam's call; the worker answers at once (ack),
+runs `pause_app` (≤2.7 s) and then lets the hook call Steam's TerminateApp with the original arguments. Never longer
+than 3 s (cap), 0.8 s without an ack (worker gone or hung: the binding function outlives its connection, calls then go
+nowhere), not at all for other ids (Steam games, other shortcuts: straight through, `__fpExit.log` notes `passed`),
+a second press while pending is dropped (one exit follows). If another script wrapped TerminateApp after the hook, the
+hook isn't applied again (no loop). The worker removes its registration when its launcher ends. FramePort's own End
+game (Monitor) pauses first and then calls `__fpExit.unhooked` (past the hook: no second pause). launch.sh's own
+`pause_game` still runs when Steam's TERM arrives; the game is in the background by then (`not in front`).
+
+Checked on the dev Frame (2026-10-24, AC Nexus launched through Steam, headless): `TerminateApp` for the game's id from
+SharedJSContext → `exit-hook.log` "Exit game 11660673876089634816: pausing the game first" → logcat `[OVRManager]
+OnApplicationPause(true)` 0.18-0.29 s after the call → "paused (state=STOPPED after 2 polls) in 0.86 s; Steam ends it
+now" → container gone 1.5-1.7 s after the call (0.65-0.8 s before: ~0.9 s added). Ids of other games (`730`-style,
+a made-up one) passed straight through. The End game path went past the hook (no hook entry). Not checked in the
+headset: pressing Exit game there (same JS call per Steam's code). Not covered: SteamVR's `QuitSceneApp`, Steam
+restarts / power-off.
 
 
 ## Expansion file names (#450, #481)

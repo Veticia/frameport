@@ -48,7 +48,7 @@ try:
 except ImportError:  # Windows: pc_revive loads this file for its VDF code only (GitHub #131)
     fcntl = None
 
-AGENT_VERSION = 120
+AGENT_VERSION = 121
 HOME = os.path.expanduser("~")
 STEAM = os.path.join(HOME, ".local/share/Steam")
 ANCHORS = os.path.join(HOME, "Applications/quest-frame")
@@ -3423,6 +3423,26 @@ def dashboard_line():
     return DASHBOARD_LINE.format(agent_q=shlex.quote(os.path.abspath(__file__)))
 
 
+# Steam's own Exit game pauses the game first (exit_hook_worker, GitHub #480); off with FRAMEPORT_NO_EXIT_HOOK=1.
+# (the whole list redirected: its subshell must not hold the launcher's stdout open)
+EXIT_HOOK_LINE = ('{{ [[ -n "${{FRAMEPORT_NO_EXIT_HOOK:-}}" ]] || '
+                  'python3 {agent_q} _exit_hook {pkg_q} "$SteamAppId" $$; }} >"$app_dir/exit-hook.log" 2>&1 9>&- &')
+
+
+def set_exit_hook_line(text, pkg):
+    """A Lepton launcher starts the Exit game hook's worker once Lepton and its helpers are started, right before it
+    waits for Lepton (once; the line follows the template). It outlives a restart (RESTART_BLOCK): it ends with the
+    launcher."""
+    text = "".join(line for line in text.splitlines(True) if " _exit_hook " not in line)
+    if "export LEPTON_ENV_FRAMEBRIDGE_CONFIG=" not in text:
+        return text
+    line = EXIT_HOOK_LINE.format(agent_q=shlex.quote(os.path.abspath(__file__)), pkg_q=shlex.quote(pkg))
+    for wait in ('\nrc=0; wait "$child"', '\nwait "$child"'):
+        if wait in text:
+            return text.replace(wait, f"\n{line}{wait}", 1)
+    return text
+
+
 # Unreal (4.21+, r.ProgramBinaryCache.RestartAndroidAfterPrecompile) restarts the app once after its first-run shader
 # precompile (the "optimizing" screen): it starts its own launcher activity and exits. Lepton ends the container when
 # the first process exits, the restarted game with it (Sports Scramble stopped after its first start; skipping the
@@ -3708,6 +3728,8 @@ def upgrade_launchers():
                 new = set_pause_lines(new, os.path.basename(os.path.dirname(path)))
             except AgentError:
                 pass
+            # ... also when Steam's own Exit game ends it (agent v121)
+            new = set_exit_hook_line(new, os.path.basename(os.path.dirname(path)))
         if new == text:
             continue
         tmp = path + ".tmp"
@@ -4162,6 +4184,7 @@ def write_launcher(anchor, base, pkg, title, appid, lepton, env, hw_video=False,
     text = set_refresh_rate_line(text, pkg)
     text = set_theater_line(text, pkg)
     text = set_pause_lines(text, pkg)
+    text = set_exit_hook_line(text, pkg)
     path = os.path.join(anchor, "launch.sh")
     with open(path + ".tmp", "w") as f:
         f.write(text)
@@ -9120,6 +9143,290 @@ def steam_js(expression, timeout=5):
                 return res.get("value")
 
 
+class SteamDevtools:
+    """A held connection to Steam's UI (SharedJSContext) through its CEF devtools port, like steam_js: calls with
+    their replies, and the events that come in between (Runtime.bindingCalled) kept until asked for."""
+
+    def __init__(self, title="SharedJSContext", timeout=5, port=8080):
+        import socket
+        import urllib.request
+
+        targets = json.load(urllib.request.urlopen(f"http://127.0.0.1:{port}/json", timeout=timeout))
+        try:
+            url = next(t["webSocketDebuggerUrl"] for t in targets if t.get("title") == title)
+        except StopIteration:
+            raise AgentError(f"Steam's UI has no {title}") from None
+        path = url.split(f"127.0.0.1:{port}", 1)[1]
+        self.sock = socket.create_connection(("127.0.0.1", port), timeout=timeout)
+        self.timeout, self.next_id, self.events = timeout, 0, []
+        key = base64.b64encode(os.urandom(16)).decode()
+        self.sock.sendall((f"GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nUpgrade: websocket\r\n"
+                           f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n")
+                          .encode())
+        head = b""
+        while b"\r\n\r\n" not in head:
+            head += self._exact(1)
+        if b" 101 " not in head.split(b"\r\n", 1)[0]:
+            self.close()
+            raise AgentError("Steam's devtools refused the connection")
+
+    def close(self):
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    def _exact(self, k):
+        buf = b""
+        while len(buf) < k:
+            chunk = self.sock.recv(k - len(buf))
+            if not chunk:
+                raise AgentError("Steam's devtools closed the connection")
+            buf += chunk
+        return buf
+
+    def _frame(self, opcode, data):
+        mask, n = os.urandom(4), len(data)
+        size = (bytes([0x80 | n]) if n < 126 else bytes([0x80 | 126]) + struct.pack(">H", n) if n < 65536
+                else bytes([0x80 | 127]) + struct.pack(">Q", n))
+        self.sock.sendall(bytes([0x80 | opcode]) + size + mask + bytes(b ^ mask[i % 4] for i, b in enumerate(data)))
+
+    def _recv(self, timeout):
+        """The next message, or None when nothing came within `timeout` s (a frame is only read once it has begun to
+        arrive, so a timeout never leaves half a frame behind)."""
+        while True:
+            if not select.select([self.sock], [], [], max(0.0, timeout))[0]:
+                return None
+            b1, b2 = self._exact(2)
+            k = b2 & 0x7F
+            k = struct.unpack(">H", self._exact(2))[0] if k == 126 else \
+                struct.unpack(">Q", self._exact(8))[0] if k == 127 else k
+            data = self._exact(k)
+            op = b1 & 0x0F
+            if op == 8:
+                raise AgentError("Steam's devtools closed the connection")
+            if op == 9:
+                self._frame(10, data)
+                continue
+            if op in (1, 2, 0):
+                return json.loads(data.decode("utf-8", "replace") or "{}")
+
+    def call(self, method, params=None, timeout=None):
+        self.next_id += 1
+        mid = self.next_id
+        self._frame(1, json.dumps({"id": mid, "method": method, "params": params or {}}).encode())
+        end = time.monotonic() + (timeout or self.timeout)
+        while True:
+            left = end - time.monotonic()
+            msg = self._recv(left) if left > 0 else None
+            if msg is None:
+                raise AgentError(f"Steam's devtools didn't answer {method}")
+            if msg.get("id") == mid:
+                if msg.get("error"):
+                    raise AgentError(f"{method}: {msg['error'].get('message')}")
+                return msg.get("result") or {}
+            if "method" in msg:
+                self.events.append(msg)
+
+    def evaluate(self, expression, timeout=None):
+        res = self.call("Runtime.evaluate", {"expression": expression, "returnByValue": True}, timeout)
+        if res.get("exceptionDetails"):
+            raise AgentError("Steam's UI: " + str((res["exceptionDetails"].get("exception") or {})
+                                                  .get("description") or res["exceptionDetails"].get("text")))
+        return (res.get("result") or {}).get("value")
+
+    def event(self, method, timeout):
+        """The next event `method` (its params), or None after `timeout` s. Other events are dropped."""
+        end = time.monotonic() + timeout
+        while True:
+            while self.events:
+                msg = self.events.pop(0)
+                if msg.get("method") == method:
+                    return msg.get("params") or {}
+            left = end - time.monotonic()
+            if left <= 0:
+                return None
+            msg = self._recv(left)
+            if msg is None:
+                return None
+            if "method" in msg:
+                self.events.append(msg)
+
+
+# GitHub #480: Steam's own Exit game (the in-headset menu, the Quick Access menu, "exit the running game?" dialogs:
+# all `SteamClient.Apps.TerminateApp(gameid, false)` in Steam's UI, SharedJSContext; the menus are popups whose code
+# runs there) signals the game's whole process tree at once, Android's system_server included, so the launcher's
+# pause_game comes too late. While a FramePort game runs, its launcher's _exit_hook worker keeps a hook on
+# TerminateApp in Steam's UI (EXIT_HOOK_JS, re-applied every EXIT_HOOK_REFRESH s: Steam's UI reloads and restarts
+# lose it) and a devtools binding of its own: Exit game for that game's id calls the binding, the worker pauses the
+# game (pause_app) and answers, and only then does the hook call Steam's TerminateApp. Every other id (Steam games,
+# other shortcuts) goes straight through. Exit game is never held longer than EXIT_HOOK_CAP_MS, nor longer than
+# EXIT_HOOK_ACK_MS when the worker doesn't answer at once (gone, hung), and not at all when the worker's
+# registration is older than its lease (it renews it at every refresh).
+EXIT_HOOK_CAP_MS = 3000
+EXIT_HOOK_ACK_MS = 800
+EXIT_HOOK_REFRESH = 2.0
+EXIT_HOOK_LEASE_MS = 10000
+EXIT_HOOK_PAUSE_LIMIT = 2.7  # the worker's pause_app, inside the hook's cap
+EXIT_HOOK_JS = r"""(function (games, binding, cap, ack, lease) {
+  if (typeof SteamClient === 'undefined' || !SteamClient.Apps || typeof SteamClient.Apps.TerminateApp !== 'function')
+    return 'no SteamClient';
+  var A = SteamClient.Apps, H = window.__fpExit, out = 'ok';
+  if (H && A.TerminateApp !== H.hook) return 'TerminateApp was replaced by another script';
+  if (!H) {
+    H = window.__fpExit = {v: 1, orig: A.TerminateApp, games: {}, pending: {}, log: []};
+    H.unhooked = function () { return H.orig.apply(A, arguments); };
+    H.hook = function (gameid) {
+      var args = arguments, gid = String(gameid), g = H.games[gid], t0 = Date.now();
+      var fn = g && window[g.binding];
+      if (!g || t0 - g.seen > g.lease || typeof fn !== 'function') {
+        H.log.push([gid, 'passed', 0]); if (H.log.length > 20) H.log.shift();
+        return H.orig.apply(A, args);
+      }
+      if (H.pending[gid]) return;
+      var finished = false, p = {}, waitAck, waitCap;
+      p.finish = function (why) {
+        if (finished) return false;
+        finished = true; clearTimeout(waitAck); clearTimeout(waitCap); delete H.pending[gid];
+        H.log.push([gid, why, Date.now() - t0]); if (H.log.length > 20) H.log.shift();
+        try { H.orig.apply(A, args); } catch (e) {}
+        return true;
+      };
+      p.ack = function () { clearTimeout(waitAck); return !finished; };
+      H.pending[gid] = p;
+      waitAck = setTimeout(function () { p.finish('no answer'); }, g.ack);
+      waitCap = setTimeout(function () { p.finish('cap'); }, g.cap);
+      try { fn(JSON.stringify({gameid: gid})); } catch (e) { p.finish('binding failed'); }
+    };
+    A.TerminateApp = H.hook;
+    out = 'installed';
+  }
+  games.forEach(function (gid) {
+    var g = H.games[gid];
+    if (out === 'ok' && (!g || g.binding !== binding)) out = 'registered';
+    H.games[gid] = {binding: binding, cap: cap, ack: ack, lease: lease, seen: Date.now()};
+  });
+  return out;
+})(%s)"""
+EXIT_HOOK_UNREGISTER_JS = r"""(function (games, binding) {
+  var H = window.__fpExit;
+  if (!H) return 0;
+  var n = 0;
+  games.forEach(function (gid) { if (H.games[gid] && H.games[gid].binding === binding) { delete H.games[gid]; n++; } });
+  return n;
+})(%s)"""
+EXIT_HOOK_ACK_JS = "(function (g) { var p = window.__fpExit && __fpExit.pending[g]; return p ? p.ack() : false; })(%s)"
+EXIT_HOOK_DONE_JS = ("(function (g, why) { var p = window.__fpExit && __fpExit.pending[g]; "
+                     "return p ? p.finish(why) : false; })(%s)")
+
+
+def exit_hook_js(template, *args):
+    return template % ", ".join(json.dumps(a) for a in args)
+
+
+def terminate_app_js(gameid):
+    """Steam's Exit game for `gameid`, past FramePort's hook (the caller has paused the game already)."""
+    gid = json.dumps(str(gameid))
+    return (f"(window.__fpExit ? __fpExit.unhooked : SteamClient.Apps.TerminateApp.bind(SteamClient.Apps))"
+            f"({gid}, false)")
+
+
+def exit_gameids(pkg, appid, env=None):
+    """The Steam game ids Exit game uses for this FramePort game: its shortcut, its devkit entry (if any), and the
+    id Steam started this launcher with (SteamGameId)."""
+    ids = []
+    for a in (appid, (devkit_appid(devkit_gameid(pkg)) if devkit_gameid(pkg) else None)):
+        try:
+            if a and int(a) > 0:
+                ids.append(str(steam_gameid(int(a))))
+        except (TypeError, ValueError):
+            pass
+    sgid = (env if env is not None else os.environ).get("SteamGameId", "")
+    if sgid.isdigit() and int(sgid) > 0xFFFFFFFF:
+        ids.append(sgid)
+    return sorted(set(ids))
+
+
+def exit_hook_worker(pkg, appid, parent, devtools=None, pause=None, sleep=time.sleep, refresh=EXIT_HOOK_REFRESH,
+                     clock=time.monotonic, max_rounds=None):
+    """Keep Steam's Exit game for this game pausing it first (EXIT_HOOK_JS) while the launcher `parent` runs. Every
+    step is printed (the launcher sends it to exit-hook.log). Steam's UI unreachable: tried again every few s."""
+    pkg = check_pkg(pkg)
+    os.environ.pop("LD_PRELOAD", None)  # Steam's overlay libraries only add ld.so errors to podman's output
+    devtools = devtools or SteamDevtools
+    pause = pause or (lambda: pause_app(appid, pkg, limit=EXIT_HOOK_PAUSE_LIMIT))
+    binding = f"fpExitPause{os.getpid()}"
+    games = exit_gameids(pkg, appid)
+
+    def say(text):
+        print(f"{time.strftime('%H:%M:%S')} {text}", flush=True)
+
+    def alive():
+        try:
+            os.kill(int(parent), 0)
+        except (OSError, ValueError):
+            return False
+        try:  # an ended launcher its parent hasn't reaped yet
+            return _rd(f"{PROC}/{int(parent)}/stat").rsplit(")", 1)[-1].split()[:1] != ["Z"]
+        except (OSError, ValueError):
+            return True
+    say(f"exit hook for {pkg}: game ids {', '.join(games)}")
+    rounds, last, dt = 0, None, None
+    try:
+        while alive() and (max_rounds is None or rounds < max_rounds):
+            rounds += 1
+            try:
+                if dt is None:
+                    dt = devtools()
+                    dt.call("Runtime.addBinding", {"name": binding})
+                    last = None
+                state = dt.evaluate(exit_hook_js(EXIT_HOOK_JS, games, binding, EXIT_HOOK_CAP_MS, EXIT_HOOK_ACK_MS,
+                                                 EXIT_HOOK_LEASE_MS))
+                if state != "ok" or last is None:
+                    say(f"Steam's UI: {state}")
+                last = state
+                until = clock() + refresh
+                while alive() and clock() < until:
+                    ev = dt.event("Runtime.bindingCalled", max(0.05, until - clock()))
+                    if not ev or ev.get("name") != binding:
+                        continue
+                    try:
+                        gid = str(json.loads(ev.get("payload") or "{}").get("gameid"))
+                    except ValueError:
+                        continue
+                    t0 = clock()
+                    if not dt.evaluate(exit_hook_js(EXIT_HOOK_ACK_JS, gid)):
+                        say(f"Exit game {gid}: already ended by the hook's own deadline")
+                        continue
+                    say(f"Exit game {gid}: pausing the game first")
+                    result = pause()
+                    done = dt.evaluate(exit_hook_js(EXIT_HOOK_DONE_JS, gid, "paused"))
+                    say(f"paused ({result or 'no answer from the container'}) in {clock() - t0:.2f} s; "
+                        f"{'Steam ends it now' if done else 'Steam had ended it already (deadline)'}")
+            except Exception as exc:  # noqa: BLE001  (Steam restarting, UI reloading: try again)
+                if dt is not None:
+                    dt.close()
+                    dt = None
+                if last != "error":
+                    say(f"Steam's UI unreachable: {exc}")
+                last = "error"
+                sleep(3)
+    finally:
+        if dt is not None:
+            try:
+                dt.evaluate(exit_hook_js(EXIT_HOOK_UNREGISTER_JS, games, binding), timeout=2)
+            except Exception:  # noqa: BLE001
+                pass
+            dt.close()
+    return rounds
+
+
 FIRST_FRAME_MARKERS = (b"FrameBridge: new layer:", b"FrameBridge: pacing:")
 # SteamVR's dashboard UI logs a dashboard opened with the controller's button as "[ToggleDashboard]
 # toggle_dashboard_action" (SteamOS 0.4) or "[ShowDashboardOverlay] {"sReason":"open_dashboard_action"" (0.5.6: the
@@ -10251,8 +10558,8 @@ def monitor_end_game(pkg, wait=6.0):
         pause_app(dep["appid"], pkg)  # Android pauses the game first, whatever Steam ends next (GitHub #480)
     devkit = devkit_gameid(pkg)
     appid = (devkit_appid(devkit) if devkit else None) or dep.get("appid")
-    try:
-        steam_js(f"SteamClient.Apps.TerminateApp('{steam_gameid(appid)}', false)")
+    try:  # past FramePort's Exit game hook: the game is paused already
+        steam_js(terminate_app_js(steam_gameid(appid)))
         via = "steam"
         end = time.monotonic() + wait
         while time.monotonic() < end and running():
@@ -11109,6 +11416,9 @@ def main():
         return 0
     if len(sys.argv) >= 5 and sys.argv[1] == "_restart_requested":
         return 0 if restart_requested(sys.argv[2], sys.argv[3], sys.argv[4]) else 1
+    if len(sys.argv) >= 5 and sys.argv[1] == "_exit_hook":
+        exit_hook_worker(sys.argv[2], sys.argv[3], sys.argv[4])
+        return 0
     if len(sys.argv) >= 4 and sys.argv[1] == "_dashboard_worker":
         dashboard_worker(sys.argv[2], sys.argv[3])
         return 0
