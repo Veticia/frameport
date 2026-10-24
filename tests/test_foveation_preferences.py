@@ -217,7 +217,9 @@ def test_dormant_diagnostic_stays_out_of_cryengine_renderers(monkeypatch):
         def put(self, *a):
             self.written.append(a)
 
-    monkeypatch.setattr(foveation, "engine_lib", lambda ws: "libCryRenderVulkan.so")
-    ws = Ws()
-    assert foveation.diagnostic_support(ws) is False and not ws.written
+    for lib in ("libCryRenderVulkan.so", "libAndroidLauncher.so"):  # The Climb 2 / The Climb 1 (monolithic)
+        monkeypatch.setattr(foveation, "engine_lib", lambda ws, lib=lib: lib)
+        ws = Ws()
+        assert foveation.diagnostic_support(ws) is False and not ws.written
+    assert adapter.FrameBridgeAdapter().revision_for("com.crytek.climb") == 4
     assert adapter.FrameBridgeAdapter().revision_for("com.crytek.climb2") > adapter.FrameBridgeAdapter.revision

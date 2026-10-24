@@ -20,7 +20,8 @@ LAYER = "libVkLayer_fdm_darken.so"
 BATMAN_ORIGINAL = "76cafa25c2243c2bc065e30d83d7083b8546153dc6a3c39227235fbabe13c969"
 CLIMB_RENDERER = "31a121dbfae692fdc0e54853e0640eed820f07826893fa0d905767c9620023a0"
 CLIMB_BRIDGE = "libvrapi_foveation.so"
-CRYENGINE_RENDERER = "libCryRender"
+# CryEngine: the modular renderer (Climb 2) and the monolithic launcher that contains it (The Climb 1)
+CRYENGINE_RENDERER = ("libCryRender", "libAndroidLauncher")
 STORAGE_WORDS = ((0x21c778, 0x5298000b, 0x5290000b),
                  (0x21c77c, 0x5288000c, 0x5280000c),
                  (0x21df50, 0x52980009, 0x52900009))
@@ -145,7 +146,8 @@ def diagnostic_support(ws):
     lib = engine_lib(ws) or "libopenxr_loader_generic.so"
     if lib.startswith(CRYENGINE_RENDERER):
         # Linked into CryEngine's renderer, The Climb 1/2 fail CrySystem initialization at start (GitHub #432/#449,
-        # headless on the dev Frame). Climb 2's private VrApi bridge loads the layer itself.
+        # headless on the dev Frame). Climb 2's private VrApi bridge loads the layer itself. The Climb 1 has no
+        # separate renderer: its whole engine is libAndroidLauncher.so, which engine_lib() picks.
         return False
     data = ws.read_lib(lib)
     changed = False

@@ -26,7 +26,7 @@ class FrameBridgeAdapter(Patch):
     id = "frame.adapter"
     # above revision 2: Batman builds before #389 are outdated; The Climb 1/2 builds with the diagnostic layer linked
     # into CryEngine's renderer don't start (#432/#449); AC Nexus builds before the Vulkan panel pool (#424)
-    package_revisions = {"com.camouflaj.manta": 3, "com.crytek.climb": 3, "com.crytek.climb2": 3,
+    package_revisions = {"com.camouflaj.manta": 3, "com.crytek.climb": 4, "com.crytek.climb2": 3,
                          "com.Ubisoft.ACNexusVR": 3}
     a32 = True  # also for 32-bit games on the bridge
     title = "FrameBridge OpenXR adapter"
