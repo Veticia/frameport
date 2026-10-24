@@ -67,9 +67,8 @@ def menu_sections(g: dict, st: MenuState, act: Callable[[str], Callable]) -> lis
         top.append((tr("Update app only…"), ft.Icons.SYSTEM_UPDATE_ALT_ROUNDED, act("update_app")))
 
     saves: list = []  # GitHub discussion #352: Steam doesn't sync Quest games' saves
-    if st.saves and not job:
-        saves += [(tr("Back up saves"), ft.Icons.BACKUP_ROUNDED, act("backup_saves")),
-                  (tr("Restore saves…"), ft.Icons.RESTORE_ROUNDED, act("restore_saves"))]
+    if st.saves and not job:  # "Back up saves" is a button next to Play (same condition)
+        saves.append((tr("Restore saves…"), ft.Icons.RESTORE_ROUNDED, act("restore_saves")))
     if st.android:
         saves.append((tr("Open backups folder"), ft.Icons.FOLDER_OPEN_ROUNDED, act("saves_folder")))
 
@@ -79,10 +78,8 @@ def menu_sections(g: dict, st: MenuState, act: Callable[[str], Callable]) -> lis
     if not job and st.on_frame:
         artwork.append((tr("Update art on Frame"), ft.Icons.WALLPAPER_ROUNDED, act("steam_art")))
 
-    recipe = [] if linux else [
-        (tr("Reset to suggested recipe…"), ft.Icons.SETTINGS_BACKUP_RESTORE_ROUNDED, act("reset_recipe")),
-        (tr("Save as known-good recipe"), G.RECIPE, act("save_recipe")),
-        (tr("Share working recipe…"), ft.Icons.SHARE_ROUNDED, act("share"))]
+    # the recipe's own actions (reset, save as known-good, share) are buttons on the page's recipe card:
+    # recipe_actions()
 
     trouble: list = []  # launch tests and uninstalls are on the page's "Where it's installed" cards
     if not job and not rift and not linux:
@@ -98,37 +95,52 @@ def menu_sections(g: dict, st: MenuState, act: Callable[[str], Callable]) -> lis
     danger = [(tr("Remove from library…"), ft.Icons.REMOVE_CIRCLE_OUTLINE_ROUNDED, act("remove"))]
 
     out: list = list(top)
-    for head, items in ((tr("Saves"), saves), (tr("Name and artwork"), artwork), (tr("Recipe"), recipe),
-                        (tr("Troubleshoot"), trouble)):
+    for head, items in ((tr("Saves"), saves), (tr("Name and artwork"), artwork), (tr("Troubleshoot"), trouble)):
         if items:
             out += [None, Header(head), *items]
     return out + [None, *danger]
 
 
 def quick_menu(st: MenuState, act: Callable[[str], Callable]) -> list:
-    """The Library's right-click menu: only the key actions, no section headers. "More actions…" opens the game
-    page's full "…" menu (menu_sections with quick=False)."""
+    """The Library's right-click menu: only what's used all the time (play, install/update, settings, the page,
+    select), no section headers. Flet's menus can't nest, so everything else is behind "More actions…" = the game
+    page's full "…" menu (menu_sections with quick=False); uninstalls are also on the page's "Where it's installed"
+    cards and the Frame page."""
     opened = (tr("Open game page"), ft.Icons.OPEN_IN_NEW_ROUNDED, act("open"))
     if st.job:
         return [(tr("Show progress"), ft.Icons.SYNC_ROUNDED, act("progress")),
                 (tr("Cancel"), ft.Icons.CLOSE_ROUNDED, act("cancel")), opened]
-    out: list = [*st.plays[:1], opened]
-    if st.selectable:
-        out.append((tr("Select"), ft.Icons.CHECKLIST_ROUNDED, act("select")))
-    out += st.installs[:1]
-    if st.android:
-        out.append((tr("Update with a newer APK…"), ft.Icons.UPGRADE_ROUNDED, act("new_apk")))
-    if st.new_version:
-        out.append((tr("Update with a newer version…"), ft.Icons.UPGRADE_ROUNDED, act("new_version")))
+    out: list = [*st.plays[:1], *st.installs[:1]]
     if st.settings:
         out.append((tr("Game settings…"), ft.Icons.TUNE_ROUNDED, act("settings")))
-    out.append((tr("Rename…"), ft.Icons.DRIVE_FILE_RENAME_OUTLINE_OUTLINED, act("rename")))
-    out += [None, (tr("More actions…"), ft.Icons.MORE_HORIZ_ROUNDED, act("more")), None]
-    if st.on_frame:
-        out.append((tr("Uninstall from Frame…"), ft.Icons.DELETE_OUTLINE_ROUNDED, act("uninstall_frame")))
-    if st.on_pc:
-        out.append((tr("Uninstall from this PC…"), ft.Icons.DELETE_OUTLINE_ROUNDED, act("uninstall_pc")))
-    return out + [(tr("Remove from library…"), ft.Icons.REMOVE_CIRCLE_OUTLINE_ROUNDED, act("remove"))]
+    out += [None, opened]
+    if st.selectable:
+        out.append((tr("Select"), ft.Icons.CHECKLIST_ROUNDED, act("select")))
+    return out + [(tr("More actions…"), ft.Icons.MORE_HORIZ_ROUNDED, act("more"))]
+
+
+RECIPE_HELP = ("reset_recipe", "save_recipe", "share_config")  # ui/help.py keys of recipe_actions, in order
+
+
+def recipe_actions(g: dict, act: Callable[[str], Callable]) -> list:
+    """The recipe's own actions: buttons on the game page's recipe card ("What FramePort will do"). Linux apps are
+    installed as they are and have no recipe."""
+    if g.get("kind") == "linux":
+        return []
+    return [(tr("Reset to suggested recipe…"), ft.Icons.SETTINGS_BACKUP_RESTORE_ROUNDED, act("reset_recipe")),
+            (tr("Save as known-good recipe"), G.RECIPE, act("save_recipe")),
+            (tr("Share working recipe…"), ft.Icons.SHARE_ROUNDED, act("share"))]
+
+
+def selection_menu(n: int, pc: int, connected: bool, pc_available: bool, act: Callable[[str], Callable]) -> list:
+    """The Library's right-click menu on one of several selected games: what the selection bar does, for all of them
+    (C.menu_targets). `pc` = how many of them are PC VR games (installable on this PC). Install on Frame is shown
+    disabled (handler None) while no Frame is connected."""
+    out: list = [(tr("Install {n} on Frame").format(n=n), G.FRAME, act("install_frame") if connected else None)]
+    if pc:
+        out.append((tr("Install {len} on this PC").format(len=pc), G.PC, act("install_pc") if pc_available else None))
+    return out + [None, (tr("Select all shown"), ft.Icons.CHECKLIST_ROUNDED, act("select_all")),
+                  (tr("Clear selection"), ft.Icons.CLOSE_ROUNDED, act("clear"))]
 
 
 def process_menu(p: dict, act: Callable[[str], Callable]) -> list:

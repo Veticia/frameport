@@ -1246,10 +1246,26 @@ def menu_entries(actions: list) -> list:
     return out
 
 
+# Flutter's popup menus are as wide as their widest row, but at most MENU_MAX_W logical px. A right-click ContextMenu
+# can't change that limit (and it doesn't grow with the UI scale); a PopupMenuButton can (menu_button).
+MENU_MAX_W = 280
+
+
+def menu_label(label: str, icon, color: str, icon_color: str) -> ft.Control:
+    """A menu row's icon + label. Flet's own icon row (PopupMenuItem icon=) gives the label no width limit, so a label
+    wider than the menu ran past its right edge (GitHub #414); here the label takes the rest of the row and wraps."""
+    text = ft.Text(label, size=T.T_BODY, color=color, expand=True)
+    if not icon:
+        return ft.Row([text])
+    return ft.Row([as_icon(icon, T.ICON_S, icon_color), text], spacing=T.px(8),
+                  vertical_alignment=ft.CrossAxisAlignment.CENTER)
+
+
 def menu_items(actions: list) -> list[ft.PopupMenuItem]:
-    """[(label, icon, handler) | menus.Header | None] → compact popup menu items (32 px rows). None becomes a divider
-    (never first, last or doubled), a Header a small caps group heading (dropped when its group is empty); an item
-    without a handler is shown disabled (e.g. "Protected by SteamOS")."""
+    """[(label, icon, handler) | menus.Header | None] → compact popup menu items (32 px rows; a label longer than the
+    menu's width limit wraps onto a second line). None becomes a divider (never first, last or doubled), a Header a
+    small caps group heading (dropped when its group is empty); an item without a handler is shown disabled (e.g.
+    "Protected by SteamOS")."""
     out: list[ft.PopupMenuItem] = []
     for a in menu_entries(actions):
         if a is None:
@@ -1262,11 +1278,9 @@ def menu_items(actions: list) -> list[ft.PopupMenuItem]:
                 mouse_cursor=ft.MouseCursor.BASIC))
         else:
             label, icon, handler = a
-            color = T.TEXT if handler else T.TEXT_3
             out.append(ft.PopupMenuItem(
-                content=ft.Text(label, size=T.T_BODY, color=color),
-                icon=as_icon(icon, T.ICON_S, T.TEXT_2 if handler else T.TEXT_3) if icon else None,
-                height=T.px(32), padding=ft.Padding(T.px(14), 0, T.px(18), 0), on_click=handler,
+                content=menu_label(label, icon, T.TEXT if handler else T.TEXT_3, T.TEXT_2 if handler else T.TEXT_3),
+                height=T.px(32), padding=ft.Padding(T.px(14), T.px(4), T.px(18), T.px(4)), on_click=handler,
                 disabled=handler is None))
     return out
 
@@ -1281,6 +1295,8 @@ def menu_button(items: list[ft.PopupMenuItem], **kw) -> ft.PopupMenuButton:
     """A PopupMenuButton with the shared menu look (border, shadow, SURFACE_2, small radius; also the theme's
     popup_menu_theme, which right-click ContextMenus use)."""
     kw.setdefault("tooltip", "")
+    # Flutter's default width limit doesn't grow with the UI scale (long labels had to wrap at 150 %): scale it
+    kw.setdefault("size_constraints", ft.BoxConstraints(min_width=T.px(112), max_width=T.px(MENU_MAX_W + 40)))
     return ft.PopupMenuButton(items=items, bgcolor=T.SURFACE_2, elevation=8, shadow_color="#000000",
                               shape=menu_shape(), menu_padding=ft.Padding(0, T.px(4), 0, T.px(4)), **kw)
 

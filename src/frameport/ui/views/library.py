@@ -888,7 +888,25 @@ class LibraryView:
                                   on_secondary_tap_down=lambda e: self.open_menu(pkg, e.global_position))
 
     def open_menu(self, pkg: str, position=None) -> None:
-        """Right-click on a card: that game's quick actions (built now, so they match the game's current state)."""
-        self.menu.items = C.menu_items(self.app.game_actions(pkg))
+        """Right-click on a card: that game's quick actions (built now, so they match the game's current state); on
+        one of several selected games, the selection's actions for all of them (C.menu_targets)."""
+        self.menu.items = C.menu_items(self.menu_actions(pkg))
         C.update(self.menu)
         self.app.page.run_task(self.menu.open, global_position=position)
+
+    def menu_actions(self, pkg: str) -> list:
+        """What the right-click menu on `pkg`'s card offers (see open_menu)."""
+        app = self.app
+        targets = C.menu_targets(pkg, sorted(self.selected)) if self.select_mode else [pkg]
+        if len(targets) < 2:
+            return app.game_actions(pkg)
+        from ...core import winhost
+        from ..menus import selection_menu
+
+        pc = [p for p in targets if p.startswith("rift.")]
+        handlers = {"install_frame": lambda e: app.install_many(targets, "frame"),
+                    "install_pc": lambda e: app.install_many(pc, "pc"),
+                    "select_all": lambda e: self.select_visible(),
+                    "clear": lambda e: (self.selected.clear(), self.set_select_mode(True))}
+        return selection_menu(len(targets), len(pc), app.frame_state == "connected", winhost.available(),
+                              handlers.__getitem__)

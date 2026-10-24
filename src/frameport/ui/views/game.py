@@ -19,6 +19,7 @@ from .. import components as C
 from .. import glyphs as G
 from .. import theme as T
 from ..help import HELP
+from ..menus import RECIPE_HELP
 
 if TYPE_CHECKING:
     from ..app import FramePortApp
@@ -756,12 +757,22 @@ class GameView:
                                                                      expand=True)], spacing=T.S2),
                 ft.Row(chips, spacing=T.S2, run_spacing=T.S2, wrap=True) if chips else
                 (ft.Container() if as_is else C.meta(tr("Nothing to patch: it runs unchanged."))),
-                *([] if flat else [ft.Divider(), switch]),
+                ft.Divider(),
+                *([] if flat else [switch]),
+                self.recipe_buttons(),
             ], spacing=T.S3)),
             action=C.ghost(tr("Hide patches") if self.advanced else tr("Customize"), ft.Icons.TUNE_ROUNDED,
                            lambda e: self.app.open_game(self.package, advanced=not self.advanced),
                            tooltip=None if self.advanced else tr("See every patch and turn them on or off.")),
             help="recipe")
+
+    def recipe_buttons(self) -> ft.Control:
+        """The recipe's actions (reset, save as known-good, share) under its card: they act on what the card shows,
+        and the game's "…" menu stays shorter (GitHub #414)."""
+        actions = self.app.game_actions(self.package, recipe=True)
+        return ft.Row([C.ghost(label, icon, handler, tooltip=C.tip(HELP[key]))
+                       for (label, icon, handler), key in zip(actions, RECIPE_HELP, strict=False)],
+                      spacing=T.S1, run_spacing=T.S1, wrap=True)
 
     def advanced_panel(self) -> ft.Control:
         app, g, package = self.app, self.g, self.package

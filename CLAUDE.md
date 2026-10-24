@@ -145,9 +145,13 @@ Detailed device findings per game/issue: docs/DEVICE_NOTES.md (read before debug
     `settings-index`).
     Help hints: wording for non-obvious terms lives in `ui/help.py` (`HELP`); show it with `C.help_icon(key)` or the
     `help=` argument of `section`/`kv` (`C.Check` help key), tooltips via `C.tip()` (wraps). Game actions for the Library
-    right-click menu (one `ft.ContextMenu` around the grid, filled on right-click; short: `menus.quick_menu`, key actions
-    + "More actions…" = the game page with its full "…" menu opened from code, `app.open_game_menu`) and the game
-    page's "…" menu (`menus.menu_sections` quick=False, sectioned) come from `app.game_actions()`. Picking art (`sources.apply_choice`) downloads into a staging dir and keeps the old
+    right-click menu (one `ft.ContextMenu` around the grid, filled on right-click; short (GitHub #414): `menus.quick_menu`
+    = Play, Install/Update, Game settings | Open game page, Select, "More actions…" = the game page with its full "…"
+    menu opened from code, `app.open_game_menu`; on one of several selected games `menus.selection_menu` via
+    `library.menu_actions`) and the game page's "…" menu (`menus.menu_sections` quick=False, sectioned; leaves out
+    what the page has buttons for: Back up saves, uninstalls, the recipe card's `menus.recipe_actions` =
+    `game_actions(recipe=True)`) come from `app.game_actions()`. Flet's popup menus can't nest and are at most 280
+    logical px wide (ContextMenu: fixed; `C.menu_button` scales it): `C.menu_label` wraps long labels instead. Picking art (`sources.apply_choice`) downloads into a staging dir and keeps the old
     art if nothing came back; "Update Steam art on Frame" re-sends the art set to the game's anchor (agent ≥ 12).
     Patch descriptions/reasons describe the general case, naming games only as "e.g. …".
   - Installs: queued/cancelled/failed ones are remembered (library setting `ui.installs`) → Library "Resume" bar;

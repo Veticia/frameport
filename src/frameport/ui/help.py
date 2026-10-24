@@ -181,8 +181,8 @@ HELP: dict[str, str] = _Translated({
     "free_space": "Deletes copies kept from earlier installs and unfinished uploads. Games and saves stay.",
     "save_backups": "Steam doesn't sync Quest games' saves. This copies each installed Quest game's saves to this PC "
                     "(caches and big downloaded content stay out). Restore one from the game's menu → Restore saves….",
-    "install_drive": "Where new games go on the Frame, such as a microSD card. Installed games stay put; right-click → "
-                     "Move to… moves one. Cards formatted as FAT, exFAT or NTFS can't hold games.",
+    "install_drive": "Where new games go on the Frame, such as a microSD card. Installed games stay put; the game's "
+                     "menu → Move to… moves one. Cards formatted as FAT, exFAT or NTFS can't hold games.",
     "move_game": "Copies the game and its saves to the other drive, checks the copy, then removes the old one. The "
                  "game must be closed. A game on a microSD card only starts while the card is in.",
     "vr_overlay": "A SteamVR overlay app: SteamVR on the Frame draws it over whatever you play, Quest and PC VR "
@@ -214,6 +214,10 @@ HELP: dict[str, str] = _Translated({
     "frame_agent": "A small helper FramePort runs on the Frame for installs, launch tests and Steam entries. "
                    "FramePort updates it by itself.",
     # ---- sharing / diagnostics
+    "reset_recipe": "Goes back to the recipe FramePort suggests for this game (the tested one if there is one). Your "
+                    "own changes to patches and settings are lost; the Frame's copy changes at its next update.",
+    "save_recipe": "Keeps this recipe as a tested one on this PC: FramePort suggests it for this game from now on, "
+                   "also after Reset to suggested recipe.",
     "share_config": "Opens a prefilled GitHub issue with this game's recipe, so it can become a built-in recipe for "
                     "everyone. You review and submit it in your browser; no game files are sent.",
     "diag_bundle": "A zip with FramePort's logs, the game's recipe and the Frame's details, without game files. "

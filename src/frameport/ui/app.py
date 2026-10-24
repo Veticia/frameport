@@ -1168,12 +1168,13 @@ class FramePortApp:
         if opts:
             opts[0][2](None)
 
-    def game_actions(self, pkg: str, quick: bool = True) -> list:
+    def game_actions(self, pkg: str, quick: bool = True, recipe: bool = False) -> list:
         """A game's menu: [(label, icon, handler) | menus.Header | None (divider)], grouped by menus.menu_sections.
         quick=True is the library's right-click menu; False is the game page's "…" menu, which leaves out what the
-        page has buttons for (play/install in the hero, launch tests and uninstalls on the "Where it's installed"
-        cards, progress + Cancel while a job runs)."""
-        from .menus import MenuState, menu_sections
+        page has buttons for (play/install and Back up saves in the hero, launch tests and uninstalls on the "Where
+        it's installed" cards, the recipe's actions on its card, progress + Cancel while a job runs).
+        recipe=True: the recipe card's actions (menus.recipe_actions)."""
+        from .menus import MenuState, menu_sections, recipe_actions
 
         g = library.game(pkg)
         if not g:
@@ -1218,6 +1219,8 @@ class FramePortApp:
             "restore_saves": lambda e: self.restore_saves(pkg),
             "saves_folder": lambda e: self.open_saves_folder(pkg),
         }
+        if recipe:
+            return recipe_actions(g, handlers.__getitem__)
         enabled = (lambda opts: [(label, icon, handler) for label, icon, handler, disabled, _ in opts
                                  if handler and not disabled])
         busy = bool(job)

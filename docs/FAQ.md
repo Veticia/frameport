@@ -119,7 +119,9 @@ Every game has three places; the answers below refer to them.
 - **Patches:** click the game in the **Library** to open its page, then **Customize** (in the **Patches** section).
   Turn a patch on or off, then click **Update on Frame** at the top of the page.
 - **The game's menu:** the **…** button at the top of its page (or right-click in the Library → **More actions…**).
-  It has **Reset to suggested recipe…** and **Report a problem…**, among others.
+  It has **Rename…**, **Update with a newer APK…** and **Report a problem…**, among others.
+- **The recipe:** **Reset to suggested recipe…**, **Save as known-good recipe** and **Share working recipe…** sit
+  under **What FramePort will do** on the game's page.
 
 The sidebar has two tabs for troubleshooting: **Monitor** (the running game's frame rate, CPU and graphics) and
 **Files** (each installed game's storage on the Frame, under **Game storage**). Quest games expose their Android
@@ -133,7 +135,8 @@ Read-only drives can be browsed and downloaded from, but cannot be changed.
    **Update on Frame**, click it. Recipes and patches improve often.
 2. **Read the game's page.** The last launch test and your last play session (**Last session**) leave their result
    there, often with a suggested patch or setting and a button that applies it. Try that first.
-3. **Changed patches yourself?** The game's menu → **Reset to suggested recipe…** brings back the tested ones.
+3. **Changed patches yourself?** **Reset to suggested recipe…** (on the game's page, under **What FramePort will
+   do**) brings back the tested ones.
 4. **Find your symptom below.** Each answer says how to tell what's wrong and what to do.
 5. **Still stuck?** Report it (last answer on this page).
 

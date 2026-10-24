@@ -146,7 +146,7 @@ installed game keeps its Steam entry, artwork and saves (Steam restarts once).
 ### microSD cards and other drives
 
 - The **Steam Frame** page's **Storage** section sets where new games go (**Install new games to**).
-- To move an installed game, right-click it → **Move to…**. The game must be closed; saves and the Steam entry stay.
+- To move an installed game, open its menu (**…** on its page, or right-click it → **More actions…**) → **Move to…**. The game must be closed; saves and the Steam entry stay.
 - A game on a card only starts while the card is inserted.
 - Cards formatted as FAT, exFAT or NTFS can't hold games: format the card in SteamOS first.
 
@@ -232,10 +232,10 @@ FramePort downloads it, checks it, restarts and keeps your games and settings. *
 - **Recipes** (the tested patches and settings for each game) update by themselves. A game whose recipe changed shows
   **Update on Frame**.
 - **Moved your games?** Scan the new folder (or **Rescan folders**): games found there whose old files are gone keep their library entry, name, artwork, tags and settings, and only their location changes. **Settings → Library folders** lists the folders FramePort scans; remove the old one there (the games stay). See the [FAQ](FAQ.md#i-moved-my-games-to-another-folder-or-drive-how-do-i-update-the-library).
-- **A newer version of a game:** right-click it (or use **…** on its page) → **Update with a newer APK…** (Quest and
-  Android games) or **Update with a newer version…** (Linux apps: the new AppImage, archive or folder; PC VR games:
-  the new game folder). Its name, artwork, tags and your settings stay. Then click **Update on Frame** (or **on this
-  PC**).
+- **A newer version of a game:** its menu (**…** on its page, or right-click it → **More actions…**) → **Update with a
+  newer APK…** (Quest and Android games) or **Update with a newer version…** (Linux apps: the new AppImage, archive or
+  folder; PC VR games: the new game folder). Its name, artwork, tags and your settings stay. Then click **Update on
+  Frame** (or **on this PC**).
 - **Dev builds:** if you're asked to test a change before its release, use Settings → Updates → **Install the latest
   dev build…**. The next release then arrives as a normal update.
 - **Installed from the AUR?** Update with your AUR helper (`yay -Syu`); FramePort can't update itself in `/opt` and
@@ -289,16 +289,16 @@ The **Files** tab copies files between your PC and the Frame: videos, documents,
 
 ## Backing up saves
 
-Steam doesn't sync Quest games' saves. A game's menu (**…** on its page) → **Saves** → **Back up saves** copies them
-to your PC (close the game first); **Back up all saves** on the Steam Frame page does every installed Quest game.
-**Restore saves…** puts a backup back on the Frame and keeps a copy of the replaced saves there (**Undo last
+Steam doesn't sync Quest games' saves. **Back up saves** next to **Play** on a game's page copies them to your PC
+(close the game first); **Back up all saves** on the Steam Frame page does every installed Quest game. The game's menu
+(**…** on its page) → **Saves** → **Restore saves…** puts a backup back on the Frame and keeps a copy of the replaced saves there (**Undo last
 restore**). Backups live in FramePort's data folder under `save-backups/`; the 10 newest per game are kept (Settings →
 Data). Caches and large downloaded content stay out. More in the [FAQ](FAQ.md#can-i-back-up-a-games-saves).
 
 ## Share a recipe or report a problem
 
-- **Share working recipe…** (in the game's menu) opens a GitHub issue with the game's recipe filled in. Accepted
-  recipes become built-in for everyone. Untested games ask how they run after you install or test them.
+- **Share working recipe…** (on the game's page, under **What FramePort will do**) opens a GitHub issue with the
+  game's recipe filled in. Accepted recipes become built-in for everyone. Untested games ask how they run after you install or test them.
 - **Report a problem…** (in the game's menu, or Settings → Problems and feedback) saves a diagnostics zip with
   personal data removed and opens a GitHub issue to attach it to.
 

@@ -97,6 +97,17 @@ def click_usb_setup(app) -> None:
         button.on_click(None)
 
 
+def open_selection_menu(app, game: str) -> None:
+    """Select `game` and the next two shown games, then right-click `game`: the menu for the whole selection."""
+    lv = app.library_view
+    lv.set_select_mode(True)
+    others = [p for p in lv.cards if p != game][:2]
+    lv.selected |= {game, *others}
+    lv.set_select_mode(True)
+    time.sleep(1)
+    lv.open_menu(game)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", type=Path, required=True)
@@ -186,6 +197,8 @@ def main() -> int:
         steps.append(("game-menu", lambda a: (a.show_activity(False), a.open_game_menu(game))))
         steps.append(("library-menu", lambda a: (a.show_activity(False), a.navigate(0), time.sleep(3),
                                                  a.library_view.open_menu(game))))
+        # right-click on one of several selected games: the selection's actions (GitHub #414)
+        steps.append(("library-selection-menu", lambda a: open_selection_menu(a, game)))
     if args.docs:
         steps = [("library", lambda a: a.navigate(0))]
         if game:
