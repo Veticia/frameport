@@ -85,7 +85,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Start straight in VR (skip the 2D launcher)](#frame-start_activity) | `frame.start_activity` | Steam Frame patches |  |
 | [Embedded OpenXR loader: use FrameBridge](#frame-static_openxr_loader) | `frame.static_openxr_loader` | Steam Frame patches |  |
 | [Allow swapchains larger than 4096 px](#frame-swapchain_limit) | `frame.swapchain_limit` | Steam Frame patches | default |
-| [Team Beef ports: treat the Frame as a Meta headset](#frame-tbxr_vendor) | `frame.tbxr_vendor` | Steam Frame patches | 2 |
+| [Team Beef ports: treat the Frame as a Meta headset](#frame-tbxr_vendor) | `frame.tbxr_vendor` | Steam Frame patches | 3 |
 | [Unity App UI: no Android 12 vibrator](#frame-unity_appui_vibrator) | `frame.unity_appui_vibrator` | Steam Frame patches |  |
 | [GL shim for Unity (no multisampled render-to-texture)](#frame-unity_gl_shim) | `frame.unity_gl_shim` | Steam Frame patches | 27 |
 | [Unity: render each eye separately (no multiview)](#frame-unity_multipass) | `frame.unity_multipass` | Steam Frame patches | 2 |
@@ -140,7 +140,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Don't pause on short interruptions](#adapter-focus_hold) | `adapter.focus_hold` | Game settings | 4 |
 | [Ignore focus dips up to](#adapter-focus_hold_ms) | `adapter.focus_hold_ms` | Game settings | 2 |
 | [Hide Quest foveation](#adapter-foveation_fix) | `adapter.foveation_fix` | Game settings |  |
-| [Clear the game's GL errors (GLES)](#adapter-gl_error_clear) | `adapter.gl_error_clear` | Game settings | 3 |
+| [Clear the game's GL errors (GLES)](#adapter-gl_error_clear) | `adapter.gl_error_clear` | Game settings | 4 |
 | [Hide fast anti-aliasing (OpenGL ES)](#adapter-gl_hide_msrtt) | `adapter.gl_hide_msrtt` | Game settings | 1 |
 | [Draw each eye separately (OpenGL ES)](#adapter-gl_hide_multiview) | `adapter.gl_hide_multiview` | Game settings | 1 |
 | [GL shim: high-precision vertex shaders](#adapter-gl_highp_markers) | `adapter.gl_highp_markers` | Game settings | 1 |
@@ -1062,7 +1062,7 @@ Lets Team Beef ports (for example Lambda1VR) start on the Frame.
 - `frame.tbxr_vendor` · revision 2
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** Team Beef port: it picks its OpenXR setup by headset maker, which the Frame reports as "valve".
-- **Catalog games (2):** JKXR, Lambda1VR.
+- **Catalog games (3):** JKXR, Lambda1VR, QuestZDoom.
 - **Source:** [patches/frame/tbxr_vendor.py](../src/frameport/patches/frame/tbxr_vendor.py)
 
 > Team Beef's ports (for example Lambda1VR, RTCWQuest) load an OpenXR library named after the headset maker and pick their VR setup by maker; for "valve" they stop at start (libopenxr_loader_valve.so not found) or take the Pico path. Adds that library and lets them take the Meta path. Keeps GL4ES in charge of its desktop OpenGL draw calls so animated models don't turn into stretched triangles.
@@ -1837,14 +1837,14 @@ For OpenGL ES games whose memory use keeps growing (e.g. Vader Immortal).
 
 - `adapter.gl_error_clear`
 - **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
-- **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
+- **Suggested (on), value `1`:** Team Beef port: these leave OpenGL errors pending, which made the Frame's runtime leak GPU memory every frame until the game slowed to a crawl (for example QuestZDoom): they are cleared first.
 - **Options:**
   - Value: int, default `0`.
   - Game settings → Troubleshooting → "Clear the game's GL errors (GLES)" (advanced).
-- **Catalog games (3):** Vader Immortal: Episode I, Vader Immortal: Episode II, Vader Immortal: Episode III.
+- **Catalog games (4):** QuestZDoom, Vader Immortal: Episode I, Vader Immortal: Episode II, Vader Immortal: Episode III.
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
 
-> Clears OpenGL errors the game left pending before FrameBridge calls the Frame's runtime. The runtime's GL code fails on any pending error; after one such failure at the start it allocated GPU memory every frame without freeing it (e.g. Vader Immortal, ~20 MB a second).
+> Clears OpenGL errors the game left pending before FrameBridge calls the Frame's runtime. The runtime's GL code fails on any pending error; after one such failure at the start it allocated GPU memory every frame without freeing it (e.g. Vader Immortal, ~20 MB a second; QuestZDoom slowed to a crawl after a few minutes).
 
 ### <a id="adapter-gl_hide_msrtt"></a>Hide fast anti-aliasing (OpenGL ES)
 

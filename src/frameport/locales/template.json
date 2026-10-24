@@ -342,7 +342,7 @@
  "Clear tags": "",
  "Clear the game's GL errors (GLES)": "",
  "Cleared near walls": "",
- "Clears OpenGL errors the game left pending before FrameBridge calls the Frame's runtime. The runtime's GL code fails on any pending error; after one such failure at the start it allocated GPU memory every frame without freeing it (e.g. Vader Immortal, ~20 MB a second).": "",
+ "Clears OpenGL errors the game left pending before FrameBridge calls the Frame's runtime. The runtime's GL code fails on any pending error; after one such failure at the start it allocated GPU memory every frame without freeing it (e.g. Vader Immortal, ~20 MB a second; QuestZDoom slowed to a crawl after a few minutes).": "",
  "Click here, then type. Every key goes to the Frame.": "",
  "Click to open · right-click for quick actions": "",
  "Click to open · right-click for quick actions · drag across cards to select several": "",

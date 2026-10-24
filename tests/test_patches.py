@@ -833,6 +833,14 @@ def test_tbxr_vendor_adds_the_valve_loader(tmp_path, quest_manifest):
         assert not patch.apply(base.ApkContext(ws, a, {}, Reporter(), {patch.id: {}}))
 
 
+def test_team_beef_ports_get_gl_error_clear():
+    """QuestZDoom (#237) left GL errors pending: the runtime's GL interop then leaked GPU objects every frame."""
+    patch = base.get("adapter.gl_error_clear")
+    s = patch.detect(_analysis(libs=["libqzdoom.so"], extra={"tbxr_libs": ["libqzdoom.so"]}))
+    assert s and s.recommended and s.params == {"value": 1}
+    assert patch.detect(_analysis(libs=["libunity.so"])) is None
+
+
 def test_tbxr_vendor_on_lambda1vr():
     """With the real APK (FRAMEPORT_GAMES): the six "meta" checks of libxash.so now match "valve"."""
     import os

@@ -30,7 +30,7 @@ SETTINGS = [
     ("gl_error_clear", "int", 0, "Clear the game's GL errors (GLES)",
      "Clears OpenGL errors the game left pending before FrameBridge calls the Frame's runtime. The runtime's GL code "
      "fails on any pending error; after one such failure at the start it allocated GPU memory every frame without "
-     "freeing it (e.g. Vader Immortal, ~20 MB a second)."),
+     "freeing it (e.g. Vader Immortal, ~20 MB a second; QuestZDoom slowed to a crawl after a few minutes)."),
     ("flip_dump", "int", 0, "Upside-down panel images (diagnostics)",
      "Saves up to N images of the UI panels FrameBridge turns upright (Vulkan games whose panels are stored upside "
      "down), exactly as the runtime gets them, as fb_flip_<n>.ppm in the game's files folder on the Frame (a new file "
@@ -640,6 +640,13 @@ class AdapterSetting(Patch):
             # OVRPort's patch_disable_space_warp doesn't reach UE5). Off until confirmed in more games.
             return Suggestion(False, "Unreal Engine 5 game with Meta's space warp: turn on if the picture flickers or "
                                      "smears (for example Into The Radius 2).", {"value": 1})
+        if self.key == "gl_error_clear" and (a.extra or {}).get("tbxr_libs"):
+            # QuestZDoom (#237) leaves GL_INVALID_ENUM pending every frame; the runtime's GL check failed on it at
+            # the first swapchain and its GL interop then leaked GPU objects (~100 a second) until the Frame slowed
+            # to a crawl and, minutes later, the GPU driver crashed. Harmless for ports that leave no error.
+            return Suggestion(True, "Team Beef port: these leave OpenGL errors pending, which made the Frame's "
+                                    "runtime leak GPU memory every frame until the game slowed to a crawl (for "
+                                    "example QuestZDoom): they are cleared first.", {"value": 1})
         if self.key == "scene_emul" and uses_scene(a):
             return Suggestion(True, "The game uses Meta's scene or spatial anchor APIs: serve the saved room on "
                                     "the Frame, or a simple play-area room until one is scanned.", {"value": 1})
