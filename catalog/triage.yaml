@@ -500,10 +500,10 @@ signatures:
     diagnosis: The game waits forever on its loading screen for an answer from Meta's platform (an org-scoped user id, used as its analytics id) that OVRPort's platform library doesn't give. The patch makes the game skip that one request, as it does without Wi-Fi.
     suggest: [frame.cortopia_org_id]
   - id: meta-org-scoped-id-wait
-    # OVRPort's ovr_User_GetOrgScopedID returns request id 0; the "Request failed." stack then ends in the callback of
-    # the logged-in user that asked for it (GitHub #452 Eleven Table Tennis: MetaPlatform <BuildIdentity>b__0 calls
-    # Users.GetOrgScopedID and waits for <BuildIdentity>b__1)
-    pattern: 'An unknown error occurred\. Request failed\.[\s\S]{0,600}?<BuildIdentity>b__0'
+    # OVRPort's ovr_User_GetOrgScopedID returns request id 0 and Meta's wrapper logs "Request failed." with a stack
+    # that names no game code. Eleven Table Tennis (GitHub #452) logs its platform start just before: its
+    # <BuildIdentity>b__0 asks for the id ~0.3 s after "[META.FUN] in meta platform HandlePlatformInitialization"
+    pattern: 'meta platform HandlePlatformInitialization[\s\S]{0,3000}?An unknown error occurred\. Request failed\.'
     severity: error
     diagnosis: The game waits on its loading screen for Meta's org-scoped user id, which OVRPort's platform library
       never answers. The patch answers that request with a fixed id derived from the game's user id.

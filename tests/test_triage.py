@@ -627,9 +627,11 @@ def test_meta_request_failed():
 
 
 def test_meta_org_scoped_id_wait():
-    log = ("E Unity   : An unknown error occurred. Request failed.\n"
-           "E Unity   : Oculus.Platform.Request`1:OnComplete(Callback)\n"
-           "E Unity   : MetaPlatform:<BuildIdentity>b__0(Message`1)\n")
+    log = ("10-23 18:31:41.484  1253  1277 I Unity   : [LOAD EVENT]:[META.FUN] in meta platform "
+           "HandlePlatformInitialization\n"
+           "10-23 18:31:41.488    47   712 W resolv  : Failed to tag socket: Bad file descriptor\n"
+           "10-23 18:31:41.746  1253  1277 E Unity   : An unknown error occurred. Request failed.\n"
+           "10-23 18:31:41.746  1253  1277 E Unity   : Oculus.Platform.Request`1:OnComplete(Callback)\n")
     r = triage(log + LOG_OK, "RUNNING", "quest.eleven.forfunlabs")
     ids = {x.id for x in r.findings}
     assert "meta-org-scoped-id-wait" in ids and "meta-request-failed" not in ids
