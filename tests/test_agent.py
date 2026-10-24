@@ -943,13 +943,29 @@ def test_battery_state(monkeypatch, tmp_path):
         for k, v in files.items():
             (ps / name / k).write_text(v + "\n")
     monkeypatch.setattr(a, "POWER_SUPPLY", str(ps))
+    monkeypatch.setattr(a, "BATTERY_SCALE", str(tmp_path / "scale.json"))
+    steam = {"level": None}
+
+    def fake_js(expr, timeout=5):
+        if steam["level"] is None:
+            raise OSError("Steam isn't running")
+        return steam["level"]
+    monkeypatch.setattr(a, "steam_js", fake_js)
     assert a.battery_state() is None  # no power_supply folder (or no battery): nothing to show
     supply("battery", type="Battery", capacity="42", status="Discharging")
     supply("usb", type="USB", online="0")
-    assert a.battery_state() == {"percent": 42, "status": "Discharging", "plugged": False, "draining": True}
+    assert a.battery_state() == {"percent": 42, "gauge_percent": 42, "status": "Discharging", "plugged": False,
+                                 "draining": True}  # without Steam: the gauge's own value
     (ps / "usb" / "online").write_text("1\n")  # cable in, battery not charging yet ("Not charging"): still plugged
     assert a.battery_state()["plugged"] is True
     assert a.cmd_battery({})["battery"]["percent"] == 42
+    # GitHub #414: Steam shows the gauge rescaled (41 % -> 45 %); the app shows Steam's scale
+    (tmp_path / "scale.json").unlink()
+    steam["level"] = 0.46
+    assert a.battery_state()["percent"] == 46
+    steam["level"] = None  # cached for 2 minutes: no Steam call, same ratio
+    (ps / "battery" / "capacity").write_text("77\n")
+    assert a.battery_state()["percent"] == 84 and a.battery_state()["gauge_percent"] == 77
 
 
 def test_virtual_keyboard_events_text_and_release(monkeypatch, tmp_path):

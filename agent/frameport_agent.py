@@ -48,7 +48,7 @@ try:
 except ImportError:  # Windows: pc_revive loads this file for its VDF code only (GitHub #131)
     fcntl = None
 
-AGENT_VERSION = 117
+AGENT_VERSION = 118
 HOME = os.path.expanduser("~")
 STEAM = os.path.join(HOME, ".local/share/Steam")
 ANCHORS = os.path.join(HOME, "Applications/quest-frame")
@@ -814,7 +814,47 @@ def battery_state():
     if battery is not None:
         battery["plugged"] = plugged or battery["status"] in ("Charging", "Full")
         battery["draining"] = battery["status"] == "Discharging"
+        battery["gauge_percent"] = battery["percent"]
+        battery["percent"] = steam_battery_percent(battery["percent"])
     return battery
+
+
+BATTERY_SCALE = os.path.join(HOME, ".cache/frameport-battery-scale.json")
+
+
+def steam_battery_percent(gauge):
+    """The battery level as Steam shows it in the headset. Steam's level (SteamClient.System battery state) is the
+    fuel gauge's capacity rescaled (41 % in sysfs = 45 % in Steam, 77 % = 85 %: about /0.9, GitHub #414), so the app
+    showed less than the headset. Steam's value is read at most every 2 minutes (cached in a file: `info` runs in a
+    new agent process each time) and its ratio to the gauge then applied; without Steam the gauge's own value."""
+    if gauge is None:
+        return None
+    now = time.time()
+    try:
+        with open(BATTERY_SCALE) as f:
+            cached = json.load(f)
+    except (OSError, ValueError):
+        cached = {}
+    if now - float(cached.get("time", 0)) > 120:
+        cached = {"time": now, "ratio": None}
+        try:
+            level = steam_js("new Promise(r=>{let h;h=SteamClient.System.RegisterForBatteryStateChanges(s=>{"
+                             "try{h&&h.unregister()}catch(e){};r(s.flLevel)});setTimeout(()=>r(null),1500)})",
+                             timeout=2)
+            if isinstance(level, (int, float)) and 0 < level <= 1 and gauge > 0:
+                cached["ratio"] = level * 100 / gauge
+        except Exception:  # noqa: BLE001 (Steam not running, devtools off: the gauge's value)
+            pass
+        try:
+            os.makedirs(os.path.dirname(BATTERY_SCALE), exist_ok=True)
+            with open(BATTERY_SCALE, "w") as f:
+                json.dump(cached, f)
+        except OSError:
+            pass
+    ratio = cached.get("ratio")
+    if not ratio or not 0.8 <= ratio <= 1.25:  # a stale or odd reading: never show something wildly off
+        return gauge
+    return max(0, min(100, int(gauge * ratio + 0.5)))
 
 
 BOOT_STATE = os.path.join(HOME, ".cache/frameport-boot.json")
@@ -9399,7 +9439,7 @@ class BatteryReader:
             self.slow["_charger"] = any(_rd(c).strip() == "1" for c in self.chargers)
             self.slow_at = now
         status = self.slow.get("status") or ""
-        b = {"percent": self.slow.get("percent"), "status": status,
+        b = {"percent": steam_battery_percent(self.slow.get("percent")), "status": status,
              "plugged": bool(self.slow.get("_charger")) or status in ("Charging", "Full"),
              "draining": status == "Discharging"}
         cur, volt = self.fast.get("current"), self.fast.get("voltage")
