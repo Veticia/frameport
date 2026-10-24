@@ -37,3 +37,21 @@ def test_files_that_cant_be_linked_are_uploaded(tmp_path, monkeypatch):
     items = [(obb, "obb/a.obb", 1)]
     frame = SimpleNamespace(target=SimpleNamespace(host="127.0.0.1"))
     assert installer._link_local(frame, items, str(tmp_path / "in"), Reporter()) == (items, 0)
+
+
+def test_copies_from_an_earlier_install_become_links(tmp_path, monkeypatch):
+    src = tmp_path / "QuestGames" / "Deadpool"
+    src.mkdir(parents=True)
+    (src / "main.1.com.x.obb").write_bytes(b"x" * 10)
+    obb_root = tmp_path / "Applications" / "com.x" / "lepton-app" / "obb"
+    obb_root.mkdir(parents=True)
+    (obb_root / "main.1.com.x.obb").write_bytes(b"x" * 10)  # copied by an earlier install
+    same = {"main.1.com.x.obb": 10}
+    frame = SimpleNamespace(target=SimpleNamespace(host="127.0.0.1"))
+    pc = SimpleNamespace(target=SimpleNamespace(host="10.0.0.5"))
+    monkeypatch.setattr("frameport.frame.local.on_frame", lambda: True)
+    assert installer._relink_installed(pc, src, same, str(obb_root), Reporter()) == 0
+    assert installer._relink_installed(frame, src, same, str(obb_root), Reporter()) == 10
+    assert os.path.samefile(obb_root / "main.1.com.x.obb", src / "main.1.com.x.obb")
+    assert installer._relink_installed(frame, src, same, str(obb_root), Reporter()) == 0  # already linked
+    assert sorted(p.name for p in obb_root.iterdir()) == ["main.1.com.x.obb"]

@@ -144,6 +144,8 @@ def install(frame: Frame, plan: InstallPlan, reporter: Reporter) -> dict:
     manifest = {} if plan.apk_only else local_data_manifest(plan.data_dir, plan.data_files)
     existing = prep["existing_obb"]
     to_send = [rel for rel, size in manifest.items() if existing.get(rel) != size]
+    _relink_installed(frame, plan.data_dir, {r: s for r, s in manifest.items() if r not in to_send},
+                      posixpath.join(prep["base"], "lepton-app", "obb"), reporter)
     need = sum(manifest[r] for r in to_send) + (0 if prep["same_apk"] else plan.apk.stat().st_size)
     if need > prep["free_bytes"] - (1 << 30):
         raise RuntimeError(f"not enough space on the Frame: need {need / 2**30:.1f} GiB + 1 GiB headroom, "
@@ -624,6 +626,34 @@ def _link_local(frame, items: list[tuple[Path, str, int]], remote_root: str, rep
         reporter.log(f"linked {len(items) - len(rest)} file(s) on this Frame instead of copying them "
                      f"({linked / 2**30:.1f} GiB)")
     return rest, linked
+
+
+def _relink_installed(frame, data_dir: Path, same: dict[str, int], obb_root: str, reporter: Reporter) -> int:
+    """FramePort on the Frame itself (GitHub #433): data an earlier install copied (before installs linked it, or from a
+    PC) and that is unchanged (same size, the test that skips its upload) is replaced by a hardlink to the original,
+    so updating a game frees the second copy without reinstalling it. Returns the bytes freed."""
+    from ..frame.local import on_frame
+
+    host = getattr(getattr(frame, "target", None), "host", None)
+    if not same or host not in ("127.0.0.1", "localhost") or not on_frame():
+        return 0
+    freed = 0
+    for rel, size in same.items():
+        src, dest = Path(data_dir) / rel, Path(posixpath.join(obb_root, rel))
+        tmp = dest.with_name(dest.name + ".fplink")
+        try:
+            if not dest.is_file() or os.path.samefile(src, dest) or src.stat().st_size != size:
+                continue
+            tmp.unlink(missing_ok=True)
+            os.link(src, tmp)
+            os.replace(tmp, dest)  # atomic: the copy stays if anything above failed
+            freed += size
+        except OSError:  # another drive, no hardlinks: keep the copy
+            with contextlib.suppress(OSError):
+                tmp.unlink(missing_ok=True)
+    if freed:
+        reporter.log(f"replaced copied game data with links to the originals ({freed / 2**30:.1f} GiB freed)")
+    return freed
 
 
 def upload_files(frame: Frame, items: list[tuple[Path, str, int]], remote_root: str, reporter: Reporter,
