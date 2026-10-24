@@ -43,6 +43,24 @@ def install_context(recipe: Recipe) -> base.InstallContext:
     return ctx
 
 
+def flat_launcher(package: str, recipe: Recipe) -> bool:
+    """The app opens a flat launcher that starts its VR part (analysis vr_activity; GitHub #475 Xelee, WiiCompiled),
+    unless frame.start_activity starts the VR part directly."""
+    from ..core import library
+
+    extra = ((library.game(package) or {}).get("analysis") or {}).get("extra") or {}
+    return bool(extra.get("vr_activity")) and "frame.start_activity" not in recipe.patches
+
+
+def deployment_recipe(recipe: Recipe) -> dict:
+    """The recipe record in the Frame's deployment.json. flat_launcher: the agent keeps SteamVR's theater mode for
+    the shown Android window (device.text_input_window), the only way such a launcher is seen."""
+    record = {"patches": sorted(recipe.patches), "source": recipe.source, "alt": recipe.use_alt}
+    if flat_launcher(recipe.package, recipe):
+        record["flat_launcher"] = True
+    return record
+
+
 def configuration_args(entry: dict, recipe: Recipe) -> dict:
     """One complete configuration for both an APK install and the configuration-only path."""
     from ..game_update import configuration, configuration_fingerprint
@@ -67,8 +85,7 @@ def configuration_args(entry: dict, recipe: Recipe) -> dict:
     return dict(settings=settings, files={k: v.decode() if isinstance(v, bytes) else v
                                         for k, v in ctx.files.items()}, env=ctx.env,
                 flatscreen=show_window(ctx, _flatscreen(recipe.package)), config_sync=ctx.config_sync,
-                recipe={"patches": sorted(recipe.patches), "source": recipe.source, "alt": recipe.use_alt},
-                configuration=applied,
+                recipe=deployment_recipe(recipe), configuration=applied,
                 configuration_fp=configuration_fingerprint(original, recipe.package, build.get("superseded")),
                 apk_recipe_fp=build.get("apk_recipe_fp"), source_version=build.get("source_version"))
 
@@ -200,7 +217,7 @@ def install(frame: Frame, plan: InstallPlan, reporter: Reporter) -> dict:
         settings=ctx.adapter_settings, files={k: v.decode() if isinstance(v, bytes) else v
                                             for k, v in ctx.files.items()}, env=ctx.env,
         flatscreen=show_window(ctx, _flatscreen(plan.package)), config_sync=ctx.config_sync or None,
-        recipe={"patches": sorted(plan.recipe.patches), "source": plan.recipe.source, "alt": plan.recipe.use_alt})
+        recipe=deployment_recipe(plan.recipe))
     if artwork_manifest is not None:
         config["artwork_manifest"] = artwork_manifest
     result = frame.agent(

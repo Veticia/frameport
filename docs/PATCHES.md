@@ -206,7 +206,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Extra Lepton settings](#device-lepton_env) | `device.lepton_env` | Files and settings on the Frame | 3 |
 | [Share a folder with another game](#device-shared_folder) | `device.shared_folder` | Files and settings on the Frame |  |
 | [Controllers as a gamepad (Steam Input)](#device-steam_gamepad) | `device.steam_gamepad` | Files and settings on the Frame |  |
-| [Show the app's Android window (for typing)](#device-text_input_window) | `device.text_input_window` | Files and settings on the Frame | 133 |
+| [Show the app's Android window (for typing)](#device-text_input_window) | `device.text_input_window` | Files and settings on the Frame | 134 |
 | [Launch options (SteamVR or OpenXR)](#pcvr-launch_args) | `pcvr.launch_args` | PC VR (Proton and Revive) | 2 |
 | [Provide the Oculus runtime from Revive (Frame)](#pcvr-libovr_redirect) | `pcvr.libovr_redirect` | PC VR (Proton and Revive) |  |
 | [No Unreal crash reporter](#pcvr-no_crash_reporter) | `pcvr.no_crash_reporter` | PC VR (Proton and Revive) |  |
@@ -2816,11 +2816,12 @@ Lets typing reach this app from Steam's on-screen keyboard or your PC's keyboard
 
 - `device.text_input_window`
 - **Changes:** Install only: written on the Frame when the game is installed; the APK isn't changed.
+- **Suggested (on):** The app opens a flat launcher that starts its VR part (…): Lepton runs VR apps headless, so the launcher is only seen in a shown Android window.
 - **Suggested (on):** App with text fields: key presses only reach a shown Android window.
-- **Catalog games (133):** AFFECTED: The Manor, AgeOfJoy, AllInOneSports, Ancient_Dungeon, Arcsmith, Arkio, Attack on Titan VR: Unbreakable, Audica and 125 more.
+- **Catalog games (134):** AFFECTED: The Manor, AgeOfJoy, AllInOneSports, Ancient_Dungeon, Arcsmith, Arkio, Attack on Titan VR: Unbreakable, Audica and 126 more.
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
 
-> Lepton runs VR apps headless: their Android window is never shown, so it never gets keyboard focus and no key press (Steam's on-screen keyboard, a USB/Bluetooth keyboard, Type on Frame) reaches the app's text fields. With Lepton's lepton-show-flatscreen marker the window is shown (behind the VR view, which keeps working) and Steam's keyboard opens for a selected text field. Steam lists the shown window as "Gamescope" (the Frame's compositor). While the game runs, FramePort turns off SteamVR's automatic theater mode for game windows: it put the Android window in front of the player with the controllers as a mouse pointer, and the game got no controller input. The window stays a page of the game in the dashboard. Pairs with "Make Unity text fields work without a system keyboard".
+> Lepton runs VR apps headless: their Android window is never shown, so it never gets keyboard focus and no key press (Steam's on-screen keyboard, a USB/Bluetooth keyboard, Type on Frame) reaches the app's text fields. With Lepton's lepton-show-flatscreen marker the window is shown (behind the VR view, which keeps working) and Steam's keyboard opens for a selected text field. Steam lists the shown window as "Gamescope" (the Frame's compositor). While the game runs, FramePort turns off SteamVR's automatic theater mode for game windows: it put the Android window in front of the player with the controllers as a mouse pointer, and the game got no controller input. The window stays a page of the game in the dashboard. Pairs with "Make Unity text fields work without a system keyboard". Apps that open a flat launcher before their VR part (for example Xelee or WiiCompiled, whose launchers pick the game) need the window too: headless, the launcher is never seen and the VR part never starts. For those, theater mode stays on, so the launcher is in front of you; once the VR part runs, close the dashboard with the controller's button if it opened on the window.
 
 ## <a id="group-pcvr"></a>PC VR (Proton and Revive)
 

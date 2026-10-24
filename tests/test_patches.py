@@ -1107,3 +1107,25 @@ def test_ac_nexus_uses_the_vulkan_panel_pool(monkeypatch):
     assert base.get("frame.adapter").revision_for("com.Ubisoft.ACNexusVR") == 3
     monkeypatch.setattr(frameport, "__version__", "1.3.0")  # 1.3.0 knows swapchain_pool: the entry stays usable
     assert catalog.unusable_reason(entry) is None
+
+
+def test_flat_launcher_apps_get_the_android_window_and_keep_theater(monkeypatch):
+    """GitHub #475 (Xelee): a flat launcher that starts a separate VR activity ran headless, unseen, so the VR part
+    never started. The window is suggested for such apps; the deployment marks them so the agent keeps theater mode."""
+    from frameport.core import library
+    from frameport.install import installer
+
+    patch = base.get("device.text_input_window")
+    a = _analysis()
+    assert patch.detect(a) is None
+    a.extra = {**(a.extra or {}), "vr_activity": "dev.melee.MeleeXrActivity"}
+    s = patch.detect(a)
+    assert s and s.recommended and "MeleeXrActivity" in s.reason
+    games = {"dev.melee.game": {"analysis": {"extra": {"vr_activity": "dev.melee.MeleeXrActivity"}}},
+             "com.x.vr": {"analysis": {"extra": {}}}}
+    monkeypatch.setattr(library, "game", lambda pkg: games.get(pkg))
+    window = {"device.text_input_window": {}}
+    assert installer.deployment_recipe(Recipe(package="dev.melee.game", patches=window))["flat_launcher"]
+    direct = Recipe(package="dev.melee.game", patches={**window, "frame.start_activity": {}})
+    assert "flat_launcher" not in installer.deployment_recipe(direct)  # starts the VR part itself
+    assert "flat_launcher" not in installer.deployment_recipe(Recipe(package="com.x.vr", patches=window))

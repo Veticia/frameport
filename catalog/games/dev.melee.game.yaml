@@ -1,9 +1,13 @@
 package: dev.melee.game
 title: Xelee
 status: unknown
-notes: 'Keep the Vulkan library rename disabled: the engine (Aurora/Dawn WebGPU) builds the name libvulkan.so from
-  two pieces, so the rename made it ask for "libfp_vkn.so", Vulkan failed to load and the GLES fallback aborted on
-  its first multiview shader (GitHub #475). Not yet checked with the rename off.'
+notes: 'The app opens a flat launcher (MeleeActivity) that starts the VR part (MeleeXrActivity): "Show the app''s
+  Android window" is on so that launcher can be seen in the headset; without it Lepton runs the app headless, the
+  launcher waits invisibly and OpenXR never starts. Keep the Vulkan library rename disabled: the engine (Aurora/Dawn
+  WebGPU) builds the name libvulkan.so from two pieces, so the rename made it ask for "libfp_vkn.so" (GitHub #475).
+  The VR part is not yet checked on the Frame.'
+details: 'Vulkan (Dawn) loads and precompiles all 6080 pipelines in about 34 s with the rename off; the launch then
+  stays in the 2D launcher, so no OpenXR call is made (GitHub #475).'
 tested_version: 0.1.0-beta
 engine: Other
 xr: OpenXR
@@ -12,6 +16,8 @@ frame:
 - frame.sdl_clipboard
 frame_remove:
 - frame.vk_sanitize
+device:
+- device.text_input_window
 adapter:
   scene_emul: 1
 updated: '2026-10-24'

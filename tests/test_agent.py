@@ -1557,14 +1557,15 @@ def test_dashboard_worker_leaves_a_dashboard_opened_with_open_dashboard_action(m
 
 
 def _text_window_game(a, tmp_path, pkg="com.x.typing", patches=("device.text_input_window", "frame.adapter"),
-                      marker=True, display=None):
+                      marker=True, display=None, flat_launcher=False):
     anchor = tmp_path / "Applications/quest-frame" / pkg
     (anchor / "lepton-app").mkdir(parents=True)
     if marker:
         (anchor / "lepton-app/lepton-show-flatscreen").touch()
     conf = {"patches": {"device.display_mode": {"params": {"mode": display}}}} if display else {}
+    recipe = {"patches": sorted(patches), **({"flat_launcher": True} if flat_launcher else {})}
     (anchor / "deployment.json").write_text(json.dumps({
-        "package": pkg, "appid": 123, "recipe": {"patches": sorted(patches)}, "configuration": conf}))
+        "package": pkg, "appid": 123, "recipe": recipe, "configuration": conf}))
     return anchor
 
 
@@ -1578,6 +1579,9 @@ def test_vr_text_window_only_for_vr_apps_with_the_typing_window(monkeypatch, tmp
     assert not a.vr_text_window("com.x.nomarker")
     _text_window_game(a, tmp_path, "com.x.chosenflat", display="flat")  # the user wants the flat window
     assert not a.vr_text_window("com.x.chosenflat")
+    # GitHub #475: a flat launcher before the VR part is only seen in theater mode
+    _text_window_game(a, tmp_path, "com.x.launcher", flat_launcher=True)
+    assert not a.vr_text_window("com.x.launcher")
     assert not a.vr_text_window("com.x.missing") and not a.vr_text_window("../bad")
 
 

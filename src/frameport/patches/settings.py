@@ -1059,17 +1059,27 @@ class TextInputWindow(Patch):
                    "FramePort turns off SteamVR's automatic theater mode for game windows: it put the Android window "
                    "in front of the player with the controllers as a mouse pointer, and the game got no controller "
                    "input. The window stays a page of the game in the dashboard. Pairs with \"Make Unity text fields "
-                   "work without a system keyboard\".")
+                   "work without a system keyboard\". Apps that open a flat launcher before their VR part (for "
+                   "example Xelee or WiiCompiled, whose launchers pick the game) need the window too: headless, the "
+                   "launcher is never seen and the VR part never starts. For those, theater mode stays on, so the "
+                   "launcher is in front of you; once the VR part runs, close the dashboard with the controller's "
+                   "button if it opened on the window.")
     category = "device"
     stage = "install"
 
     def applies(self, a):
-        return a.vr_kind != "none" and bool((a.extra or {}).get("text_fields"))
+        extra = a.extra or {}
+        return a.vr_kind != "none" and bool(extra.get("text_fields") or extra.get("vr_activity"))
 
     def detect(self, a):
-        if self.applies(a):
-            return Suggestion(True, "App with text fields: key presses only reach a shown Android window.")
-        return None
+        if not self.applies(a):
+            return None
+        vr = (a.extra or {}).get("vr_activity")
+        if vr:  # GitHub #475 (Xelee): headless, its launcher was never seen and never started the VR part
+            return Suggestion(True, "The app opens a flat launcher that starts its VR part "
+                                    f"({vr.rsplit('.', 1)[-1]}): Lepton runs VR apps headless, so the launcher "
+                                    "is only seen in a shown Android window.")
+        return Suggestion(True, "App with text fields: key presses only reach a shown Android window.")
 
     def install(self, ctx: InstallContext) -> None:
         ctx.flatscreen = True

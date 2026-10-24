@@ -9601,12 +9601,17 @@ THEATER_SETTING = ("dashboard", "autoShowGameTheater")
 
 def vr_text_window(pkg):
     """Whether this game runs as VR with its Android window shown for typing (device.text_input_window), not as a
-    flat app: a 2D app (or a VR app the user set to "Flat window") needs SteamVR's theater to be seen at all."""
+    flat app: a 2D app (or a VR app the user set to "Flat window") needs SteamVR's theater to be seen at all, and so
+    does an app that opens a flat launcher before its VR part (recipe flat_launcher, agent v122; GitHub #475 Xelee:
+    held off, the launcher was only a dashboard page and the game never started its VR part)."""
     try:
         dep = deployment(check_pkg(pkg)) or {}
     except AgentError:
         return False
-    if "device.text_input_window" not in ((dep.get("recipe") or {}).get("patches") or ()):
+    recipe = dep.get("recipe") or {}
+    if "device.text_input_window" not in (recipe.get("patches") or ()):
+        return False
+    if recipe.get("flat_launcher"):  # GitHub #475: a flat launcher (Xelee) is only seen in theater mode
         return False
     display = ((dep.get("configuration") or {}).get("patches") or {}).get("device.display_mode") or {}
     if (display.get("params") or {}).get("mode") == "flat":
