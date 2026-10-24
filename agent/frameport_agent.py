@@ -48,7 +48,7 @@ try:
 except ImportError:  # Windows: pc_revive loads this file for its VDF code only (GitHub #131)
     fcntl = None
 
-AGENT_VERSION = 118
+AGENT_VERSION = 119
 HOME = os.path.expanduser("~")
 STEAM = os.path.join(HOME, ".local/share/Steam")
 ANCHORS = os.path.join(HOME, "Applications/quest-frame")
@@ -745,6 +745,12 @@ def ensure_host_fixes():
         upgraded = []
     if upgraded:
         changed.append(f"launchers: exit watchdog, dashboard, play log ({len(upgraded)})")
+    try:
+        theater = theater_settle()  # a worker killed with its game left auto-theater off
+    except Exception:  # noqa: BLE001
+        theater = None
+    if theater:
+        changed.append(f"SteamVR {theater}")
     try:
         old = remove_old_codec_dirs()
     except Exception:  # noqa: BLE001
@@ -4307,6 +4313,24 @@ def cmd_config_sync(args):
 class SteamVRSettings(SteamVRApps):
     interface = b"FnTable:IVRSettings_003"
     table_size = 11
+
+    def bool_setting(self, section, key, value=None):
+        """GetBool (after SetBool when `value` isn't None)."""
+        ct = self.ct
+        err = ct.c_int(0)
+        if value is not None:
+            ct.CFUNCTYPE(None, ct.c_char_p, ct.c_char_p, ct.c_bool, ct.POINTER(ct.c_int))(
+                self.table[1])(section.encode(), key.encode(), bool(value), ct.byref(err))  # SetBool
+            self._raise(err)
+        on = ct.CFUNCTYPE(ct.c_bool, ct.c_char_p, ct.c_char_p, ct.POINTER(ct.c_int))(
+            self.table[5])(section.encode(), key.encode(), ct.byref(err))  # GetBool
+        self._raise(err)
+        return bool(on)
+
+    def _raise(self, err):
+        if err.value:
+            name = self.ct.CFUNCTYPE(self.ct.c_char_p, self.ct.c_int)(self.table[0])(err.value)
+            raise AgentError((name or b"SteamVR settings error").decode())
 
     def refresh_rate(self, appid, rate):
         ct = self.ct
@@ -8586,6 +8610,11 @@ def purge_worker(payload):
         except Exception as exc:  # noqa: BLE001
             result["errors"].append(f"overlay autostart service: {exc}")
         try:
+            if theater_settle(force=True):
+                result["removed"].append("SteamVR theater mode hold")
+        except Exception as exc:  # noqa: BLE001
+            result["errors"].append(f"SteamVR theater mode: {exc}")
+        try:
             if remove_library_hooks():
                 result["removed"].append(LIBRARY_HOOK)
         except Exception as exc:  # noqa: BLE001
@@ -8998,8 +9027,10 @@ def steam_js(expression, timeout=5):
 
 FIRST_FRAME_MARKERS = (b"FrameBridge: new layer:", b"FrameBridge: pacing:")
 # SteamVR's dashboard UI logs a dashboard opened with the controller's button as "[ToggleDashboard]
-# toggle_dashboard_action"; Steam's own start-up menu comes without it (onShowOverlayRequestFromSteam / frame menu)
-USER_DASHBOARD_MARKER = b"toggle_dashboard_action"
+# toggle_dashboard_action" (SteamOS 0.4) or "[ShowDashboardOverlay] {"sReason":"open_dashboard_action"" (0.5.6: the
+# worker closed every press again, AC Nexus 2026-10-23); Steam's own start-up menu comes without either
+# (onShowOverlayRequestFromSteam / frame menu / SetDockLocation)
+USER_DASHBOARD_MARKERS = (b"toggle_dashboard_action", b"open_dashboard_action")
 
 
 def user_opened_dashboard(log, pos):
@@ -9012,7 +9043,8 @@ def user_opened_dashboard(log, pos):
             if pos is None or pos > end:  # first look, or the log was rotated: only what comes from now on
                 return False, end
             f.seek(pos)
-            return USER_DASHBOARD_MARKER in f.read(), end
+            text = f.read()
+            return any(m in text for m in USER_DASHBOARD_MARKERS), end
     except OSError:
         return False, pos
 
@@ -9137,7 +9169,147 @@ def logcat_keeper(log, appid, parent, poll=2.0, restarts=5, popen=None, run=None
     say("launcher ended")
 
 
+# A VR app with device.text_input_window has Lepton's flat Android window (lepton-show-flatscreen) next to its VR
+# view. gamescope hands that window to SteamVR as the game's "desktop game" overlay (valve.steam.desktopgame.<appid>,
+# mouse input, its own cursor overlay). The window is there before the game's OpenXR session (Unity: 10-30 s), and
+# SteamVR's dashboard puts the window of a game that isn't a VR scene app yet into theater mode
+# (dashboard.autoShowGameTheater): the Android screen in front of the player with the controllers as a mouse
+# pointer. When the session starts, SteamVR docks the window back into the dashboard and opens the dashboard on it
+# (SetDockLocation), again the Android screen with a pointer, until something closes it (AC Nexus 2026-10-23, GitHub
+# #476/#477: "the game renders, the controllers do nothing"). With auto-theater off the window stays a page of the
+# game in the dashboard: nothing is shown on its own and the dashboard isn't opened on it, while Android keeps a
+# focused window (Steam's keyboard, Type on Frame). The setting is global, so FramePort turns it off only while such
+# a game runs (one hold per dashboard worker) and puts it back when the last one ends.
+THEATER_HOLDS = os.path.join(HOME, ".local/share/frameport/theater-holds")
+THEATER_RESTORE = "restore"  # in THEATER_HOLDS: FramePort turned auto-theater off and has to turn it on again
+THEATER_SETTING = ("dashboard", "autoShowGameTheater")
+
+
+def vr_text_window(pkg):
+    """Whether this game runs as VR with its Android window shown for typing (device.text_input_window), not as a
+    flat app: a 2D app (or a VR app the user set to "Flat window") needs SteamVR's theater to be seen at all."""
+    try:
+        dep = deployment(check_pkg(pkg)) or {}
+    except AgentError:
+        return False
+    if "device.text_input_window" not in ((dep.get("recipe") or {}).get("patches") or ()):
+        return False
+    display = ((dep.get("configuration") or {}).get("patches") or {}).get("device.display_mode") or {}
+    if (display.get("params") or {}).get("mode") == "flat":
+        return False
+    return os.path.exists(os.path.join(dep["base"], "lepton-app", "lepton-show-flatscreen"))
+
+
+def _theater_holder_alive(pid):
+    try:
+        with open(f"/proc/{int(pid)}/cmdline", "rb") as f:
+            return b"_dashboard_worker" in f.read()  # (not a reused pid)
+    except OSError:
+        return False
+
+
+def _theater_holders():
+    """Live holds (worker pids); holds of workers that are gone are removed."""
+    live = []
+    for name in os.listdir(THEATER_HOLDS):
+        if not name.isdigit():
+            continue
+        if _theater_holder_alive(name):
+            live.append(int(name))
+        else:
+            try:
+                os.remove(os.path.join(THEATER_HOLDS, name))
+            except OSError:
+                pass
+    return live
+
+
+def _theater_setting(value=None):
+    """SteamVR's dashboard.autoShowGameTheater (None = SteamVR isn't running), set to `value` first if given."""
+    vr = SteamVRSettings.open()
+    if vr is None:
+        return None
+    try:
+        return vr.bool_setting(*THEATER_SETTING, value)
+    finally:
+        vr.close()
+
+
+def theater_hold(holder):
+    """Keep SteamVR from putting game windows into theater mode while `holder` (a dashboard worker) runs."""
+    os.makedirs(THEATER_HOLDS, exist_ok=True)
+    with open(os.path.join(THEATER_HOLDS, ".lock"), "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        _theater_holders()
+        restore = os.path.join(THEATER_HOLDS, THEATER_RESTORE)
+        if not os.path.exists(restore):
+            on = _theater_setting()
+            if on is None:
+                return "SteamVR isn't running: theater mode left as it is"
+            if on:
+                _theater_setting(False)
+                open(restore, "w").close()
+        open(os.path.join(THEATER_HOLDS, str(int(holder))), "w").close()
+        return "theater mode off while the game runs"
+
+
+def theater_settle(holder=None, force=False):
+    """Drop `holder`'s hold (and those of ended workers); when no hold is left (or `force`: FramePort is being removed)
+    turn auto-theater back on if FramePort turned it off. Returns what it did, or None."""
+    if not os.path.isdir(THEATER_HOLDS):
+        return None
+    with open(os.path.join(THEATER_HOLDS, ".lock"), "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if holder is not None:
+            try:
+                os.remove(os.path.join(THEATER_HOLDS, str(int(holder))))
+            except OSError:
+                pass
+        restore = os.path.join(THEATER_HOLDS, THEATER_RESTORE)
+        if not os.path.exists(restore) or (_theater_holders() and not force):
+            return None
+        if _theater_setting(True) is None:
+            return None  # SteamVR isn't running: try again next time
+        os.remove(restore)
+        return "theater mode back on"
+
+
 def dashboard_worker(log, parent, wait_start=240, window=120, poll=0.5, ui_log=None, max_hides=10):
+    """Close the dashboard at the game's first VR frame (close_start_dashboard) and, for a VR app with its Android
+    window shown (vr_text_window), keep SteamVR's theater mode off until the launcher ends."""
+    def alive():
+        try:
+            os.kill(int(parent), 0)
+            return True
+        except (OSError, ValueError):
+            return False
+    held = False
+    try:
+        if vr_text_window(os.path.basename(os.path.dirname(os.path.abspath(log)))):
+            try:
+                print(f"{time.strftime('%H:%M:%S')} {theater_hold(os.getpid())}", flush=True)
+                held = True
+            except Exception as exc:  # noqa: BLE001 (SteamVR settings unavailable: behave as before)
+                print(f"theater mode: {exc}", flush=True)
+        else:
+            try:  # a worker that was killed with its game (Steam stopped) left theater mode off
+                theater_settle()
+            except Exception:  # noqa: BLE001
+                pass
+        close_start_dashboard(log, alive, wait_start, window, poll, ui_log, max_hides)
+        while held and alive():
+            time.sleep(2)
+    finally:
+        if held:
+            try:
+                done = theater_settle(os.getpid())
+                if done:
+                    print(f"{time.strftime('%H:%M:%S')} {done}", flush=True)
+            except Exception as exc:  # noqa: BLE001
+                print(f"theater mode: {exc}", flush=True)
+
+
+def close_start_dashboard(log, alive, wait_start=240, window=120, poll=0.5, ui_log=None, max_hides=10):
     """Close SteamVR's dashboard (Steam's "Resume game" frame menu) that opens when the game submits its first VR
     frame: watch from FrameBridge's first "new layer:" line (the first submitted frame; Steam showed the menu ~0.3 s
     later with ITR2), checking every `poll` s for `window` s after it (at most `max_hides`; agent 59: 120 s / 10, the
@@ -9148,12 +9320,6 @@ def dashboard_worker(log, parent, wait_start=240, window=120, poll=0.5, ui_log=N
     if ui_log is None:
         ui_log = os.path.join(STEAM, "logs/vrwebhelper_systemui.txt")
     _, ui_pos = user_opened_dashboard(ui_log, None)
-    def alive():
-        try:
-            os.kill(int(parent), 0)
-            return True
-        except (OSError, ValueError):
-            return False
     deadline, pos, tail = time.time() + wait_start, 0, b""
     while time.time() < deadline and alive():
         try:

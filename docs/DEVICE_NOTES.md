@@ -1173,3 +1173,47 @@ black, so headset checks of the picture should be done with the test off. Headle
 straight-ahead gaze lands on the optical centre, which confirms the NDC re-basing). Not done: Khronos validation, a
 GLES game, a real gaze.
 
+
+## Typing window takes the controllers: SteamVR theater mode (#476, #477, AC Nexus)
+
+**2026-10-24 (SteamOS 0.5.6, gamescope 2.18.2, Lepton 3.0.5).** With `device.text_input_window` (Lepton's
+`lepton-show-flatscreen`) some VR games render but ignore the controllers; the owner saw "the Android screen with a
+mouse pointer" in AC Nexus (catalog dropped the window, 94783f56), users in PadelVRTraining (#476) and AltspaceVR
+(#477); UNDERDOGS (#474) and many others were reported fine with it.
+
+How the window reaches the headset: Lepton then sets `waydroid.wayland_display=wayland-0`, `lepton.headless=false`
+(`liblepton/properties.sh`), so Waydroid's window is a client of gamescope. gamescope runs with `--backend openvr
+--vr-overlay-show-immediately --virtual-connector-strategy PerAppId --vr-app-overlay-key valve.steam.desktopgame`:
+each Steam app's windows become a SteamVR dashboard overlay `valve.steam.desktopgame.<appid>` ("Gamescope", input
+method mouse) plus a cursor overlay `gamescope.gamescope-0.cursor.<appid>`. SteamVR's dashboard
+(`/opt/steamvr/resources/webinterface/dashboard/chunk~*.js`) does, when that game's frame comes alive:
+`!bVRSceneApp && /settings/dashboard/autoShowGameTheater` → `docking.SetInTheater()` + HideDashboard("GameFrame now
+alive, auto-theatering"). The Android window always exists before the OpenXR session (Unity: 10-30 s), so the game is
+never a scene app at that moment: the Android screen goes in front of the player as a theater screen, the
+controllers become a laser mouse (Steam Input switches to app 13830428 at that moment). When the session starts,
+SteamVR docks the frame back into the dashboard and opens the dashboard on it (`[ShowDashboardOverlay]
+{"overlayKey":"valve.steam.desktopgame.<appid>","sReason":"SetDockLocation"} bOpenDashboard true`): the Android
+screen with a pointer again, the session stays VISIBLE (no input) until something closes the dashboard. Steam
+sometimes closes it itself ~0.3 s later, FramePort's dashboard worker only after the first VR frame (AC Nexus loads
+for seconds after the session starts) and only when `IsDashboardVisible` says so; in one of the owner's three AC
+Nexus sessions with the window (2026-10-23 17:23) it stayed open on the Android screen until the owner pressed the
+button. The timeline in `vrwebhelper_systemui.txt` was the same for every window session of AC Nexus (16:40, 17:01,
+17:23) and for UNDERDOGS headless: overlay created → auto-theatering → session → SetDockLocation; without the
+window (17:48 onwards) none of it. So the race between the game's session/first frame and these dashboard steps
+decides per game and per start whether the player is left on the Android screen.
+
+Fix (agent 119): the dashboard worker (every launcher runs it) turns `dashboard.autoShowGameTheater` off through
+IVRSettings (ctypes, `SteamVRSettings.bool_setting`) while a game with `device.text_input_window` runs (deployment
+recipe has the patch, the marker exists, display mode not "Flat window"), one hold file per worker in
+`~/.local/share/frameport/theater-holds/`, and turns it on again after the last such game (a worker killed with its game, e.g. Steam stopped: the next
+game's worker or `ensure_host_fixes` puts it back; purge too). Headless with UNDERDOGS: no auto-theatering, no SetDockLocation, the
+window overlay never visible, Android's focused window still UnityPlayerActivity; SteamVR drops the key from
+steamvr.vrsettings again when it's back at the default. 2D apps keep theater mode (it is how they are shown).
+Also: SteamOS 0.5.6 logs the dashboard button as `open_dashboard_action`, not `toggle_dashboard_action`; the worker
+didn't recognise it and closed each of the owner's presses again (AC Nexus 23:33, ten presses in eight seconds).
+
+Facts for later: `vrcmd --overlays` lists every overlay with visible/not_visible (works headless);
+`vrcmd --settings-bool dashboard.autoShowGameTheater` / `--set-settings-bool <section.key> 0|1` (a "true" argument
+did nothing); `vrcmd --dock-overlay dashboard|theater|world <overlay key>`. Headless sessions never reach FOCUSED,
+so whether the controllers reach the game, and whether Steam's keyboard still opens for a text field with the
+window kept in the dashboard, needs the headset.

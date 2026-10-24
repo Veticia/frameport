@@ -2820,7 +2820,7 @@ Lets typing reach this app from Steam's on-screen keyboard or your PC's keyboard
 - **Catalog games (133):** AFFECTED: The Manor, AgeOfJoy, AllInOneSports, Ancient_Dungeon, Arcsmith, Arkio, Attack on Titan VR: Unbreakable, Audica and 125 more.
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
 
-> Lepton runs VR apps headless: their Android window is never shown, so it never gets keyboard focus and no key press (Steam's on-screen keyboard, a USB/Bluetooth keyboard, Type on Frame) reaches the app's text fields. With Lepton's lepton-show-flatscreen marker the window is shown (behind the VR view, which keeps working) and Steam's keyboard opens for a selected text field. Steam lists the shown window as "Gamescope" (the Frame's compositor). Pairs with "Make Unity text fields work without a system keyboard".
+> Lepton runs VR apps headless: their Android window is never shown, so it never gets keyboard focus and no key press (Steam's on-screen keyboard, a USB/Bluetooth keyboard, Type on Frame) reaches the app's text fields. With Lepton's lepton-show-flatscreen marker the window is shown (behind the VR view, which keeps working) and Steam's keyboard opens for a selected text field. Steam lists the shown window as "Gamescope" (the Frame's compositor). While the game runs, FramePort turns off SteamVR's automatic theater mode for game windows: it put the Android window in front of the player with the controllers as a mouse pointer, and the game got no controller input. The window stays a page of the game in the dashboard. Pairs with "Make Unity text fields work without a system keyboard".
 
 ## <a id="group-pcvr"></a>PC VR (Proton and Revive)
 

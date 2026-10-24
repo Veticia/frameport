@@ -475,6 +475,12 @@ over Quest games.
   and key presses (Steam's keyboard, USB/Bluetooth keyboards, `input text`) don't reach VR apps. The app folder's
   `lepton-show-flatscreen` marker shows the window (VR keeps working) and gives it focus; Steam's on-screen keyboard
   then opens for its text fields (FramePort patch `device.text_input_window`).
+- That window is a gamescope client: gamescope (`--backend openvr`, `--virtual-connector-strategy PerAppId`) shows a
+  Steam app's windows as the SteamVR dashboard overlay `valve.steam.desktopgame.<appid>` with mouse input. SteamVR
+  puts a game's window into theater mode while the game isn't a VR scene app yet (setting
+  `dashboard.autoShowGameTheater`) and opens the dashboard on it when the OpenXR session starts: the controllers then
+  drive a mouse pointer on the Android screen. FramePort turns the setting off while such a game runs (see
+  DEVICE_NOTES.md "Typing window takes the controllers").
 - `/dev/uinput` is writable by the steamos user (ACL for Steam Input): a uinput virtual keyboard works like a real
   one everywhere (FramePort's "Type on Frame", agent `_keyboard`).
 - Unity text fields close without a system keyboard; see `frame.unity_text_input` in PLAYBOOK.md.

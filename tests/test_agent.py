@@ -1538,6 +1538,128 @@ def test_dashboard_worker_leaves_a_dashboard_the_player_opened(monkeypatch, tmp_
     assert calls.count("SteamClient.OpenVR.VROverlay.HideDashboard()") == 1  # Steam's start-up menu only
 
 
+def test_dashboard_worker_leaves_a_dashboard_opened_with_open_dashboard_action(monkeypatch, tmp_path):
+    """SteamOS 0.5.6 logs the controller's dashboard button as open_dashboard_action: the worker closed each of the
+    player's presses again (AC Nexus, 2026-10-23 23:33, ten presses in eight seconds)."""
+    a = load_agent(monkeypatch, tmp_path)
+    ui = tmp_path / "vrwebhelper_systemui.txt"
+    ui.write_text("start\n")
+    _, pos = a.user_opened_dashboard(str(ui), None)
+    with open(ui, "a") as f:
+        f.write('| [Dashboard] [ShowDashboardOverlay] {"sReason":"open_dashboard_action","bSourceIsVRLinkRemote":false}'
+                ' bOpenDashboard true\n')
+    assert a.user_opened_dashboard(str(ui), pos)[0]
+    _, pos = a.user_opened_dashboard(str(ui), None)
+    with open(ui, "a") as f:  # Steam's own: docking the game's window, its start-up menu
+        f.write('| [Dashboard] [ShowDashboardOverlay] {"overlayKey":"valve.steam.desktopgame.1","sReason":'
+                '"SetDockLocation"} bOpenDashboard true\n')
+    assert not a.user_opened_dashboard(str(ui), pos)[0]
+
+
+def _text_window_game(a, tmp_path, pkg="com.x.typing", patches=("device.text_input_window", "frame.adapter"),
+                      marker=True, display=None):
+    anchor = tmp_path / "Applications/quest-frame" / pkg
+    (anchor / "lepton-app").mkdir(parents=True)
+    if marker:
+        (anchor / "lepton-app/lepton-show-flatscreen").touch()
+    conf = {"patches": {"device.display_mode": {"params": {"mode": display}}}} if display else {}
+    (anchor / "deployment.json").write_text(json.dumps({
+        "package": pkg, "appid": 123, "recipe": {"patches": sorted(patches)}, "configuration": conf}))
+    return anchor
+
+
+def test_vr_text_window_only_for_vr_apps_with_the_typing_window(monkeypatch, tmp_path):
+    a = load_agent(monkeypatch, tmp_path)
+    _text_window_game(a, tmp_path)
+    assert a.vr_text_window("com.x.typing")
+    _text_window_game(a, tmp_path, "com.x.flat", patches=("frame.adapter",))  # a 2D app: its window is the app
+    assert not a.vr_text_window("com.x.flat")
+    _text_window_game(a, tmp_path, "com.x.nomarker", marker=False)  # recipe changed, not reinstalled yet
+    assert not a.vr_text_window("com.x.nomarker")
+    _text_window_game(a, tmp_path, "com.x.chosenflat", display="flat")  # the user wants the flat window
+    assert not a.vr_text_window("com.x.chosenflat")
+    assert not a.vr_text_window("com.x.missing") and not a.vr_text_window("../bad")
+
+
+class _FakeTheater:
+    def __init__(self, on=True):
+        self.on, self.sets = on, []
+
+    def __call__(self, value=None):
+        if value is not None:
+            self.on = value
+            self.sets.append(value)
+        return self.on
+
+
+def test_theater_hold_turns_auto_theater_off_while_held_and_back_on_after(monkeypatch, tmp_path):
+    """dashboard.autoShowGameTheater is global: off from the first hold, on again after the last one, never touched
+    when the player had turned it off."""
+    a = load_agent(monkeypatch, tmp_path)
+    setting = _FakeTheater(on=True)
+    monkeypatch.setattr(a, "_theater_setting", setting)
+    alive = {11, 12}
+    monkeypatch.setattr(a, "_theater_holder_alive", lambda pid: int(pid) in alive)
+    a.theater_hold(11)
+    a.theater_hold(12)
+    assert setting.on is False and setting.sets == [False]
+    assert a.theater_settle(11) is None and setting.on is False  # 12 still runs
+    alive.discard(12)  # killed without releasing (Steam stopped): the next look restores it
+    assert a.theater_settle() == "theater mode back on" and setting.on is True
+    assert not (tmp_path / ".local/share/frameport/theater-holds" / a.THEATER_RESTORE).exists()
+    user_off = _FakeTheater(on=False)
+    monkeypatch.setattr(a, "_theater_setting", user_off)
+    a.theater_hold(11)
+    alive.discard(11)
+    assert a.theater_settle(11) is None and user_off.sets == []
+
+
+def test_theater_settle_waits_for_steamvr_and_force_ignores_holds(monkeypatch, tmp_path):
+    a = load_agent(monkeypatch, tmp_path)
+    setting = _FakeTheater(on=True)
+    monkeypatch.setattr(a, "_theater_setting", setting)
+    monkeypatch.setattr(a, "_theater_holder_alive", lambda pid: True)
+    a.theater_hold(21)
+    monkeypatch.setattr(a, "_theater_setting", lambda value=None: None)  # SteamVR not running
+    assert a.theater_settle(force=True) is None
+    monkeypatch.setattr(a, "_theater_setting", setting)
+    assert a.theater_settle(force=True) == "theater mode back on" and setting.on is True  # purge
+
+
+def test_dashboard_worker_holds_theater_off_for_a_text_window_game(monkeypatch, tmp_path):
+    a = load_agent(monkeypatch, tmp_path)
+    anchor = _text_window_game(a, tmp_path)
+    log = anchor / "launch.log"
+    log.write_text("I FrameBridge: new layer: type=35\n")
+    setting = _FakeTheater(on=True)
+    monkeypatch.setattr(a, "_theater_setting", setting)
+    monkeypatch.setattr(a, "_theater_holder_alive", lambda pid: True)
+    monkeypatch.setattr(a, "steam_js", lambda expr, timeout=5: False)
+    states = []
+    parent_alive = iter([True] * 6 + [False] * 100)
+
+    def kill(pid, sig):
+        states.append(setting.on)
+        if not next(parent_alive):
+            raise OSError("gone")
+    monkeypatch.setattr(a.os, "kill", kill)
+    monkeypatch.setattr(a.time, "sleep", lambda s: None)
+    clock = iter(range(0, 10000))
+    monkeypatch.setattr(a.time, "time", lambda: next(clock))
+    a.dashboard_worker(str(log), 1, wait_start=10, window=4)
+    assert setting.sets == [False, True] and False in states  # off while the game ran, on again at its end
+    other = _text_window_game(a, tmp_path, "com.x.vr", patches=("frame.adapter",))
+    (other / "launch.log").write_text("I FrameBridge: new layer: type=35\n")
+    monkeypatch.setattr(a.os, "kill", lambda pid, sig: None)
+    a.dashboard_worker(str(other / "launch.log"), 1, wait_start=10, window=4)
+    assert setting.sets == [False, True]  # a game without the window leaves SteamVR alone
+    holds = tmp_path / ".local/share/frameport/theater-holds"
+    (holds / a.THEATER_RESTORE).touch()  # left by a worker killed with its game
+    monkeypatch.setattr(a, "_theater_holder_alive", lambda pid: False)
+    a.dashboard_worker(str(other / "launch.log"), 1, wait_start=10, window=4)
+    assert setting.sets == [False, True, True] and not (holds / a.THEATER_RESTORE).exists()
+
+
 def test_dashboard_worker_waits_for_vr_frames(monkeypatch, tmp_path):
     a = load_agent(monkeypatch, tmp_path)
     monkeypatch.setattr(a.time, "sleep", lambda s: None)
