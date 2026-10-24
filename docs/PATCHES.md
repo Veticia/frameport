@@ -66,7 +66,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Fix Lua startup crashes on Frame](#frame-luajit_pointers) | `frame.luajit_pointers` | Steam Frame patches | 1 |
 | [Start the game in the app's main process](#frame-main_process) | `frame.main_process` | Steam Frame patches | default |
 | [Unity: disable Meta depth occlusion](#frame-meta_depth_occlusion) | `frame.meta_depth_occlusion` | Steam Frame patches | 1 |
-| [Declare Meta-only permissions](#frame-meta_permissions) | `frame.meta_permissions` | Steam Frame patches | 8 |
+| [Declare Meta-only permissions](#frame-meta_permissions) | `frame.meta_permissions` | Steam Frame patches | 9 |
 | [Meta XR Audio: skip Quest telemetry class](#frame-metaxr_telemetry) | `frame.metaxr_telemetry` | Steam Frame patches | default |
 | [Clear android:debuggable](#frame-nodebug) | `frame.nodebug` | Steam Frame patches | 3 |
 | [Oculus OS telemetry class stubs](#frame-oculusos) | `frame.oculusos` | Steam Frame patches | 18 |
@@ -79,7 +79,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Unpaired pointer-authentication checks](#frame-pac_hints) | `frame.pac_hints` | Steam Frame patches | 1 |
 | [Photon Voice: skip Android 12 audio routing](#frame-photon_voice_audio_route) | `frame.photon_voice_audio_route` | Steam Frame patches | 2 |
 | [QuestCraft: count the Frame's network as online](#frame-pojlib_connection) | `frame.pojlib_connection` | Steam Frame patches | 1 |
-| [SDL apps: start without a clipboard service](#frame-sdl_clipboard) | `frame.sdl_clipboard` | Steam Frame patches | 8 |
+| [SDL apps: start without a clipboard service](#frame-sdl_clipboard) | `frame.sdl_clipboard` | Steam Frame patches | 9 |
 | [Stress Level Zero: let Unity start Vulkan itself](#frame-slz_vulkan_hooks) | `frame.slz_vulkan_hooks` | Steam Frame patches | 1 |
 | [Start straight in VR (skip the 2D launcher)](#frame-start_activity) | `frame.start_activity` | Steam Frame patches |  |
 | [Embedded OpenXR loader: use FrameBridge](#frame-static_openxr_loader) | `frame.static_openxr_loader` | Steam Frame patches |  |
@@ -168,7 +168,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Re-create play space](#adapter-respace_kick) | `adapter.respace_kick` | Game settings |  |
 | [Render resolution (supersampling)](#adapter-scale) | `adapter.scale` | Game settings | 18 |
 | [Room depth](#adapter-scene_depth) | `adapter.scene_depth` | Game settings |  |
-| [Use room layout](#adapter-scene_emul) | `adapter.scene_emul` | Game settings | 19 |
+| [Use room layout](#adapter-scene_emul) | `adapter.scene_emul` | Game settings | 20 |
 | [Room height](#adapter-scene_height) | `adapter.scene_height` | Game settings |  |
 | [Hide play-area size](#adapter-scene_hide_bounds) | `adapter.scene_hide_bounds` | Game settings | 1 |
 | [Scan when requested](#adapter-scene_scan_request) | `adapter.scene_scan_request` | Game settings |  |
@@ -806,7 +806,7 @@ Declares Meta's permissions some mixed-reality games ask for, so they don't stop
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** Mixed-reality game that needs the room model: its 'use spatial data' permission must be granted (for example Demeter).
 - **Suggested (on):** Uses Meta's room or anchor APIs: their permissions must be granted, or the game never asks for the room (for example NOPE's MR mode).
-- **Catalog games (8):** Arkio, BattleTalent, Demeter, Laser Dance, Movie Deck for Plex, Punch Fit, Real VR Fishing, Test Quest MR.
+- **Catalog games (9):** Arkio, BattleTalent, Demeter, Laser Dance, Movie Deck for Plex, Punch Fit, Real VR Fishing, Test Quest MR and 1 more.
 - **Source:** [patches/frame/manifest_fixes.py](../src/frameport/patches/frame/manifest_fixes.py)
 
 > Declares com.oculus.permission.* / horizonos.permission.* that the app uses, so Android grants them at install (for example the 'use spatial data' permission of mixed-reality games like Demeter).
@@ -981,7 +981,7 @@ Lets SDL and LÖVE games start on the Frame (they'd crash looking for a clipboar
 - `frame.sdl_clipboard` · also for 2D apps
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** SDL app: it crashes at start in Lepton, which has no clipboard service.
-- **Catalog games (8):** Crisis Zone VR, GoldenEye VR, Majora's Mask VR, PrimedGun v2, Simpsons Hit and Run VR, Time Crisis II VR (Test), Time Crisis VR (Experimental), WiiCompiled VR.
+- **Catalog games (9):** Crisis Zone VR, GoldenEye VR, Majora's Mask VR, PrimedGun v2, Simpsons Hit and Run VR, Time Crisis II VR (Test), Time Crisis VR (Experimental), WiiCompiled VR and 1 more.
 - **Suggested by launch-test signatures:**
   - `sdl-no-clipboard` (fatal): The app crashed at start because the Frame's Android has no clipboard.
 - **Source:** [patches/frame/sdl_clipboard.py](../src/frameport/patches/frame/sdl_clipboard.py)
@@ -2254,7 +2254,7 @@ Scene games get your saved room. Without one, they get a simple room from the pl
 - **Options:**
   - Value: int, default `0`.
   - Game settings → Mixed reality → "Use room layout".
-- **Catalog games (19):** Arkio, AugmentedEmpire, Battlemarked, BattleTalent, cubism, Demeo, Demeter, Ghostbusters: Rise of the Ghost Lord and 11 more.
+- **Catalog games (20):** Arkio, AugmentedEmpire, Battlemarked, BattleTalent, cubism, Demeo, Demeter, Ghostbusters: Rise of the Ghost Lord and 12 more.
 - **Suggested by launch-test signatures:**
   - `mr-discovery-unsupported` (warning): The game cannot discover a Meta room.
   - `scene-missing` (warning): The game wants Meta's room data (scene API), which the Frame lacks.

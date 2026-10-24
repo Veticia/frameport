@@ -1,0 +1,18 @@
+package: dev.melee.game
+title: Xelee
+status: unknown
+notes: 'Keep the Vulkan library rename disabled: the engine (Aurora/Dawn WebGPU) builds the name libvulkan.so from
+  two pieces, so the rename made it ask for "libfp_vkn.so", Vulkan failed to load and the GLES fallback aborted on
+  its first multiview shader (GitHub #475). Not yet checked with the rename off.'
+tested_version: 0.1.0-beta
+engine: Other
+xr: OpenXR
+frame:
+- frame.meta_permissions
+- frame.sdl_clipboard
+frame_remove:
+- frame.vk_sanitize
+adapter:
+  scene_emul: 1
+updated: '2026-10-24'
+source_hint: Xelee-Quest-arm64
