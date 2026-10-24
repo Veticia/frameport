@@ -20,9 +20,10 @@ signatures:
     suggest: [adapter.scene_emul]
   - id: dynamic-resolution-foveation
     pattern: 'projection view [01](?: rect change)?:[^\r\n]*rect=(?:[1-9]\d*,\d+|0,[1-9]\d*) '
-    unless: 'fixed_resolution: recommended'
+    # a rebuilt APK's foveation centring layer re-centres Valve's density map on the submitted rect (#394)
+    unless: 'fixed_resolution: recommended|fdm_centre: pass'
     severity: info
-    diagnosis: The game submits an offset projection viewport. With Valve foveation, dynamic resolution can move the sharp centre or expose a white edge. Keeping full resolution may help; it increases GPU load and needs the updated adapter and OVRPlugin shim in a rebuilt APK.
+    diagnosis: The game submits an offset projection viewport. With Valve foveation, dynamic resolution can move the sharp centre or expose a white edge. A rebuilt APK (Update on Frame) puts the sharp area back on each eye; keeping full resolution may also help for the white edge, increases GPU load and needs the updated adapter and OVRPlugin shim in a rebuilt APK.
     question: With foveated rendering enabled, was the sharp centre misplaced or was there a white line at the picture edge?
     suggest: [adapter.fixed_resolution]
   - id: static-openxr-loader-bypass
@@ -605,6 +606,12 @@ signatures:
     pattern: '(?s)\A(?=.*Fatal signal 11)(?=.*fdm_injection_xrDestroySwapchain)(?=.*TBXR_LeaveVR)'
     severity: error
     diagnosis: The game crashed while leaving VR, inside Valve's foveation layer when it destroys a swapchain (for example Lambda1VR). This can happen after manually quitting; it is not a startup crash and does not explain distorted geometry seen before quitting.
+    suggest: []
+    supersedes: [native-crash]
+  - id: valve-fdm-render-crash
+    pattern: '(?s)\A(?=.*(?:Fatal signal 11|SIGSEGV))(?=.*vulkan\.freedreno\.so)(?=.*fdm_injection_CmdBeginRendering)'
+    severity: error
+    diagnosis: The game crashed in the graphics driver while Valve's foveation layer started a render pass. Valve's Fixed foveation path crashed AC Nexus like this (#394); builds with FramePort's foveation centring run Fixed on Valve's eye-tracked path instead, so rebuild the game (Update on Frame), or switch Foveated rendering to Eye-tracked or Off.
     suggest: []
     supersedes: [native-crash]
   - id: batman-audio-geometry-allocation

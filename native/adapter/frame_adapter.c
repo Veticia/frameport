@@ -665,6 +665,7 @@ static void forget_swapchain(XrSwapchain handle) {
 
 static void flip_on_create_swapchain(XrSwapchain handle, const XrSwapchainCreateInfo *info);
 static int flip_wants_transfer(const XrSwapchainCreateInfo *info);
+static int snap_vk_wants_transfer(const XrSwapchainCreateInfo *info);
 static void clear_gl_errors(const char *where);
 static void flip_on_destroy(XrSwapchain handle);
 static void ab_on_destroy(XrSwapchain handle);
@@ -773,6 +774,8 @@ XRAPI_ATTR XrResult XRAPI_CALL xrCreateSwapchain(XrSession session, const XrSwap
     // in-place flips of upside-down quads (flip_vk.c) blit from and back into these images
     if (flip_wants_transfer(&fixed))
         fixed.usageFlags |= XR_SWAPCHAIN_USAGE_TRANSFER_SRC_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
+    // Vulkan eye snapshots (snapshot_vk.c) copy from the shown images
+    if (snap_vk_wants_transfer(&fixed)) fixed.usageFlags |= XR_SWAPCHAIN_USAGE_TRANSFER_SRC_BIT;
     if (equirect_emul && swapchain && emul_virtual_create(session, &fixed, swapchain)) {
         remember_swapchain(*swapchain);
         emul_on_create_swapchain(*swapchain, &fixed);
@@ -1179,6 +1182,8 @@ XRAPI_ATTR XrResult XRAPI_CALL xrDestroySpace(XrSpace space) {
 #include "layer_emul_gl.c"
 #include "swapchain_pool.c"
 #include "cube_standin.c"
+#include "snapshot_vk.c"
+#include "fdm_views.c"
 #include "snapshot_gl.c"
 #include "surface_swapchain.c"
 #include "fade_quad.c"
@@ -1811,6 +1816,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEndFrame(XrSession session, const XrFrameEndInf
     clear_gl_errors("xrEndFrame");
     __atomic_add_fetch(&frame_ends, 1, __ATOMIC_RELAXED);
     snap_end_frame(info);
+    fdm_views_end_frame(info);
     if(surface_native)++sc_serial;
     if (eye_debug) eye_debug_end_frame(session, info);
     {   // frame pacing statistics every ~5 s: fps and submitted-vs-predicted display time

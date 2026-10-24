@@ -25,7 +25,8 @@ SETTINGS = [
     ("snapshot", "int", 0, "Eye-image snapshots (diagnostics)",
      "Every N seconds, saves the left-eye image the game submits (a quarter of its size) as fb_snap_0-7.ppm in the "
      "game's files folder on the Frame. Launch tests run without anyone wearing the headset, so the headset view stays "
-     "black; this shows what the game itself draws. OpenGL ES games only."),
+     "black; this shows what the game itself draws. Vulkan games: both eyes at half size (fb_snap_vk_N_vV.ppm), "
+     "the whole swapchain image with the submitted rect and FOV in the log."),
     ("gl_error_clear", "int", 0, "Clear the game's GL errors (GLES)",
      "Clears OpenGL errors the game left pending before FrameBridge calls the Frame's runtime. The runtime's GL code "
      "fails on any pending error; after one such failure at the start it allocated GPU memory every frame without "

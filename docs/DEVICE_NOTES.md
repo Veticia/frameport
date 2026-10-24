@@ -1002,3 +1002,99 @@ FrameBridge`, `fp_xrruntime: xrInitializeLoaderKHR forwarded to FrameBridge: 0`,
 `new layer:` lines. The outer loader should log the private sdcard manifest, the
 inner loader the real vendor manifest. Require RUNNING and submitted frames;
 headset rendering and controls need separate confirmation.
+
+## Foveation: sharp area centre and size (#394)
+
+Reports: Valve foveation's sharp area sat towards the bottom right in both eyes (In Death: Unchained, The 7th Guest
+VR), top right in Batman (dynamic resolution), and its size changed with FramePort's render resolution (RE4,
+Asgard's Wrath 2: Large at 1x bigger than at 1.5x/2x; Small "different sizes and shapes").
+
+**Mechanism** (Valve's `libVkLayer_VALVE_fdm_injection.so` disassembled 2026-10-24, Mesa Turnip source, AC Nexus on the
+dev Frame): one library is both an implicit OpenXR API layer and a Vulkan layer. Its `xrCreateSwapchain` makes a
+density map per eye swapchain (`detected FDM image 63x54[2]` for 2016x1728 array 2: `ceil(w/32) x ceil(h/32)`, one layer
+per eye) and fills the `FOVE_LEVEL` preset rectangles in map-normalized coordinates, so every preset is centred at
+about (0.51, 0.51) of the **whole swapchain**. Its `xrEndFrame` stores each view's imageRect, but nothing uses it for
+the map. Eye-tracked offsets (`calc_offset`) are `foveationCenter NDC x 0.5 x render area`, also from the swapchain
+centre; Fixed (`disable_offsets`) passes none and creates images without the density-map-offset flag. Turnip then
+picks one density per GMEM **bin**, from the map texel under the bin's centre (`tu_calc_frag_area`); bins have a fixed
+pixel size (GMEM / bytes per pixel), roughly 250-300 px for AC Nexus.
+
+**Root causes.** Off-centre: games often submit a rect that isn't the swapchain (AC Nexus rect=0,0 / 287,0 1726x1728
+inside 2016x1728 for its asymmetric eyes, then dynamic resolution rect=0,259 1467x1469; Asgard's Wrath 2 0,0 / 347,0
+2237x2256 inside 2592x2256), and the eye's optical axis is off the rect centre anyway (FOV left/right -1.03/+0.88 rad,
+up/down +0.86/-1.05). The swapchain-centred map then sits ~14% of the view width to one side (and towards the bottom
+for corner-anchored dynamic-resolution rects). Size: the sharp area is the set of bins whose centre lies in Valve's
+rectangle, so it snaps to whole bins: at 1x the bins are large relative to the eye, at 1.5x/2x smaller. At 1x Small
+(hi) and Large (lo) gave the **same** 572x444 px area; at 1.5x they differ (764x444 vs 764x892, also in shape). The
+rectangle is also a fraction of the swapchain, not of a smaller dynamic-resolution view.
+
+**Fix (centre):** `VK_LAYER_FRAMEPORT_fdm_centre` (`native/foveation/centre.h`, a second layer in
+`libVkLayer_fdm_darken.so`; its constructor inserts it right after Valve's layer in GraphicsEnv's debug-layer list when
+`FDM_DEBUG` has `enable`, never for The Climb 2). Below Valve it sees the passes with Valve's map attached (render pass
++ framebuffer, or dynamic rendering) and the offsets at their end, and replaces each eye layer's offset so that Valve's
+sharp centre (computed with Turnip's texel size and the preset) lands on the eye's optical centre (Fixed, or
+Eye-tracked without a gaze: all-zero offsets) or on the gaze re-based on the eye's rect (Eye-tracked). It never changes
+images: for Fixed it drops `disable_offsets` from `FDM_DEBUG` in the process (only once it is in the layer chain, and
+before Valve reads the option), so Valve runs exactly as in Eye-tracked (flags its own images, passes offsets) and the
+layer replaces Valve's gaze offsets with the optical centre. If Valve read the option first, its maps carry no offset
+flag and every pass is left alone (Valve's own Fixed). It writes every offset Turnip reads: Turnip takes one per view
+(or per-layer map layer) whatever `fragmentDensityOffsetCount` says, and one-eye passes get their eye's map layer
+(the map view's base layer picks the eye). FrameBridge
+(`adapter/fdm_views.c`) reports per view: swapchain size, array layer, imageRect and optical centre (GLES: rows from
+the bottom, Zink's memory order), through a weak `fp_fdm_set_views`. Double-wide single-layer eyes and passes of other
+sizes are left alone. `FRAMEPORT_FDM_CENTRE=0` (as `LEPTON_ENV_`) turns it off. Logs: `FrameBridge: fdm views: …`,
+`FoveationDarken: fdm_centre: pass 2016x1728 map 63x54 layer 0+2 (preset 1, Valve centre 1024,880, Fixed): 2
+view(s), 2 offset(s) from Valve 0,0 -> -24,-184 (+ more views)`. Not changed: the bin quantization of the size (driver design) and the preset being a fraction of
+the swapchain. Ships in the APK (FrameBridge + layer library): a game needs a rebuild (Update on Frame) to get it.
+
+**Headless evidence, first version** (AC Nexus, Fixed, darkening test, `snapshot=2`; its white start flash shows full density white,
+coarse grey): FrameBridge now also reads Vulkan eye images back (`snapshot_vk.c`: both eyes, half size, the whole
+swapchain layer, rect + FOV in the log). Sharp-area centre minus the left eye's optical centre, before -> after:
+
+| scale | size | swapchain / left-eye rect | before | after | sharp area (of the rect) |
+|---|---|---|---|---|---|
+| 1.0 | Large (lo) | 2016x1728 / 0,259 1467x1469 | +203,+43 px (+14%,+3%) | +26,+11 (+2%,+1%) | 572x444 (39%x30%) |
+| 1.0 | Small (hi) | same | +202,+43 | +26,+11 | 572x444 (same as Large) |
+| 1.5 | Large (lo) | 2976x2592 / 0,389 2166x2203 | +276,+65 (+13%,+3%) | +12,+17 (+1%,+1%) | 764x892 (35%x40%) |
+| 1.5 | Small (hi) | same | +276,+65 | +13,+17 | 764x444 (35%x20%) |
+| 2.0 | Large (lo) | 4032x3456 / 0,519 2933x2937 | +407,+87 (+14%,+3%) | +47,+31 (+2%,+1%) | 1148x892 (39%x30%) |
+| 2.0 | Small (hi) | same | (no flash frame caught) | -49,-81 (-2%,-3%) | 956x668 (33%x23%) |
+
+Right eyes match (mirrored rects 244,259 / 360,389 / 488,519). The residual 1-2% is the bin grid. Not checked: GLES/Zink
+games (the dynamic-rendering path is implemented, the GL row order is unverified), Eye-tracked with a real gaze
+(headless has none), and the picture in the headset. Twice AC Nexus died in a freedreno thread right after a Vulkan
+snapshot of its loading frame (not without snapshots): keep `snapshot` for diagnostics.
+
+**Headset round 1 failed (2026-10-24), second version.** The first version (b2be40af, reverted) crashed AC Nexus in
+Fixed (SIGSEGV in Turnip's `CmdBeginRendering` called from Valve's `fdm_injection_CmdBeginRendering`, ~33 s) and showed
+black in Eye-tracked. Causes, confirmed headless:
+- Eye-tracked: Valve declares `fragmentDensityOffsetCount` 1 for a two-view (multiview) pass but computes both eyes'
+  offsets; Turnip reads one offset per view whatever the count says (`tu_fdm_num_layers`). The first version handed
+  down an array of `count` entries, so Turnip read the right eye's offset from uninitialised stack memory. Now every
+  offset Turnip reads is written: the view count comes from the render pass / rendering view mask (else framebuffer
+  layers), each eye's gaze from Valve's array (the same memory Turnip reads with Valve alone), one-eye passes take the
+  eye from the map view's base layer.
+- Fixed: the first version flagged every 2D render target with the density-map-offset flag, including
+  external-memory images Valve deliberately leaves alone (`fdm_injection_CreateImage` skips images with
+  `VkExternalMemoryImageCreateInfo`: Zink/AHardwareBuffer imports such as surface_emul's video). The layer no longer
+  touches images. Valve's own Fixed path (`disable_offsets`) also crashed AC Nexus without this layer (1 of 2 headless
+  130 s runs, same `fdm_injection_CmdBeginRendering` -> freedreno stack), so Fixed now runs Valve's offset mode (the
+  Eye-tracked path, 0 crashes in 6 runs) with the layer replacing the gaze offsets by the optical centre.
+
+Headless, 130 s each, AC Nexus 1x, Large, darkening test, `snapshot=15` (start-flash centre vs optical centre):
+
+| run | result | left eye | right eye |
+|---|---|---|---|
+| foveation not enabled (`FDM_DEBUG` empty) | runs | whole view sharp | whole view sharp |
+| Valve only, Fixed (1) | **crash** after ~20 s, frames stopped | - | - |
+| Valve only, Fixed (2) | runs | +14%, +3% | +14%, +2% |
+| Valve only, Eye-tracked (headless default gaze) | runs | +25%, -9% | +2%, -8% |
+| centring, Fixed (2 runs) | runs, 72 fps | +2%, +1% | +2%, +1% |
+| centring, Eye-tracked | runs, 72 fps | +2%, +1% | +2%, +1% |
+
+Later snapshots (dark scene) stay non-black in every surviving run (mean ~20/255 with the darkening test, ~39 without
+it): the darkening test dims everything outside the sharp area to 20%, which in AC Nexus' dark start area looks almost
+black, so headset checks of the picture should be done with the test off. Headless gaze isn't zero (Valve's
+straight-ahead gaze lands on the optical centre, which confirms the NDC re-basing). Not done: Khronos validation, a
+GLES game, a real gaze.
+

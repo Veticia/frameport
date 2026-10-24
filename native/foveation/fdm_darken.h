@@ -2,8 +2,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-/* Diagnostic only: dim location-0 vec4 RGB where FragSizeEXT != (1,1).
+/* Diagnostic only: dim location-0 vec4 RGB where FragSizeEXT != (1,1) (or paint it 1/area, fdm_paint).
  * Unsupported interfaces pass through; alpha and all other outputs are retained. */
+static int fdm_paint; /* FRAMEPORT_FOVEATION_TEST=2: RGB = 1/fragment area (white = full density), alpha kept */
 static uint32_t *fdm_darken(const uint32_t *w,size_t n,size_t *out_n) {
  if(n<5||n>4000000||w[0]!=0x07230203||!w[3]||w[3]>1000000)return NULL;
  uint32_t bound=w[3],output=0,ptr=0,vec=0,flt=0; int entries=0,stores=0;
@@ -44,7 +45,7 @@ static uint32_t *fdm_darken(const uint32_t *w,size_t n,size_t *out_n) {
  int nui=!ui,nbv=!bv,nv2=!v2,nip=!ip;
  if(nui)ui=bound++;if(nbv)bv=bound++;if(nv2)v2=bound++;if(nip)ip=bound++;
  uint32_t frag=bound++,one=bound++,bright=bound++,dark=bound++;
- uint32_t *out=calloc(n+200+stores*64,sizeof(uint32_t));if(!out)return NULL;size_t k=0;
+ uint32_t *out=calloc(n+200+stores*72,sizeof(uint32_t));if(!out)return NULL;size_t k=0;
 #define EMIT(...) do{const uint32_t a[]={__VA_ARGS__};memcpy(out+k,a,sizeof a);k+=sizeof a/4;}while(0)
  memcpy(out,w,20);k=5;if(!ext_at)ext_at=cap_at;
  for(size_t i=5;i<=n;) {
@@ -63,10 +64,16 @@ static uint32_t *fdm_darken(const uint32_t *w,size_t n,size_t *out_n) {
   else if(op==62&&w[i+1]==output){
    uint32_t sz=bound++,x=bound++,y=bound++,area=bound++,low=bound++,factor=bound++,factors=bound++,color=bound++;
    EMIT((4u<<16)|61,v2,sz,frag);EMIT((5u<<16)|81,ui,x,sz,0);EMIT((5u<<16)|81,ui,y,sz,1);
-   EMIT((5u<<16)|132,ui,area,x,y);EMIT((5u<<16)|171,bv,low,area,one);
+   EMIT((5u<<16)|132,ui,area,x,y);
+   if(fdm_paint){uint32_t fa=bound++;
+    EMIT((4u<<16)|112,flt,fa,area);EMIT((5u<<16)|136,flt,factor,bright,fa);
+    EMIT((7u<<16)|80,vec,factors,factor,factor,factor,bright);
+    EMIT((9u<<16)|79,vec,color,factors,w[i+2],0,1,2,7);
+   }else{
+   EMIT((5u<<16)|171,bv,low,area,one);
    EMIT((6u<<16)|169,flt,factor,low,dark,bright);
    EMIT((7u<<16)|80,vec,factors,factor,factor,factor,bright);
-   EMIT((5u<<16)|133,vec,color,w[i+2],factors);
+   EMIT((5u<<16)|133,vec,color,w[i+2],factors);}
    memcpy(out+k,w+i,len*4);out[k+2]=color;k+=len;
   }else{memcpy(out+k,w+i,len*4);k+=len;}
   i+=len;

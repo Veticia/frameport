@@ -513,11 +513,31 @@ The inspected arm64 `libVkLayer_VALVE_fdm_injection.so` has these semantics (vir
   offset (`0x1b9b8`). These three flags do not resize the profile.
 - `FDM_SWAPCHAIN_SIZE` is parsed by `atoi` (`0x1c518`), clamped to nonnegative, and
   seeds a known swapchain size (`0x1ccf8`). It is a size/matching hint, not a radius.
-  The synthetic map is square with side `ceil(size/32)` (`0x19048–0x19088`); image
-  association also matches this tile size (`0x16c78`). Changing render resolution changes
-  the pixel extent, tile quantization and potentially the matched render target/map. This can
-  change the visible diagnostic area without making the ignored radius exports effective;
-  a matched device capture is needed to establish which path a particular game used.
+  The synthetic map (Zink/GLES dynamic-rendering path, `CmdBeginRendering`) is square with side
+  `ceil(size/32)`, size = the render area width (`0x19048–0x19088`); image association also matches
+  this tile size (`0x16c78`).
+- Where the sharp area lands (device-checked 2026-10-24 with AC Nexus, GitHub #394; details in
+  DEVICE_NOTES.md "Foveation: sharp area centre and size"): for Vulkan games the layer's
+  `xrCreateSwapchain` creates a map of `ceil(w/32) x ceil(h/32)` texels per eye swapchain (one array
+  layer per eye) and fills the preset rectangles in map-normalized coordinates, so the sharp area is
+  centred on the **whole swapchain** (all presets centre at about 0.51, 0.51). It knows each view's
+  imageRect (`xrEndFrame` stores them) but doesn't use it for the map. Eye-tracked offsets
+  (`calc_offset`, `0x1b848`) are `gaze NDC x 0.5 x render-area size`, rounded to the offset
+  granularity (8), measured from that same swapchain centre; `disable_offsets` (Fixed) also leaves
+  every image without `VK_IMAGE_CREATE_FRAGMENT_DENSITY_MAP_OFFSET_BIT_EXT` (added at `0x16afc`
+  only when offsets are on). A game that submits a smaller or shifted rect (dynamic resolution,
+  asymmetric eyes: AC Nexus rect=0,0 / 287,0 1726x1728 in 2016x1728, Asgard's Wrath 2 0,0 / 347,0
+  2237x2256 in 2592x2256) gets the sharp area off its view's centre, and the eye's optical axis
+  (asymmetric FOV, e.g. -1.03/+0.88 rad) isn't the rect centre either. FramePort's
+  `VK_LAYER_FRAMEPORT_fdm_centre` (native/foveation/centre.h, below Valve's layer) rewrites the
+  per-view offsets so the area sits on each eye.
+- Turnip (freedreno) applies a density map per GMEM **bin**: it reads the map on the CPU at the
+  bin's centre (`tu_calc_frag_area`, texel size `2^ceil(log2(fb/map))` >= 32 px) and renders the
+  whole bin at that density. The visible sharp area is therefore the set of bins whose centre falls
+  in Valve's rectangle: its size snaps to the bin grid (bins are ~150-200 px here and get relatively
+  smaller as render resolution grows), so the same preset looks bigger or smaller and changes
+  shape between render scales. That part is the driver's design, not a setting; FramePort can't
+  pick the bins.
 
 Per-game library preferences now store `level`. Legacy radius choices are translated on read
 (and written as `level` on Save): nearest old nominal .30 → lo, .25 → med, .20 → hi,
@@ -529,7 +549,8 @@ For device verification, hold game scene, render resolution and gaze constant; c
 `lo`, `med`, `hi` across fresh game starts (Default should match lo absent another runtime override).
 First use Fixed for a stable comparison, then Eye-tracked to check gaze following. Enable
 **Darken coarse fragments (test)** and adapter `snapshot=N` to capture submitted eye images headlessly
-every N seconds (GLES only, left eye at quarter size); compare the undarkened center and peripheral bands. Existing adapter
+every N seconds (GLES: left eye at quarter size; Vulkan: both eyes at half size, the whole swapchain layer, with
+imageRect and FOV in the log); compare the undarkened center and peripheral bands. Existing adapter
 builds need diagnostic support installed. Turn the test and snapshots off before benchmarking.
 Agent `FOVEATION_ENV_KEYS` must include `"FOVE_LEVEL"` for launcher updates via `set_settings`.
 
@@ -561,7 +582,9 @@ in Climb the same library also carries the compatibility correction.
 
 High-resolution Deadpool samples crossed from about 45 to 90 FPS with injection enabled, but temperatures and
 power rose as it rendered twice as many frames. Foveation does not guarantee lower temperature at uncapped FPS.
-Preset export/migration has configuration coverage; these preset comparisons have not been device-tested here.
+Preset export/migration has configuration coverage. Headless device check of the presets (2026-10-24, AC Nexus,
+Fixed, darkening test + FrameBridge `snapshot=N`, which also reads Vulkan eye images back): DEVICE_NOTES.md
+"Foveation: sharp area centre and size".
 
 ## Monitoring sources (probed 2026-10-07, SteamOS 0.4.3, kernel 6.18; used by the Monitor tab, agent `_monitor`)
 
