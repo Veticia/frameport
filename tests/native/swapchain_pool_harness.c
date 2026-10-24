@@ -1,8 +1,10 @@
 // Host runtime/GL doubles exercise the actual adapter implementation, without a headset.
+#define _POSIX_C_SOURCE 200809L
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
 #include <pthread.h>
+#include <time.h>
 #include <EGL/egl.h>
 #include <GLES3/gl3.h>
 #define VK_NO_PROTOTYPES
@@ -23,7 +25,7 @@ static void log_ignore(const char *fmt, ...) { (void)fmt; }
 static uintptr_t fake = 100;
 #define FAKE_HANDLE(t) ((t)(++fake))
 static XrInstance active_instance;
-static int swapchain_pool = 1;
+static int swapchain_pool = 1, layer_debug;
 static int creates, destroys, acquires, waits, releases, blits, deleted, fail_create, fail_enum, fail_wait,
     fail_release;
 static int bad_gl, fail_gl, scissor = 1, read_fb = 31, draw_fb = 32, texture = 33;
@@ -211,7 +213,9 @@ static struct {
 } vk_layouts[64];
 static VkImageCreateInfo vk_last_image;
 static VkImageCopy vk_last_copy;
-static VkImage vk_last_dst;
+static VkImageBlit vk_last_blit;
+static VkImage vk_last_dst, vk_last_blit_src;
+static int vk_blits;
 static uint32_t vk_last_memory_type;
 static VkImageLayout *vk_layout(VkImage image) {
     for (int k = 0; k < 64; ++k)
@@ -335,6 +339,18 @@ static void fk_CmdCopyImage(VkCommandBuffer c, VkImage src, VkImageLayout sl, Vk
     vk_last_dst = dst;
     ++vk_copies;
 }
+static void fk_CmdBlitImage(VkCommandBuffer c, VkImage src, VkImageLayout sl, VkImage dst, VkImageLayout dl,
+                            uint32_t n, const VkImageBlit *r, VkFilter filter) {
+    (void)c;
+    if (!vk_recording || n != 1 || sl != *vk_layout(src) || dl != *vk_layout(dst) ||
+        sl != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL || dl != VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL ||
+        filter != VK_FILTER_NEAREST)
+        ++vk_bad_layouts;
+    vk_last_blit = r[0];
+    vk_last_blit_src = src;
+    vk_last_dst = dst;
+    ++vk_blits;
+}
 static VkResult fk_QueueSubmit(VkQueue q, uint32_t n, const VkSubmitInfo *s, VkFence f) {
     (void)s;
     if (q != vk.queue || n != 1 || !f || vk_recording) ++vk_bad_layouts;
@@ -388,6 +404,7 @@ static PFN_vkVoidFunction fk_GetDeviceProcAddr(VkDevice d, const char *name) {
     FK(ResetCommandBuffer);
     FK(CmdPipelineBarrier);
     FK(CmdCopyImage);
+    FK(CmdBlitImage);
     FK(QueueSubmit);
     FK(CreateFence);
     FK(DestroyFence);
@@ -405,6 +422,31 @@ static void flip_on_destroy(XrSwapchain h) {
     (void)h;
     --vk_flip_tracked;
 }
+// flip_vk.c's flip interface: one runtime quad swapchain (6000) whose shown image is 4000 (1024x256, sRGB)
+static int flip_on = 1, flip_source_ok = 1, dump_records, dump_collects;
+static int flip_emulated(void) { return flip_on; }
+static int wants_vertical_flip(const XrCompositionLayerQuad *q) {
+    for (const XrBaseInStructure *n = (const XrBaseInStructure *)q->next; n; n = n->next)
+        if (n->type == (XrStructureType)1000040000) return (((const XrCompositionLayerImageLayoutFB *)n)->flags & 1) != 0;
+    return 0;
+}
+static int flip_source(XrSwapchain h, uint32_t layer, VkImage *image, int64_t *format, uint32_t *w, uint32_t *he) {
+    if (!flip_source_ok || h != (XrSwapchain)6000 || layer) return 0;
+    *image = (VkImage)4000;
+    *format = VK_FORMAT_R8G8B8A8_SRGB;
+    *w = 1024;
+    *he = 256;
+    return 1;
+}
+static int flip_dump_due(XrSwapchain h) { (void)h; return 1; }
+static void flip_dump_record(VkCommandBuffer cmd, int slot, XrSwapchain source, VkImage atlas, int32_t x, int32_t y,
+                             uint32_t w, uint32_t h) {
+    (void)cmd; (void)slot; (void)source; (void)x; (void)y; (void)w; (void)h;
+    if (*vk_layout(atlas) != VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) ++vk_bad_layouts;
+    ++dump_records;
+}
+static void flip_dump_collect(int slot, int ok) { (void)slot; (void)ok; ++dump_collects; }
+static void flip_dump_free(void) {}
 #include "swapchain_pool.c"
 // AC Nexus (#424): its panels, then the Quest 3 eye set while the old one lives. Returns the live runtime count.
 static int vk_session_counts(int *pooled) {
@@ -532,7 +574,7 @@ static int vk_device_sequence(void) {
           pool_cycle(i, 2, NULL) == XR_SUCCESS);
     XrSwapchainSubImage sub = {pool_images[i].handle, {{0, 0}, {1875, 1500}}, 0};
     pool_begin_frame_locked();
-    CHECK(pool_subimage_locked(&sub) && pool_finish_locked() && !vk_bad_layouts);
+    CHECK(pool_subimage_locked(&sub, 0) && pool_finish_locked() && !vk_bad_layouts);
     CHECK(vk_last_copy.srcSubresource.mipLevel == 0 && vk_last_copy.dstSubresource.mipLevel == 0);
     // Every decline reason is reported: an unknown chained struct, no mip level.
     XrBaseInStructure unknown = {(XrStructureType)1000999000};
@@ -557,8 +599,14 @@ static int vk_main(void) {
     XrGraphicsBindingVulkanKHR binding = {XR_TYPE_GRAPHICS_BINDING_VULKAN_KHR};
     XrSessionCreateInfo sci = {XR_TYPE_SESSION_CREATE_INFO, &binding};
     swapchain_pool = 0;
+    flip_on = 0;
     pool_on_create_session((XrSession)5, &sci);
     CHECK(!pool_session && !pool_vulkan);
+    flip_on = 1;  // flip emulation alone: the Vulkan session gets atlases, but nothing is pooled
+    pool_on_create_session((XrSession)5, &sci);
+    CHECK(pool_session == (XrSession)5 && pool_vulkan && pool_flips && !pool_should_create(pool_session));
+    pool_cleanup((XrSession)5);
+    CHECK(!pool_session && !pool_flips);
     swapchain_pool = 1;
     XrBaseInStructure other = {XR_TYPE_GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR};
     sci.next = &other;
@@ -625,7 +673,7 @@ static int vk_main(void) {
     CHECK(pool_cycle(i, 0, &index) == XR_SUCCESS && vk_submits == 1);
     XrSwapchainSubImage src = {panel, {{10, 5}, {100, 50}}, 0}, sub = src;
     pool_begin_frame_locked();
-    CHECK(!pool_subimage_locked(&sub));
+    CHECK(!pool_subimage_locked(&sub, 0));
     CHECK(pool_finish_locked() && vk_submits == 1);
     CHECK(pool_cycle(i, 1, NULL) == XR_SUCCESS && pool_cycle(i, 2, NULL) == XR_SUCCESS);
     // A frame: one atlas acquire/wait/release, one copy per image however often it is referenced, one submit.
@@ -672,6 +720,44 @@ static int vk_main(void) {
         CHECK(pool_rewrite_layers(again, 1, &frame) == 0 && releases == before_releases + 1 && !vk_recording);
     }
     vk_fail_submit = 0;
+    // Vertical flips: a flagged pooled quad is blitted upside down (same atlas area, rect mirrored), a flagged runtime
+    // quad gets a per-frame atlas area with its rectangle upside down, shared by both eyes; caller layers untouched.
+    {
+        XrCompositionLayerImageLayoutFB layout = {(XrStructureType)1000040000, NULL, 1};
+        XrCompositionLayerQuad fq = q, rq = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+        fq.next = &layout;
+        rq.next = &layout;
+        rq.subImage = (XrSwapchainSubImage){(XrSwapchain)6000, {{24, 16}, {1000, 200}}, 0};
+        const XrCompositionLayerBaseHeader *fl[] = {(void *)&fq, (void *)&rq, (void *)&rq};
+        int blits0 = vk_blits, copies0 = vk_copies;
+        pool_flips = 1;
+        CHECK(pool_rewrite_layers(fl, 3, &frame) == 3 && !vk_bad_layouts && !vk_recording);
+        CHECK(vk_blits == blits0 + 2 && vk_copies == copies0 && dump_records == 2);
+        // pooled: whole image reversed into its rect; quad rect 10,5 100x50 -> y = 1020 - 5 - 50
+        CHECK(frame.quads[0].subImage.swapchain == pool_atlas[0].handle &&
+              frame.quads[0].subImage.imageRect.offset.x == r.x + 10 &&
+              frame.quads[0].subImage.imageRect.offset.y == r.y + 1020 - 55);
+        // runtime: atlas area outside the pooled rect, rows reversed, source rect as submitted
+        XrRect2Di m = frame.quads[1].subImage.imageRect;
+        CHECK(frame.quads[1].subImage.swapchain == pool_atlas[0].handle && m.extent.width == 1000 &&
+              m.extent.height == 200 && !memcmp(&frame.quads[2].subImage, &frame.quads[1].subImage, sizeof(XrSwapchainSubImage)));
+        CHECK(!(m.offset.x < r.x + r.w && m.offset.x + 1000 > r.x && m.offset.y < r.y + r.h && m.offset.y + 200 > r.y));
+        CHECK(vk_last_blit_src == (VkImage)4000 && vk_last_blit.srcOffsets[0].y == 16 &&
+              vk_last_blit.srcOffsets[1].y == 216 && vk_last_blit.dstOffsets[0].y == m.offset.y + 200 &&
+              vk_last_blit.dstOffsets[1].y == m.offset.y && *vk_layout((VkImage)4000) == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+        CHECK(rq.subImage.swapchain == (XrSwapchain)6000 && fq.subImage.swapchain == panel);
+        // every frame again (late drawing shows up), never in place: the source is only read
+        fl[0] = (void *)&fq;  // (the call rewrites the array it is given)
+        fl[1] = fl[2] = (void *)&rq;
+        CHECK(pool_rewrite_layers(fl, 3, &frame) == 3 && vk_blits == blits0 + 4 && !vk_bad_layouts);
+        // an undrawn/unknown source stays as it is
+        flip_source_ok = 0;
+        fl[0] = (void *)&fq;
+        fl[1] = fl[2] = (void *)&rq;
+        CHECK(pool_rewrite_layers(fl, 3, &frame) == 3 && frame.quads[1].subImage.swapchain == (XrSwapchain)6000);
+        flip_source_ok = 1;
+        pool_flips = 0;
+    }
     // Destroy waits for in-flight copies, frees the image and its memory and the flip tracking.
     int images = vk_images_alive, memory = vk_memory_alive;
     pool_destroy(i);
@@ -739,37 +825,37 @@ int main(void) {
     CHECK(released(second) == 0);
     XrSwapchainSubImage src = {second, {{10, 5}, {100, 50}}, 0}, sub = src;
     pool_begin_frame_locked();
-    CHECK(pool_subimage_locked(&sub));
+    CHECK(pool_subimage_locked(&sub, 0));
     CHECK(sub.swapchain == pool_atlas[0].handle && sub.imageRect.offset.x == pool_images[j].rect.x + 10);
     CHECK(sub.imageRect.offset.y == 5 && sub.imageRect.extent.width == 100);
     CHECK(read_fb == 31 && draw_fb == 32 && scissor == 1 && texture == 33);
     sub = src;
-    CHECK(pool_subimage_locked(&sub) && blits == 1); // two eyes/strips copy source once
+    CHECK(pool_subimage_locked(&sub, 0) && blits == 1); // two eyes/strips copy source once
     CHECK(acquires == 1 && waits == 1 && releases == 0 && pool_finish_locked() && releases == 1);
     pool_begin_frame_locked();
     sub = src;
-    CHECK(pool_subimage_locked(&sub) && blits == 2 && acquires == 2);
+    CHECK(pool_subimage_locked(&sub, 0) && blits == 2 && acquires == 2);
     CHECK(pool_finish_locked());
     // Failed wait keeps ownership, retries the same acquired image, never releases before wait.
     pool_begin_frame_locked();
     fail_wait = 1;
     sub = src;
-    CHECK(!pool_subimage_locked(&sub));
+    CHECK(!pool_subimage_locked(&sub, 0));
     CHECK(pool_finish_locked());
     CHECK(acquires == 3 && releases == 2);
     fail_wait = 0;
-    CHECK(pool_subimage_locked(&sub) && acquires == 3);
+    CHECK(pool_subimage_locked(&sub, 0) && acquires == 3);
     CHECK(pool_finish_locked());
     pool_begin_frame_locked();
     bad_gl = 1;
     sub = src;
-    CHECK(!pool_subimage_locked(&sub));
+    CHECK(!pool_subimage_locked(&sub, 0));
     CHECK(pool_finish_locked());
     bad_gl = 0;
     CHECK(read_fb == 31 && draw_fb == 32 && scissor == 1);
     pool_begin_frame_locked();
     sub = src;
-    CHECK(pool_subimage_locked(&sub));
+    CHECK(pool_subimage_locked(&sub, 0));
     fail_release = 1;
     CHECK(!pool_finish_locked());
     fail_release = 0;
@@ -798,17 +884,17 @@ int main(void) {
     sub = src;
     sub.imageRect = (XrRect2Di){{0, 0}, {0, 0}};
     pool_begin_frame_locked();
-    CHECK(pool_subimage_locked(&sub) && sub.imageRect.extent.width == 1024);
+    CHECK(pool_subimage_locked(&sub, 0) && sub.imageRect.extent.width == 1024);
     CHECK(pool_finish_locked());
     sub = src;
     sub.imageRect.offset.x = 2000;
     pool_begin_frame_locked();
-    CHECK(!pool_subimage_locked(&sub));
+    CHECK(!pool_subimage_locked(&sub, 0));
     CHECK(pool_finish_locked());
     sub = src;
     sub.imageRect.offset.x = -10;
     pool_begin_frame_locked();
-    CHECK(pool_subimage_locked(&sub) && sub.imageRect.offset.x == pool_images[j].rect.x && sub.imageRect.extent.width == 90);
+    CHECK(pool_subimage_locked(&sub, 0) && sub.imageRect.offset.x == pool_images[j].rect.x && sub.imageRect.extent.width == 90);
     CHECK(pool_finish_locked());
     PoolRect old = pool_images[i].rect;
     pool_destroy(i);

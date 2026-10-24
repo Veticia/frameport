@@ -1741,7 +1741,7 @@ Saves a few UI panels before and after FrameBridge turns them upright, for testi
   - Game settings → Troubleshooting → "Upside-down panel images (diagnostics)" (advanced).
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
 
-> Saves the first N UI panels that FrameBridge turns upright (Vulkan games whose panels are stored upside down), before and after the flip, as fb_flip_&lt;n&gt;_raw.ppm / fb_flip_&lt;n&gt;_upright.ppm in the game's files folder on the Frame. Shows what the runtime gets without anyone wearing the headset.
+> Saves up to N images of the UI panels FrameBridge turns upright (Vulkan games whose panels are stored upside down), exactly as the runtime gets them, as fb_flip_&lt;n&gt;.ppm in the game's files folder on the Frame (a new file whenever a panel's content changes). Shows what is displayed without anyone wearing the headset.
 
 ### <a id="adapter-flip_emul"></a>Fix upside-down menus
 
@@ -1755,7 +1755,7 @@ Turns menus and text the right way up.
   - Game settings → Menus and screens → "Fix upside-down menus".
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
 
-> Blit quads flagged XrCompositionLayerImageLayoutFB VERTICAL_FLIP upside down (Vulkan). Fixes UI panels and text that show upside down (for example Assassin's Creed Nexus).
+> Shows quads flagged XrCompositionLayerImageLayoutFB VERTICAL_FLIP as upside-down copies, refreshed every frame (Vulkan). Fixes UI panels and text that show upside down (for example Assassin's Creed Nexus).
 
 ### <a id="adapter-flip_quads"></a>Rotate panels 180°
 

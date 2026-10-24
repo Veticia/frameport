@@ -31,9 +31,9 @@ SETTINGS = [
      "fails on any pending error; after one such failure at the start it allocated GPU memory every frame without "
      "freeing it (e.g. Vader Immortal, ~20 MB a second)."),
     ("flip_dump", "int", 0, "Upside-down panel images (diagnostics)",
-     "Saves the first N UI panels that FrameBridge turns upright (Vulkan games whose panels are stored upside down), "
-     "before and after the flip, as fb_flip_<n>_raw.ppm / fb_flip_<n>_upright.ppm in the game's files folder on the "
-     "Frame. Shows what the runtime gets without anyone wearing the headset."),
+     "Saves up to N images of the UI panels FrameBridge turns upright (Vulkan games whose panels are stored upside "
+     "down), exactly as the runtime gets them, as fb_flip_<n>.ppm in the game's files folder on the Frame (a new file "
+     "whenever a panel's content changes). Shows what is displayed without anyone wearing the headset."),
     ("strip_color_bias", "int", 0, "Drop layer color fades",
      "Removes the color scale/bias (XR_KHR_composition_layer_color_scale_bias) from the game's layers, so the runtime "
      "doesn't apply it (diagnostics). Fades done this way no longer show."),
@@ -82,8 +82,8 @@ SETTINGS = [
      "game drew and black where it should show the room (for example Star Wars: Beyond Victory). The alpha is "
      "inverted in the game's image before it is composited (Vulkan)."),
     ("flip_emul", "int", 1, "Emulate flipped quads",
-     "Blit quads flagged XrCompositionLayerImageLayoutFB VERTICAL_FLIP upside down (Vulkan). Fixes UI panels and "
-     "text that show upside down (for example Assassin's Creed Nexus)."),
+     "Shows quads flagged XrCompositionLayerImageLayoutFB VERTICAL_FLIP as upside-down copies, refreshed every frame "
+     "(Vulkan). Fixes UI panels and text that show upside down (for example Assassin's Creed Nexus)."),
     ("cylinder_strips", "int", 1, "Show curved panels",
      "Cylinder layers (curved menus and movie screens, for example 4XVR), which the Frame's runtime lacks, are shown "
      "as a few flat strips along the curve. 0 = drop them. 360° (equirect) layers can't be shown on the Frame."),

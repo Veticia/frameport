@@ -15,8 +15,9 @@ Vulkan sessions (#424, AC Nexus) use the same setting: format-43 (sRGB RGBA8) si
 device-local VkImages (app usage + transfer src/dst, returned as `XrSwapchainImageVulkanKHR`), moved to
 COLOR_ATTACHMENT_OPTIMAL at their first acquire; xrEndFrame records one command buffer per frame (a 3-deep fence ring
 on the binding's queue, submits under `flip_lock`) with vkCmdCopyImage into the waited atlas image (COLOR_ATTACHMENT ->
-TRANSFER_DST -> COLOR_ATTACHMENT) before releasing it. Pooled panels stay tracked by `flip_vk.c`, so flipped quads are
-still turned upright in place. Other formats and every arraySize-2 (eye) image keep runtime swapchains. The harness
+TRANSFER_DST -> COLOR_ATTACHMENT) before releasing it. Quads flagged VERTICAL_FLIP (`flip_emul`, also without the
+pool) use the same atlases: a pooled panel's copy becomes a vkCmdBlitImage with reversed rows, a runtime swapchain's
+quad gets a per-frame atlas area with an upside-down blit of its shown image; the app's images are only read. Other formats and every arraySize-2 (eye) image keep runtime swapchains. The harness
 checks layouts, copy regions, the ring and AC Nexus' swapchain count with a recording Vulkan double; the real queue,
 layouts on Turnip and the picture need the device.
 

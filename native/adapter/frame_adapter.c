@@ -112,7 +112,7 @@ static int snapshot = 0;  // seconds between eye-image snapshots (snapshot_gl.c;
 static char snap_dir[256];
 static int gl_error_clear;  // GLES: clear GL errors the app left pending before calling the runtime (Vader)
 static int gles_session;
-static int flip_dump;  // diagnostics: save the first N flipped quads before/after the flip (flip_vk.c)
+static int flip_dump;  // diagnostics: save up to N images of flipped quads as submitted (atlas copies, flip_vk.c)
 static void snap_on_create(XrSwapchain handle, const XrSwapchainCreateInfo *info);
 static void snap_on_destroy(XrSwapchain handle);
 static void snap_on_enumerate(XrSwapchain handle, uint32_t count, const XrSwapchainImageBaseHeader *images);
@@ -2008,10 +2008,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEndFrame(XrSession session, const XrFrameEndInf
             continue;
         }
         if (!layer || (layer_fix && !layer_usable(layer))) { ++dropped; continue; }
-        if (layer->type == XR_TYPE_COMPOSITION_LAYER_QUAD) {
-            const XrCompositionLayerQuad *flipped = flip_quad(session, (const XrCompositionLayerQuad *)layer, &quads[count]);
-            if (flipped) { layer = (const XrCompositionLayerBaseHeader *)flipped; ++swapped; }
-        }
+        // quads flagged VERTICAL_FLIP (Vulkan): turned upright by the atlas copy in pool_rewrite_layers below
         if (flip_quads && layer->type == XR_TYPE_COMPOSITION_LAYER_QUAD) {
             // Rotate 180 degrees about the quad's local X axis: shows the image upright without mirroring it.
             quads[count] = *(const XrCompositionLayerQuad *)layer;
@@ -2239,7 +2236,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEndFrame(XrSession session, const XrFrameEndInf
         count = tcount;
     }
     PoolFrame pool_frame;
-    if (swapchain_pool && session == pool_session) {
+    if ((swapchain_pool || pool_flips) && session == pool_session) {
         count = pool_rewrite_layers(kept, count, &pool_frame);
         ++swapped;
     }
@@ -2617,7 +2614,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrGetInstanceProcAddr(XrInstance instance, const 
         HOOK_AS(xrReleaseSwapchainImage, surf_composite_release)
         HOOK_AS(xrWaitSwapchainImage, surf_composite_wait)
     }
-    if (swapchain_pool) { HOOK_AS(xrDestroySession, hook_xrDestroySession) }
+    if (swapchain_pool || flip_emul_setting) { HOOK_AS(xrDestroySession, hook_xrDestroySession) }  // pool/flip atlases
     if (cube_standin) {
         HOOK_AS(xrEndSession, cube_end_session)
         HOOK_AS(xrDestroySession, hook_xrDestroySession)
