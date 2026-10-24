@@ -62,17 +62,9 @@ static struct {
     VkDeviceMemory scratch_memory;
     VkFormat scratch_format;
     uint32_t scratch_w, scratch_h;
-    // late-drawing checks (sample_start/sample_poll): copies read back a frame or more later, never waited for
-    struct {
-        VkCommandBuffer cmd;
-        VkFence fence;
-        VkBuffer buf;
-        VkDeviceMemory mem;
-        VkDeviceSize capacity, size;
-        int busy, kind;  // kind 1: the image right after its flip, 2: a later check
-        XrSwapchain handle;
-        uint32_t index, acquires;
-    } sample[4];
+    // image samples for late-drawing checks (flip_vk.c sample_print): 16x16 texels, host-visible
+    VkBuffer print_buf;
+    VkDeviceMemory print_mem;
 } vk;
 
 typedef struct {
@@ -92,7 +84,6 @@ typedef struct {
     uint32_t flipped_count[MAX_IMAGES];
     // late drawing: a sample of the image right after its flip, the last sample, and frames left to watch it
     uint32_t print[MAX_IMAGES], seen[MAX_IMAGES], watch[MAX_IMAGES];
-    uint32_t acquires;  // since creation: panels the app redraws get new images, static ones are watched
     uint32_t alpha_inverted[MAX_IMAGES];  // alpha_blend_vk.c: array layers whose alpha was inverted since the acquire
     int dumped;  // flip_dump saved this swapchain's quad (its dump number)
     int shown_dumped, frames_since_dump;
@@ -130,7 +121,8 @@ static void flip_on_create_session(const XrSessionCreateInfo *info) {
             vk.scratch = VK_NULL_HANDLE;  // belonged to the previous session's device
             vk.scratch_memory = VK_NULL_HANDLE;
             vk.scratch_w = vk.scratch_h = 0;
-            memset(vk.sample, 0, sizeof(vk.sample));  // the previous session's device
+            vk.print_buf = VK_NULL_HANDLE;
+            vk.print_mem = VK_NULL_HANDLE;
             LOG("flip: Vulkan session (queue family %u index %u)", vk.family, vk.index);
         }
 }
@@ -161,7 +153,6 @@ static void flip_on_acquire(XrSwapchain handle, uint32_t index) {
         t->last_acquired = index;
         if (index < MAX_IMAGES) t->flipped_count[index] = 0;  // new content: upside down again
         if (index < MAX_IMAGES) t->watch[index] = 0;
-        ++t->acquires;
         if (index < MAX_IMAGES) t->alpha_inverted[index] = 0;
         if(t->acquired_count<MAX_IMAGES)t->acquired[t->acquired_count++]=index;
         if (t->held_count < MAX_IMAGES) t->held[t->held_count++] = index;
@@ -324,137 +315,64 @@ static int scratch_fit(VkFormat format, uint32_t w, uint32_t h) {
 
 // flip_dump=N (diagnostics): the quad's rectangle as the app drew it ("raw") and as submitted after the flip
 // ("upright"), saved as files/fb_flip_<n>_<raw|upright>.ppm (8-bit RGBA formats only).
-#define PRINT_PIXELS (4u << 20)  // larger rectangles: evenly spaced whole rows up to this many pixels
-#define PRINT_MAX_ROWS 1024
-#define PRINT_FRAMES 900  // how long a flipped image is watched for late drawing (~10 s: every frame for the first
-                          // ~1.5 s, then every 8th)
-#define PRINT_STATIC_ACQUIRES 6  // only panels acquired this rarely are watched (redrawn panels get new images)
+#define PRINT_GRID 16
+#define PRINT_FRAMES 180  // how long a flipped image is watched for late drawing (~2 s)
 
-// A fingerprint of the rectangle: every pixel (very large ones: evenly spaced whole rows), hashed (0 = no sample).
-// Unity sometimes finishes a panel after xrEndFrame, so its drawing landed after the flip, upside down, and the image
-// was never acquired again (AC Nexus' "calibrate arms" screen; its "work of fiction" notice is a few lines of text on
-// an empty panel, which a sparse sample missed).
-// Starts a copy of the rectangle (every pixel; very large ones: evenly spaced whole rows) into a free slot; the result
-// is read by sample_poll on a later frame. Waiting for it here stalled every frame behind the game's GPU work.
-static int sample_start(tracked_swapchain *t, uint32_t index, uint32_t layer, XrRect2Di rect, int kind) {
-    int64_t format = t->info.format;
+// A fingerprint of the rectangle: 16x16 texels on a grid, hashed (0 = no sample). Unity sometimes finishes a panel
+// after xrEndFrame, so its drawing landed after the flip, upside down, and the image was never acquired again (AC
+// Nexus' "calibrate arms" screen).
+static int sample_print(VkImage app, uint32_t layer, XrRect2Di rect, int64_t format, uint32_t *out) {
     if (format != VK_FORMAT_R8G8B8A8_SRGB && format != VK_FORMAT_R8G8B8A8_UNORM && format != VK_FORMAT_B8G8R8A8_SRGB &&
         format != VK_FORMAT_B8G8R8A8_UNORM) return 0;
-    int slot = -1;
-    for (int i = 0; i < 4 && slot < 0; ++i)
-        if (!vk.sample[i].busy) slot = i;
-    if (slot < 0) return 0;
-    __typeof__(vk.sample[0]) *sm = &vk.sample[slot];
-    uint32_t width = (uint32_t)rect.extent.width, height = (uint32_t)rect.extent.height;
-    uint32_t rows = (uint64_t)width * height <= PRINT_PIXELS ? height : PRINT_PIXELS / width;
-    if (rows > height) rows = height;
-    if (rows < height && rows > PRINT_MAX_ROWS) rows = PRINT_MAX_ROWS;
-    if (!rows) return 0;
-    VkDeviceSize size = (VkDeviceSize)rows * width * 4;
-    if (!sm->cmd) {
-        VkCommandBufferAllocateInfo alloc = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, NULL, vk.pool,
-                                             VK_COMMAND_BUFFER_LEVEL_PRIMARY, 1};
-        VkFenceCreateInfo fence = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, NULL, 0};
-        if (vk.AllocateCommandBuffers(vk.device, &alloc, &sm->cmd) != VK_SUCCESS) { sm->cmd = VK_NULL_HANDLE; return 0; }
-        if (vk.CreateFence(vk.device, &fence, NULL, &sm->fence) != VK_SUCCESS) { sm->fence = VK_NULL_HANDLE; return 0; }
-    }
-    if (!sm->fence) return 0;
-    if (sm->buf && sm->capacity < size) {
-        vk.DestroyBuffer(vk.device, sm->buf, NULL);
-        vk.FreeMemory(vk.device, sm->mem, NULL);
-        sm->buf = VK_NULL_HANDLE;
-        sm->mem = VK_NULL_HANDLE;
-    }
-    if (!sm->buf) {
+    VkDeviceSize size = PRINT_GRID * PRINT_GRID * 4;
+    if (!vk.print_buf) {
         VkBufferCreateInfo bi = {VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, NULL, 0, size, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                                  VK_SHARING_MODE_EXCLUSIVE, 0, NULL};
-        if (vk.CreateBuffer(vk.device, &bi, NULL, &sm->buf) != VK_SUCCESS) { sm->buf = VK_NULL_HANDLE; return 0; }
+        if (vk.CreateBuffer(vk.device, &bi, NULL, &vk.print_buf) != VK_SUCCESS) { vk.print_buf = VK_NULL_HANDLE; return 0; }
         VkMemoryRequirements req;
-        vk.GetBufferMemoryRequirements(vk.device, sm->buf, &req);
+        vk.GetBufferMemoryRequirements(vk.device, vk.print_buf, &req);
         uint32_t type = UINT32_MAX;
         for (uint32_t i = 0; i < vk.memory.memoryTypeCount && type == UINT32_MAX; ++i)
             if ((req.memoryTypeBits & (1u << i)) && (vk.memory.memoryTypes[i].propertyFlags &
                 (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) ==
                 (VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) type = i;
         VkMemoryAllocateInfo ai = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, NULL, req.size, type};
-        if (type == UINT32_MAX || vk.AllocateMemory(vk.device, &ai, NULL, &sm->mem) != VK_SUCCESS ||
-            vk.BindBufferMemory(vk.device, sm->buf, sm->mem, 0) != VK_SUCCESS) {
-            if (sm->mem) vk.FreeMemory(vk.device, sm->mem, NULL);
-            vk.DestroyBuffer(vk.device, sm->buf, NULL);
-            sm->buf = VK_NULL_HANDLE;
-            sm->mem = VK_NULL_HANDLE;
+        if (type == UINT32_MAX || vk.AllocateMemory(vk.device, &ai, NULL, &vk.print_mem) != VK_SUCCESS ||
+            vk.BindBufferMemory(vk.device, vk.print_buf, vk.print_mem, 0) != VK_SUCCESS) {
+            if (vk.print_mem) vk.FreeMemory(vk.device, vk.print_mem, NULL);
+            vk.DestroyBuffer(vk.device, vk.print_buf, NULL);
+            vk.print_buf = VK_NULL_HANDLE;
+            vk.print_mem = VK_NULL_HANDLE;
             return 0;
         }
-        sm->capacity = size;
     }
-    static VkBufferImageCopy regions[PRINT_MAX_ROWS];
-    uint32_t count = rows == height ? 1 : rows;
-    if (rows == height)  // the whole rectangle
-        regions[0] = (VkBufferImageCopy){0, 0, 0, {VK_IMAGE_ASPECT_COLOR_BIT, 0, layer, 1},
-                                         {rect.offset.x, rect.offset.y, 0}, {width, height, 1}};
-    else
-        for (uint32_t y = 0; y < rows; ++y)
-            regions[y] = (VkBufferImageCopy){(VkDeviceSize)y * width * 4, 0, 0, {VK_IMAGE_ASPECT_COLOR_BIT, 0, layer, 1},
-                {rect.offset.x, rect.offset.y + (int32_t)((2 * y + 1) * (int64_t)height / (2 * rows)), 0}, {width, 1, 1}};
-    VkImage app = t->images[index];
+    if (!vk_cmd_idle()) return 0;
+    VkBufferImageCopy regions[PRINT_GRID * PRINT_GRID];
+    for (int y = 0; y < PRINT_GRID; ++y)
+        for (int x = 0; x < PRINT_GRID; ++x) {
+            int i = y * PRINT_GRID + x;
+            regions[i] = (VkBufferImageCopy){(VkDeviceSize)i * 4, 0, 0, {VK_IMAGE_ASPECT_COLOR_BIT, 0, layer, 1},
+                {rect.offset.x + (int32_t)((2 * x + 1) * (int64_t)rect.extent.width / (2 * PRINT_GRID)),
+                 rect.offset.y + (int32_t)((2 * y + 1) * (int64_t)rect.extent.height / (2 * PRINT_GRID)), 0}, {1, 1, 1}};
+        }
     VkCommandBufferBeginInfo begin = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, NULL,
                                       VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, NULL};
-    VkCommandBuffer saved = vk.cmd;  // barrier() records into vk.cmd
-    vk.cmd = sm->cmd;
-    vk.ResetCommandBuffer(sm->cmd, 0);
-    vk.BeginCommandBuffer(sm->cmd, &begin);
+    vk.ResetCommandBuffer(vk.cmd, 0);
+    vk.BeginCommandBuffer(vk.cmd, &begin);
     barrier(app, layer, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
-    vk.CmdCopyImageToBuffer(sm->cmd, app, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, sm->buf, count, regions);
+    vk.CmdCopyImageToBuffer(vk.cmd, app, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, vk.print_buf, PRINT_GRID * PRINT_GRID, regions);
     barrier(app, layer, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
-    vk.cmd = saved;
-    vk.EndCommandBuffer(sm->cmd);
-    VkSubmitInfo submit = {VK_STRUCTURE_TYPE_SUBMIT_INFO, NULL, 0, NULL, NULL, 1, &sm->cmd, 0, NULL};
-    if (vk.QueueSubmit(vk.queue, 1, &submit, sm->fence) != VK_SUCCESS) return 0;
-    sm->busy = 1;
-    sm->kind = kind;
-    sm->size = size;
-    sm->handle = t->handle;
-    sm->index = index;
-    sm->acquires = t->acquires;
+    vk.EndCommandBuffer(vk.cmd);
+    if (vk_cmd_submit(100000000ull) != 1) return 0;  // still running: no sample this frame
+    void *mapped = NULL;
+    if (vk.MapMemory(vk.device, vk.print_mem, 0, size, 0, &mapped) != VK_SUCCESS) return 0;
+    uint32_t hash = 2166136261u;
+    for (VkDeviceSize i = 0; i < size; ++i) hash = (hash ^ ((const unsigned char *)mapped)[i]) * 16777619u;
+    vk.UnmapMemory(vk.device, vk.print_mem);
+    *out = hash ? hash : 1;
     return 1;
-}
-
-// Reads finished copies: a "kind 1" sample is the image right after its flip; a later one that differs from it and
-// matches the previous check (drawing settled) is the app's late drawing, upside down: flipped again on its next quad.
-static void sample_poll(void) {
-    for (int i = 0; i < 4; ++i) {
-        __typeof__(vk.sample[0]) *sm = &vk.sample[i];
-        if (!sm->busy || vk.WaitForFences(vk.device, 1, &sm->fence, VK_TRUE, 0) != VK_SUCCESS) continue;
-        vk.ResetFences(vk.device, 1, &sm->fence);
-        sm->busy = 0;
-        void *mapped = NULL;
-        if (vk.MapMemory(vk.device, sm->mem, 0, sm->size, 0, &mapped) != VK_SUCCESS) continue;
-        uint64_t h = 1469598103934665603ull;  // 8 bytes at a time: a panel is up to 4 MB
-        const uint64_t *words = mapped;
-        for (VkDeviceSize k = 0; k < sm->size / 8; ++k) h = (h ^ words[k]) * 1099511628211ull;
-        uint32_t hash = (uint32_t)(h ^ (h >> 32));
-        vk.UnmapMemory(vk.device, sm->mem);
-        tracked_swapchain *t = find_tracked(sm->handle, 0);
-        uint32_t x = sm->index;
-        if (!t || x >= MAX_IMAGES || t->acquires != sm->acquires || !t->flipped_count[x]) continue;  // new content since
-        if (sm->kind == 1) {
-            t->print[x] = t->seen[x] = hash;
-            t->watch[x] = PRINT_FRAMES;
-        } else if (t->watch[x] && hash != t->print[x]) {
-            if (hash == t->seen[x]) {
-                static int late;
-                if (late++ < 10)
-                    LOG("flip: quad swapchain=%p (%ux%u) image %u was drawn after its flip, flipping it again",
-                        (void *)(uintptr_t)t->handle, t->info.width, t->info.height, x);
-                t->flipped_count[x] = 0;
-                t->watch[x] = 0;
-            } else {
-                t->seen[x] = hash;
-            }
-        }
-    }
 }
 
 static int dump_rect(VkImage app, uint32_t layer, XrRect2Di rect, int64_t format, int n, const char *what) {
@@ -556,13 +474,20 @@ static const XrCompositionLayerQuad *flip_quad(XrSession session, const XrCompos
         else if (flip_dumps < flip_dump && dump_rect(t->images[index], layer, rect, t->info.format, flip_dumps + 1, "late"))
             ++flip_dumps;
     }
-    sample_poll();
     if (t->flipped_count[index] && t->watch[index] && t->flipped[index][0].layer == layer &&
-        !memcmp(&t->flipped[index][0].rect, &rect, sizeof rect) &&  // the image's first flipped quad: drawn into late?
-        (--t->watch[index] > PRINT_FRAMES - 108 || t->watch[index] % 8 == 0)) {
-        int pending = 0;
-        for (int i = 0; i < 4; ++i) pending |= vk.sample[i].busy && vk.sample[i].handle == t->handle;
-        if (!pending) sample_start(t, index, layer, rect, 2);
+        !memcmp(&t->flipped[index][0].rect, &rect, sizeof rect)) {  // the image's first flipped quad: drawn into late?
+        --t->watch[index];
+        uint32_t now = 0;
+        if (sample_print(t->images[index], layer, rect, t->info.format, &now) && now != t->print[index]) {
+            if (now == t->seen[index]) {  // changed since the flip and settled: the app's late drawing, upside down
+                static int late;
+                if (late++ < 10)
+                    LOG("flip: quad swapchain=%p (%ux%u) image %u was drawn after its flip, flipping it again",
+                        (void *)(uintptr_t)q->subImage.swapchain, t->info.width, t->info.height, index);
+                t->flipped_count[index] = 0;
+            }
+            t->seen[index] = now;
+        }
     }
     for (uint32_t i = 0; i < t->flipped_count[index]; ++i)
         if (t->flipped[index][i].layer == layer && !memcmp(&t->flipped[index][i].rect, &rect, sizeof rect)) goto done;
@@ -628,8 +553,11 @@ static const XrCompositionLayerQuad *flip_quad(XrSession session, const XrCompos
     if (dump) dump_rect(app, layer, rect, t->info.format, dump, "upright");
     t->flipped[index][t->flipped_count[index]].rect = rect;
     t->flipped[index][t->flipped_count[index]++].layer = layer;
-    if (t->flipped_count[index] == 1 && t->acquires <= PRINT_STATIC_ACQUIRES)
-        sample_start(t, index, layer, rect, 1);  // right behind the flip on the queue; watched once it's read
+    if (t->flipped_count[index] == 1 && submitted == 1 &&
+        sample_print(app, layer, rect, t->info.format, &t->print[index])) {
+        t->seen[index] = t->print[index];
+        t->watch[index] = PRINT_FRAMES;
+    }
     if (layer_debug && t->traced++ < 12)  // layer_debug: its first flips, with the app's acquire/release state
         LOG("flip: swapchain=%p %ux%u image %u (acquired %u, released %d, held %u) rect=%d,%d layer %u", (void *)(uintptr_t)q->subImage.swapchain,
             t->info.width, t->info.height, index, t->last_acquired, t->released_any ? (int)t->last_released : -1,
