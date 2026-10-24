@@ -204,6 +204,36 @@ scheme, explicit component or not, no property to disable): it writes `steam://o
 → 4XVR) can't work inside Lepton; don't retry without Valve changing it. Lepton installs exactly one `*.apk` per app
 folder (two break `get_apk_path`).
 
+## Browser stand-in for sign-ins (Plex, GitHub #466)
+
+**Browser hand-off (2026-10-24, GitHub #466 Plex):** Lepton's hand-off is in services.jar
+`com.android.server.wm.ActivityStarter.execute()`, before anything is resolved: when the request's intent action is
+`android.intent.action.VIEW` it logs `ActivityTaskManager: Intercepted VIEW: <data>`, appends
+`steam://openurl/<data>\n` to `/lepton/steam.pipe` (mounted rw from the host's `~/.steam/steam.pipe`, a 0600 FIFO;
+Steam's console_log.txt then shows `ExecCommandLine: "steam://openurl/…"`) and returns START_SUCCESS (0) — also for a
+VIEW without data (nothing written) and for an explicit component. Other actions start normally. Apps that check for a
+browser first (Plex: `<queries>` for VIEW + BROWSABLE http/https, then "no browser installed") never get there: the
+container has no browser package. Patch `frame.browser_handoff` (opt-in; offered for 2D apps and suggested-off when
+the manifest's `<queries>` ask for a browser or a Custom Tabs service, analysis `browser_query`) adds
+`org.frameport.handoff.BrowserHandoff` to the app's own manifest (exported, Theme.NoDisplay, excludeFromRecents,
+VIEW + DEFAULT + BROWSABLE, schemes http/https without a host, so the app's own host-specific deep links are
+unchanged; missing android: attribute names are inserted into the resource-mapped part of the string pool,
+`axml._attr_name`) and its class as the next `classesN.dex` (`native/java-handoff`, `dex/browser-handoff.dex`). The
+app's query now finds its own stand-in; its startActivity(VIEW) is still taken by Lepton before resolution, so the stand-in
+normally never runs. If it is started directly (another action, explicit component), it writes the same pipe line on a
+background thread and finishes. No second package (see Companion apps above). A 2D app turns from "installed
+unchanged" into a FramePort build signed with FramePort's key once an APK patch is on (`engine.flat_as_is` in
+`pipeline.set_recipe`; before, a hand-enabled APK patch on a 2D app stayed `as_is` and was never applied, e.g.
+Plex's `frame.sdl_clipboard`). Whether the app then notices the finished sign-in depends on its flow (PIN/code polling
+works from any browser; a redirect back into the app through a link can't, since Lepton sends every VIEW to Steam).
+Verified headless on the dev Frame (2026-10-24) with a scratch 2D test app (targetSdk 33, Plex's `<queries>`,
+`queryIntentActivities`/`resolveActivity` with MATCH_DEFAULT_ONLY, then startActivity): unpatched `query: 0`,
+`resolve: null`; with the patch `query: 1 … org.frameport.handoff.BrowserHandoff`, the VIEW start returned normally
+and Steam's console_log had `ExecCommandLine: "steam://openurl/https://example.com/?…=view"`; an explicit start of the
+stand-in wrote `…=explicit` itself (logcat `FramePort: browser hand-off: page sent to Steam`): the app uid can open
+`/lepton/steam.pipe` for writing. aapt2 reads the edited manifest of 70 real APKs with the original tree unchanged.
+Plex's own sign-in flow is unverified.
+
 ## Text input (Stremio VR)
 
 **Text input (2026-10-03, verified in the headset with Stremio VR):** Lepton's Android has no IME (`ime list` empty)

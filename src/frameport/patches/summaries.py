@@ -82,6 +82,8 @@ SUMMARIES = {
                                     "the Frame.",
     "frame.sdl_clipboard": "Lets SDL and LÖVE games start on the Frame (they'd crash looking for a clipboard).",
     "frame.godot_clipboard": "Lets Godot games start on the Frame (they'd crash looking for a clipboard).",
+    "frame.browser_handoff": "For apps that say no browser is installed (e.g. when signing in): their web pages "
+                             "open in Steam's browser instead.",
     "frame.unreal_skip_obb_delivery": "Skips a separate data-file check when an Unreal game still hangs at startup "
                                       "with the content check off. Experimental; the game still needs its data.",
     "frame.unreal_skip_obb_check": "Starts Unreal games without re-checking their data file (they'd seem to hang "

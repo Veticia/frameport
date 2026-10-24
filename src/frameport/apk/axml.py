@@ -575,3 +575,220 @@ def define_meta_permissions(manifest: bytes) -> tuple[bytes, list[str]] | None:
     data = x.data[:insert_at] + chunks + x.data[insert_at:]
     struct.pack_into("<I", data, 4, len(data))
     return bytes(data), wanted
+
+
+# ---------------------------------------------------------------------- browser stand-in (frame.browser_handoff)
+RES_XML_START_NAMESPACE, RES_XML_END_NAMESPACE, RES_XML_CDATA, RES_XML_RESOURCE_MAP = 0x0100, 0x0101, 0x0104, 0x0180
+VIEW = "android.intent.action.VIEW"
+BROWSABLE = "android.intent.category.BROWSABLE"
+CUSTOM_TABS_SERVICE = "android.support.customtabs.action.CustomTabsService"
+BROWSER_SCHEMES = ("http", "https")
+THEME_NO_DISPLAY = 0x01030055  # @android:style/Theme.NoDisplay
+# android: attributes of the stand-in activity, by framework resource id (the order aapt writes them in)
+ATTR_IDS = {"theme": 0x01010000, "name": 0x01010003, "exported": 0x01010010, "excludeFromRecents": 0x01010017,
+            "scheme": 0x01010027}
+
+
+def events(manifest: bytes) -> Iterator[tuple[str, str, Element | None]]:
+    """("start" | "end", element name, the Element for starts) in file order."""
+    x = Axml(manifest)
+    names = x.strings()
+    starts = {el.offset: el for el in x.elements()}
+    pos = struct.unpack_from("<H", x.data, 2)[0]
+    while pos < len(x.data):
+        typ, hsz, size = struct.unpack_from("<HHI", x.data, pos)
+        if size == 0:
+            break
+        if typ == RES_XML_START_ELEMENT:
+            el = starts[pos]
+            yield "start", el.name, el
+        elif typ == RES_XML_END_ELEMENT:
+            name = struct.unpack_from("<I", x.data, pos + hsz + 4)[0]
+            yield "end", names[name] if name < len(names) else "", None
+        pos += size
+
+
+def queries_browser(manifest: bytes) -> bool:
+    """The manifest's <queries> ask for a web browser: an intent with action VIEW and an http(s) scheme, or a Custom
+    Tabs provider. Apps declare that (Android 11 package visibility) when they look for a browser before opening a
+    page, e.g. Plex's sign-in, which then says "no browser installed" in Lepton (its Android has none)."""
+    x = Axml(manifest)
+    queries = 0
+    intent: dict | None = None
+    for kind, name, el in events(manifest):
+        if kind == "start":
+            if name == "queries":
+                queries += 1
+            elif queries and name == "intent":
+                intent = {"actions": set(), "schemes": set()}
+            elif intent is not None and name == "action":
+                intent["actions"].add(x.attr_str(el, "name"))
+            elif intent is not None and name == "data":
+                intent["schemes"].add(x.attr_str(el, "scheme"))
+        elif name == "queries":
+            queries -= 1
+        elif name == "intent" and intent is not None:
+            if CUSTOM_TABS_SERVICE in intent["actions"] or (
+                    VIEW in intent["actions"] and intent["schemes"] & set(BROWSER_SCHEMES)):
+                return True
+            intent = None
+    return False
+
+
+def browser_activities(manifest: bytes) -> list[str]:
+    """The app's own activities that look like a web browser: a VIEW + BROWSABLE filter for http(s) without a host
+    (deep links name their hosts)."""
+    x = Axml(manifest)
+    out: list[str] = []
+    component = None
+    filt: dict | None = None
+    for kind, name, el in events(manifest):
+        if kind == "start":
+            if name in ("activity", "activity-alias"):
+                component = x.attr_str(el, "name") or ""
+            elif name == "intent-filter" and component is not None:
+                filt = {"actions": set(), "cats": set(), "schemes": set(), "hosts": False}
+            elif filt is not None and name == "action":
+                filt["actions"].add(x.attr_str(el, "name"))
+            elif filt is not None and name == "category":
+                filt["cats"].add(x.attr_str(el, "name"))
+            elif filt is not None and name == "data":
+                filt["schemes"].add(x.attr_str(el, "scheme"))
+                filt["hosts"] |= x.attr_str(el, "host") is not None
+        elif name == "intent-filter" and filt is not None:
+            if (VIEW in filt["actions"] and BROWSABLE in filt["cats"] and filt["schemes"] & set(BROWSER_SCHEMES)
+                    and not filt["hosts"] and component not in out):
+                out.append(component)
+            filt = None
+        elif name in ("activity", "activity-alias"):
+            component = None
+    return out
+
+
+def _resource_map(x: Axml) -> tuple[int, list[int]] | None:
+    """(chunk offset, attribute resource ids) of the resource map that follows the string pool."""
+    pos = x.pool_off + x.pool_size
+    typ, hsz, size = struct.unpack_from("<HHI", x.data, pos)
+    if typ != RES_XML_RESOURCE_MAP:
+        return None
+    return pos, list(struct.unpack_from(f"<{(size - hsz) // 4}I", x.data, pos + hsz))
+
+
+def _shift_string_refs(data: bytearray, start: int, at: int) -> None:
+    """Every string reference >= at in the XML nodes from `start` on moves up by one (a string was inserted)."""
+    def bump(off: int) -> None:
+        v = struct.unpack_from("<I", data, off)[0]
+        if v != 0xFFFFFFFF and v >= at:
+            struct.pack_into("<I", data, off, v + 1)
+
+    pos = start
+    while pos < len(data):
+        typ, hsz, size = struct.unpack_from("<HHI", data, pos)
+        if size == 0:
+            break
+        ext = pos + hsz
+        if typ in (RES_XML_START_NAMESPACE, RES_XML_END_NAMESPACE, RES_XML_START_ELEMENT, RES_XML_END_ELEMENT,
+                   RES_XML_CDATA):
+            bump(pos + 12)  # comment
+            bump(ext)  # namespace prefix / element namespace / cdata text
+        if typ in (RES_XML_START_NAMESPACE, RES_XML_END_NAMESPACE, RES_XML_START_ELEMENT, RES_XML_END_ELEMENT):
+            bump(ext + 4)  # namespace uri / element name
+        if typ == RES_XML_CDATA and data[ext + 7] == TYPE_STRING:
+            bump(ext + 8)
+        if typ == RES_XML_START_ELEMENT:
+            astart, asize, acount = struct.unpack_from("<HHH", data, ext + 8)
+            for i in range(acount):
+                a = ext + astart + i * asize
+                for off in (0, 4, 8):  # namespace, name, raw value
+                    bump(a + off)
+                if data[a + 15] == TYPE_STRING:
+                    bump(a + 16)
+        pos += size
+
+
+def _attr_name(x: Axml, name: str, resource: int) -> Axml:
+    """Make sure an android: attribute name exists in the resource-mapped part of the string pool (Android matches
+    manifest attributes by resource id). A missing one is inserted right after the mapped strings (its offset; the
+    text goes at the end of the pool) and every string reference from there on moves up by one."""
+    found = _resource_map(x)
+    ids = found[1] if found else []
+    names = x.strings()
+    if any(i < len(names) and names[i] == name and rid == resource for i, rid in enumerate(ids)):
+        return x
+    if x.styles:
+        raise ValueError("string pools with styles are not supported")
+    at = len(ids)
+    if x.utf8:
+        b = name.encode("utf-8")
+        enc = bytes([len(name), len(b)]) + b + b"\0"
+    else:
+        enc = struct.pack("<H", len(name)) + name.encode("utf-16-le") + b"\0\0"
+    d, po = x.data, x.pool_off
+    str_data = bytes(d[po + x.sstart: po + x.pool_size])
+    offsets = x.offsets[:at] + [len(str_data)] + x.offsets[at:]
+    str_data += enc + b"\0" * (-(len(str_data) + len(enc)) % 4)
+    sstart = x.pool_hsz + 4 * len(offsets)
+    header = struct.pack("<HHIIIIII", RES_STRING_POOL, x.pool_hsz, sstart + len(str_data), len(offsets), 0,
+                         x.flags & ~0x1, sstart, 0) + bytes(d[po + 28: po + x.pool_hsz])  # (no longer sorted)
+    pool = header + struct.pack(f"<{len(offsets)}I", *offsets) + str_data
+    rest = found[0] + struct.unpack_from("<I", d, found[0] + 4)[0] if found else po + x.pool_size
+    resmap = struct.pack("<HHI", RES_XML_RESOURCE_MAP, 8, 8 + 4 * (at + 1)) + struct.pack(f"<{at + 1}I", *ids,
+                                                                                          resource)
+    data = bytearray(bytes(d[:po]) + pool + resmap + bytes(d[rest:]))
+    _shift_string_refs(data, po + len(pool) + len(resmap), at)
+    struct.pack_into("<I", data, 4, len(data))
+    return Axml(bytes(data))
+
+
+def add_browser_activity(manifest: bytes, activity: str) -> bytes | None:
+    """Declare `activity` (fully qualified) as a web browser at the start of the app's <application>: exported,
+    Theme.NoDisplay, left out of recents, with a VIEW + DEFAULT + BROWSABLE filter for http and https (no host).
+    None when it's already declared or there is no <application>."""
+    x = Axml(manifest)
+    elements = list(x.elements())
+    if any(el.name == "activity" and x.attr_str(el, "name") == activity for el in elements) or \
+            not any(el.name == "application" for el in elements):
+        return None
+    for name, resource in ATTR_IDS.items():
+        x = _attr_name(x, name, resource)
+
+    def index(s: str) -> int:
+        i = x.index(s)
+        return i if i is not None else x.append_string(s)
+
+    ns = index(ANDROID_NS)
+    activity_el, filter_el, action_el, category_el, data_el = (index(s) for s in (
+        "activity", "intent-filter", "action", "category", "data"))
+    values = {s: index(s) for s in (activity, VIEW, DEFAULT, BROWSABLE, *BROWSER_SCHEMES)}
+    names, ids = x.strings(), _resource_map(x)[1]
+    attr = {a: next(i for i, rid in enumerate(ids) if rid == resource and names[i] == a)
+            for a, resource in ATTR_IDS.items()}
+
+    def record(name: str, kind: int, value: int) -> bytes:
+        return struct.pack("<IIIHBBI", ns, attr[name], value if kind == TYPE_STRING else 0xFFFFFFFF, 8, 0, kind,
+                           value)
+
+    def start(el: int, records: list[bytes]) -> bytes:
+        return (struct.pack("<HHIII", RES_XML_START_ELEMENT, 16, 36 + 20 * len(records), 0, 0xFFFFFFFF)
+                + struct.pack("<IIHHHHHH", 0xFFFFFFFF, el, 20, 20, len(records), 0, 0, 0) + b"".join(records))
+
+    def end(el: int) -> bytes:
+        return struct.pack("<HHIII", RES_XML_END_ELEMENT, 16, 24, 0, 0xFFFFFFFF) + struct.pack("<II", 0xFFFFFFFF, el)
+
+    # attributes sorted by resource id, as aapt writes them (Android's attribute lookup relies on the order)
+    chunk = start(activity_el, [record("theme", TYPE_REFERENCE, THEME_NO_DISPLAY),
+                                record("name", TYPE_STRING, values[activity]),
+                                record("exported", TYPE_INT_BOOLEAN, 0xFFFFFFFF),
+                                record("excludeFromRecents", TYPE_INT_BOOLEAN, 0xFFFFFFFF)])
+    chunk += start(filter_el, [])
+    chunk += start(action_el, [record("name", TYPE_STRING, values[VIEW])]) + end(action_el)
+    for cat in (DEFAULT, BROWSABLE):
+        chunk += start(category_el, [record("name", TYPE_STRING, values[cat])]) + end(category_el)
+    for scheme in BROWSER_SCHEMES:
+        chunk += start(data_el, [record("scheme", TYPE_STRING, values[scheme])]) + end(data_el)
+    chunk += end(filter_el) + end(activity_el)
+    app = next(el for el in x.elements() if el.name == "application")
+    at = app.offset + app.size
+    data = x.data[:at] + chunk + x.data[at:]
+    struct.pack_into("<I", data, 4, len(data))
+    return bytes(data)

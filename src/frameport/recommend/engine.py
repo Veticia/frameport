@@ -312,6 +312,17 @@ def _non_quest(analysis: Analysis, recipe: Recipe) -> None:
                                           "headset's own extensions and store/platform services aren't available.")
 
 
+def flat_as_is(analysis: Analysis, recipe: Recipe) -> None:
+    """A 2D app (vr_kind none) has no "install unchanged" switch: it is installed unchanged exactly when none of its
+    patches that can matter edits the APK. Saving a recipe with such a patch turned on by hand builds the APK
+    (it used to stay as_is, so e.g. frame.browser_handoff turned on for Plex would never have been applied)."""
+    if analysis.vr_kind != "none":
+        return
+    base.load_all()
+    recipe.as_is = not any(pid in base.REGISTRY and base.get(pid).stage == "apk" and base.get(pid).applies(analysis)
+                           for pid in recipe.patches)
+
+
 A32_NOTE = ("32-bit only (e.g. a Gear VR or Oculus Go game): the Steam Frame has no 32-bit ARM support, so the game "
             "runs through FramePort's 32-bit bridge (experimental).")
 

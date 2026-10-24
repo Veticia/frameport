@@ -2,7 +2,7 @@
 
 # Patches
 
-Every patch and game setting FramePort knows: 199 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
+Every patch and game setting FramePort knows: 200 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
 
 Each entry says what the patch does, whether it changes the APK or only the install, when FramePort suggests it, its options, the catalog games whose recipe names it and the launch-test signatures that suggest it. Patches that are on by default are on for every game, so the catalog rarely names them.
 
@@ -11,7 +11,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 ## Groups
 
 - [Patches from OVRPort](#group-overport) (25)
-- [Steam Frame patches](#group-frame) (68)
+- [Steam Frame patches](#group-frame) (69)
 - [Game settings](#group-adapter) (82)
 - [Files and settings on the Frame](#group-device) (11)
 - [PC VR (Proton and Revive)](#group-pcvr) (13)
@@ -52,6 +52,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Skip Meta avatars](#frame-avatar_stub) | `frame.avatar_stub` | Steam Frame patches | 1 |
 | [bHaptics: skip the Bluetooth permission request](#frame-bhaptics_permission) | `frame.bhaptics_permission` | Steam Frame patches | 11 |
 | [BlazeRush: controllers without Meta avatars, own shader cache](#frame-blazerush) | `frame.blazerush` | Steam Frame patches | 1 |
+| [Browser for sign-ins: open pages in Steam's browser](#frame-browser_handoff) | `frame.browser_handoff` | Steam Frame patches |  |
 | [Cortopia games: don't wait for Meta's org-scoped id](#frame-cortopia_org_id) | `frame.cortopia_org_id` | Steam Frame patches | 1 |
 | [Epic Online Services: stop the keychain retry loop](#frame-eos_keychain_loop) | `frame.eos_keychain_loop` | Steam Frame patches |  |
 | [GAZZLERS: take the Quest platform path](#frame-gazzlers_quest_platform) | `frame.gazzlers_quest_platform` | Steam Frame patches | 1 |
@@ -617,6 +618,17 @@ Makes BlazeRush's menus and controllers work without Meta's avatars, and lets it
 - **Source:** [patches/frame/blazerush.py](../src/frameport/patches/frame/blazerush.py)
 
 > BlazeRush 1.0.349 only (Klownicle's guide, GitHub #57). Its menus wait for Meta's avatar, which never comes on the Frame, before they create the game's own controllers: the second menu ignored all input. Two instructions in libtargemapp.so skip that wait and the avatar mesh drawing; the game's shader cache gets a new folder name (cache/br_shader_v1), so programs compiled before the GL shim's shader fixes aren't reused. Only this exact build is changed (code fingerprint and every instruction checked); anything else is left as it is.
+
+### <a id="frame-browser_handoff"></a>Browser for sign-ins: open pages in Steam's browser
+
+For apps that say no browser is installed (e.g. when signing in): their web pages open in Steam's browser instead.
+
+- `frame.browser_handoff` · also for 2D apps
+- **Changes:** Changes the APK (a rebuild and reinstall apply it).
+- **Offered (off):** The app looks for a web browser (its manifest asks Android for apps that open http/https links), and Lepton has none. Turn on if it says no browser is installed, e.g. when signing in.
+- **Source:** [patches/frame/browser_handoff.py](../src/frameport/patches/frame/browser_handoff.py)
+
+> Lepton's Android has no web browser. Apps that check for one before opening a page (for example Plex's sign-in) say no browser is installed and stop. This adds a small browser entry to the app itself (an activity for http/https links in its manifest and an extra classes.dex): the app's check finds it, and the page opens in Steam's browser, where Lepton sends every link. Whether the app notices the finished sign-in depends on the app (a code or PIN it polls for works; a sign-in that returns to the app through a link doesn't).
 
 ### <a id="frame-cortopia_org_id"></a>Cortopia games: don't wait for Meta's org-scoped id
 

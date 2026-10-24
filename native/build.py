@@ -10,7 +10,7 @@ timefix OpenXR layer for Proton games (linux-arm64, glibc; the NDK's clang build
 OculusHMDConnected helper for Rift games under Proton (win-x64 PE; the NDK's clang + lld-link, no Windows SDK), the
 live view's hardware H.264 encoder fp_venc (linux-arm64-bin, static freestanding executable), and rewrites artifacts/SHA256SUMS. Run `frameport parity` afterwards to see which games change.
 
-    python native/build.py [--only adapter,bridge,compat,langpack,glshim,eglfmt,glmv,ovrtrace,dex,xrlayer,oculushmd,xrruntime,xrshim,vkshim,zinkfix,foveation,ovrpshim,tlskeys,vrsettings,venc,vroverlay_probe] [--ndk PATH]
+    python native/build.py [--only adapter,bridge,compat,langpack,glshim,eglfmt,glmv,ovrtrace,dex,handoff,xrlayer,oculushmd,xrruntime,xrshim,vkshim,zinkfix,foveation,ovrpshim,tlskeys,vrsettings,venc,vroverlay_probe] [--ndk PATH]
 """
 from __future__ import annotations
 
@@ -417,7 +417,26 @@ def build_a32(tc: Path):
         shutil.copyfile(HERE / "a32translator/out/bridge" / name, ART / "arm64-v8a" / name)
 
 
-def build_dex():
+# compile-only stand-ins for the Android classes the Java sources reference (not dexed; the device provides them)
+ANDROID_STAND_INS = {
+    "android/content/Context.java": "package android.content;\npublic abstract class Context {}\n",
+    "android/os/Bundle.java": "package android.os;\npublic final class Bundle {}\n",
+    "android/net/Uri.java": "package android.net;\npublic abstract class Uri {\n"
+                            "    public abstract String getScheme();\n}\n",
+    "android/content/Intent.java": "package android.content;\npublic class Intent {\n"
+                                   "    public android.net.Uri getData() { return null; }\n}\n",
+    "android/app/Activity.java": "package android.app;\npublic class Activity extends android.content.Context {\n"
+                                 "    protected void onCreate(android.os.Bundle b) {}\n"
+                                 "    public android.content.Intent getIntent() { return null; }\n"
+                                 "    public void finish() {}\n}\n",
+    "android/util/Log.java": "package android.util;\npublic final class Log {\n"
+                             "    public static int i(String t, String m) { return 0; }\n"
+                             "    public static int w(String t, String m) { return 0; }\n}\n",
+}
+
+
+def _java_dex(name: str, sources: Path, artifact: str):
+    """javac (Java 8) + d8 (newest build-tools, min API 24) of `sources` into artifacts/dex/<artifact>."""
     javac = shutil.which("javac")
     if not javac:
         raise SystemExit("javac not found: install a JDK (e.g. Temurin 21) to rebuild the Java stubs")
@@ -427,22 +446,31 @@ def build_dex():
     if not d8.exists():
         with zipfile.ZipFile(bt) as z:
             d8.write_bytes(z.read(next(m for m in z.namelist() if m.endswith("lib/d8.jar"))))
-    out = CACHE / "java-classes"
+    out = CACHE / f"java-classes-{name}"
     shutil.rmtree(out, ignore_errors=True)
-    # compile-only stand-ins for the Android classes the stubs reference (not dexed; the device provides them)
     android = CACHE / "android-stubs"
-    (android / "android/content").mkdir(parents=True, exist_ok=True)
-    (android / "android/content/Context.java").write_text("package android.content;\npublic abstract class Context {}\n")
+    for rel, text in ANDROID_STAND_INS.items():
+        (android / rel).parent.mkdir(parents=True, exist_ok=True)
+        (android / rel).write_text(text)
     android_out = CACHE / "android-classes"
-    run([javac, "--release", "8", "-d", android_out, android / "android/content/Context.java"])
-    srcs = sorted((HERE / "java-stubs").rglob("*.java"))
+    run([javac, "--release", "8", "-d", android_out, *sorted(android.rglob("*.java"))])
+    srcs = sorted(sources.rglob("*.java"))
     run([javac, "--release", "8", "-cp", android_out, "-d", out, *srcs])
     classes = sorted(out.rglob("*.class"))
-    dexdir = CACHE / "dex"
+    dexdir = CACHE / f"dex-{name}"
     shutil.rmtree(dexdir, ignore_errors=True)
     dexdir.mkdir(parents=True)
     run(["java", "-cp", d8, "com.android.tools.r8.D8", "--release", "--min-api", "24", "--output", dexdir, *classes])
-    shutil.copy(dexdir / "classes.dex", ART / "dex/oculusos-stubs.dex")
+    shutil.copy(dexdir / "classes.dex", ART / "dex" / artifact)
+
+
+def build_dex():
+    _java_dex("oculusos", HERE / "java-stubs", "oculusos-stubs.dex")
+
+
+def build_handoff():
+    """frame.browser_handoff's browser stand-in activity (java-handoff/)."""
+    _java_dex("handoff", HERE / "java-handoff", "browser-handoff.dex")
 
 
 def _build_tools_paths():
@@ -461,16 +489,16 @@ def write_sums():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--only", default="adapter,bridge,compat,langpack,glshim,eglfmt,glmv,ovrtrace,dex,xrlayer,oculushmd,xrruntime,xrshim,vkshim,zinkfix,foveation,ovrpshim,tlskeys,luajit,vrsettings,venc,roomscan,a32")
+    ap.add_argument("--only", default="adapter,bridge,compat,langpack,glshim,eglfmt,glmv,ovrtrace,dex,xrlayer,oculushmd,xrruntime,xrshim,vkshim,zinkfix,foveation,ovrpshim,tlskeys,luajit,vrsettings,venc,roomscan,a32,handoff")
     ap.add_argument("--ndk")
     args = ap.parse_args()
     parts = set(args.only.split(","))
     for d in ("arm64-v8a", "armeabi-v7a", "dex"):
         (ART / d).mkdir(parents=True, exist_ok=True)
-    tc = clang_dir(ndk(args.ndk)) if parts - {"dex"} else None
+    tc = clang_dir(ndk(args.ndk)) if parts - {"dex", "handoff"} else None
     steps = {"adapter": lambda: build_adapter(tc), "bridge": lambda: build_bridge(tc), "compat": lambda: build_compat(tc),
              "xrruntime": lambda: build_xrruntime(tc), "langpack": lambda: build_langpack(tc),
-             "glshim": lambda: build_glshim(tc), "eglfmt": lambda: build_eglfmt(tc), "glmv": lambda: build_glmv(tc), "ovrtrace": lambda: build_ovrtrace(tc), "xrshim": lambda: build_xrshim(tc), "dex": build_dex, "xrlayer": lambda: build_xrlayer(tc),
+             "glshim": lambda: build_glshim(tc), "eglfmt": lambda: build_eglfmt(tc), "glmv": lambda: build_glmv(tc), "ovrtrace": lambda: build_ovrtrace(tc), "xrshim": lambda: build_xrshim(tc), "dex": build_dex, "handoff": build_handoff, "xrlayer": lambda: build_xrlayer(tc),
              "oculushmd": lambda: build_oculushmd(tc), "vkshim": lambda: build_vkshim(tc),
              "zinkfix": lambda: build_zinkfix(tc),
              "foveation": lambda: build_foveation(tc),
@@ -479,7 +507,7 @@ def main():
              "vrsettings": lambda: build_vrsettings(tc), "venc": lambda: build_venc(tc),
              "roomscan": lambda: build_roomscan(tc),
              "vroverlay_probe": lambda: build_vroverlay_probe(tc), "a32": lambda: build_a32(tc)}
-    for name in ("adapter", "bridge", "compat", "langpack", "glshim", "eglfmt", "glmv", "ovrtrace", "xrruntime", "xrshim", "vkshim", "zinkfix", "foveation", "ovrpshim", "tlskeys", "luajit", "dex", "xrlayer", "oculushmd", "vrsettings", "venc",
+    for name in ("adapter", "bridge", "compat", "langpack", "glshim", "eglfmt", "glmv", "ovrtrace", "xrruntime", "xrshim", "vkshim", "zinkfix", "foveation", "ovrpshim", "tlskeys", "luajit", "dex", "handoff", "xrlayer", "oculushmd", "vrsettings", "venc",
                  "roomscan", "vroverlay_probe", "a32"):
         if name in parts:
             log(f"build {name}")

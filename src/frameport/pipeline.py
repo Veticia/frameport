@@ -1202,8 +1202,9 @@ def set_recipe(package: str, recipe: Recipe) -> None:
     entry = library.game(package) or {}
     if entry.get("analysis") and not is_rift(entry) and not is_linux(entry):
         saved = (entry.get("recipe") or {}).get("patches") or {}
-        engine.a32_recipe(library.analysis_from_dict(entry["analysis"]), recipe,
-                          newly="frame.a32_bridge" not in saved)
+        analysis = library.analysis_from_dict(entry["analysis"])
+        engine.a32_recipe(analysis, recipe, newly="frame.a32_bridge" not in saved)
+        engine.flat_as_is(analysis, recipe)
     library.upsert_game(package, recipe=library.recipe_to_dict(recipe))
 
 
@@ -1367,6 +1368,8 @@ def _build_record(entry: dict, apk: Path | None = None, superseded=None) -> dict
                             if name.startswith("lib/") and (artifacts_dir() / name.removeprefix("lib/")).is_file()]
         if "frame.oculusos" in (entry["recipe"].get("patches") or {}):
             native_names.append("dex/oculusos-stubs.dex")
+        if "frame.browser_handoff" in (entry["recipe"].get("patches") or {}):
+            native_names.append("dex/browser-handoff.dex")
     jar = toolchain.overport_jar()
     converter_stat = None
     if jar and jar.is_file():

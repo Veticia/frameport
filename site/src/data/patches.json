@@ -499,6 +499,11 @@
   "title": "BlazeRush: controllers without Meta avatars, own shader cache",
   "group": "Steam Frame patches"
  },
+ "frame.browser_handoff": {
+  "anchor": "frame-browser_handoff",
+  "title": "Browser for sign-ins: open pages in Steam's browser",
+  "group": "Steam Frame patches"
+ },
  "frame.cortopia_org_id": {
   "anchor": "frame-cortopia_org_id",
   "title": "Cortopia games: don't wait for Meta's org-scoped id",
