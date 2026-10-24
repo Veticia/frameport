@@ -48,7 +48,7 @@ try:
 except ImportError:  # Windows: pc_revive loads this file for its VDF code only (GitHub #131)
     fcntl = None
 
-AGENT_VERSION = 116
+AGENT_VERSION = 117
 HOME = os.path.expanduser("~")
 STEAM = os.path.join(HOME, ".local/share/Steam")
 ANCHORS = os.path.join(HOME, "Applications/quest-frame")
@@ -8413,11 +8413,27 @@ def cmd_collect_diag(args):
     out = {"agent_version": AGENT_VERSION, "host": host, "files": files}
     pkg = args.get("package")
     if not pkg:
-        # the OpenXR runtime's own log (XRService-<date>_<time>.log): the newest one
+        # the OpenXR runtime's own logs (XRService-<date>_<time>.log, one per runtime start): the newest three, so a
+        # runtime or Steam restart during play still leaves the log from before it (GitHub #441)
         xr = [p for p in glob.glob(os.path.join(STEAM, "logs/XRService-*.log")) +
               glob.glob(os.path.join(STEAM, "logs/XRService-*/XRService-*.log")) if os.path.isfile(p)]
-        for p in sorted(xr, key=os.path.getmtime, reverse=True)[:1]:
-            files[os.path.basename(p)] = _tail(p, max_bytes)
+        for i, p in enumerate(sorted(xr, key=os.path.getmtime, reverse=True)[:3]):
+            files[os.path.basename(p)] = _tail(p, max_bytes if i == 0 else max_bytes // 2)
+        # SteamVR's compositor/server logs and Steam's previous session: what ended a session that took Steam down
+        for name in ("vrcompositor.txt", "vrcompositor.previous.txt", "vrserver.txt", "vrserver.previous.txt",
+                     "console_log.previous.txt"):
+            text = _tail(os.path.join(STEAM, "logs", name), max_bytes // 4)
+            if text:
+                files["steam-" + name if name.startswith("console") else name] = text
+        # how steam.service ended (exit status, signal, restarts) in this boot and the one before
+        for name, boot in (("steam-service.txt", "0"), ("steam-service-previous-boot.txt", "-1")):
+            try:
+                text = run(["journalctl", "--user", "-u", "steam.service", "-b", boot, "-n", "300", "-q",
+                            "--no-pager"]).stdout[-max_bytes // 4:]
+            except OSError:
+                text = ""
+            if text.strip():
+                files[name] = text
         return out
     pkg = check_pkg(pkg)
     dep = deployment(pkg)
