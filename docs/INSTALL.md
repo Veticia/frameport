@@ -105,6 +105,20 @@ CLI: `frameport frame steam-library now|later|off` saves the setting and applies
 `frameport frame restart-steam` applies pending entries now; `--yes` confirms ending a running game.
 These settings concern game shortcuts; installing a missing Steam runtime such as Proton can still require a restart.
 
+**Moving from a PC:**
+
+1. Copy the signing keys first: the `<package>.keystore` files in
+   `%LOCALAPPDATA%\FramePort\overport-workspace\signatures\`
+   (Linux/macOS: FramePort's data folder, `overport-workspace/signatures/`) go to
+   `~/.local/share/frameport-app/overport-workspace/signatures/` on the Frame, before FramePort there builds those
+   games. Otherwise it makes new keys: updates are signed differently from the installed games, and games that keep
+   progress per Meta account get a different account id, so their progress can look gone.
+2. Put the original game files on the Frame and add that folder to the Library there; the PC's library doesn't carry
+   over, and updates are built from the originals. Data files on the same drive as the installs are linked into the
+   install instead of copied, so they take space once.
+3. Games already installed keep working; installing them again from the Frame keeps their saves. Don't manage the
+   same game from both the PC and the Frame unless both have the same keys.
+
 ## Installing games
 
 ![Game page](images/game.png)
