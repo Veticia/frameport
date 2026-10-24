@@ -31,6 +31,17 @@ def keyboard_tips() -> list[tuple[str, str, str]]:
              tr("Put a password, link or note in the box and press Type it."))]
 
 
+PASTE_MIN_WIDTH = 240  # the paste field's narrowest useful width (unscaled px) before its buttons move below it
+
+
+def paste_stacked(width: float, buttons: list[float | None]) -> bool | None:
+    """Whether the paste buttons go below the field: the row is `width` wide, the buttons measure `buttons`
+    (natural sizes). None while something isn't measured yet (the layout stays as it is)."""
+    if not width or any(not b for b in buttons):
+        return None
+    return width < sum(buttons) + T.S2 * len(buttons) + T.px(PASTE_MIN_WIDTH)
+
+
 class KeyboardView:
     def __init__(self, app: FramePortApp):
         self.app = app
@@ -56,6 +67,19 @@ class KeyboardView:
         self.paste = C.field(hint_text=tr("Or paste text to type it in one go"), expand=True,
                              on_submit=self._send_text)
         self.reconnect = C.secondary(tr("Reconnect"), ft.Icons.REFRESH_ROUNDED, lambda e: self.start())
+        # the paste field and its buttons: one line while the field keeps PASTE_MIN_WIDTH, else the buttons go below
+        # it (in a narrow window or at a large UI scale the expanding field was squeezed to nothing). The buttons
+        # always keep their natural size; their measured widths decide the layout (_paste_sized).
+        self.paste_buttons = [
+            C.secondary(tr("Type it"), ft.Icons.SEND_OUTLINED, self._send_text),
+            C.secondary(tr("Copy from Frame"), ft.Icons.CONTENT_PASTE_GO_ROUNDED, self._copy_from_frame,
+                        tooltip=tr("Copy the text copied on the Frame (Desktop Mode, Steam) to this PC's clipboard"))]
+        self._button_w: dict[int, float] = {}
+        for i, b in enumerate(self.paste_buttons):
+            b.on_size_change = lambda e, i=i: self._button_sized(i, e.width)
+        self._paste_w = 0.0
+        self.paste_stacked = False
+        self.paste_box = ft.Container(self._paste_layout(False), on_size_change=self._paste_sized)
 
     # ---------------------------------------------------------------- building
     def mount(self) -> ft.Control:
@@ -75,11 +99,7 @@ class KeyboardView:
                     ft.Row([self.status, self.reconnect], spacing=T.S3,
                            vertical_alignment=ft.CrossAxisAlignment.CENTER),
                     self.listener,
-                    ft.Row([self.paste, C.secondary(tr("Type it"), ft.Icons.SEND_OUTLINED, self._send_text),
-                            C.secondary(tr("Copy from Frame"), ft.Icons.CONTENT_PASTE_GO_ROUNDED, self._copy_from_frame,
-                                        tooltip=tr("Copy the text copied on the Frame (Desktop Mode, Steam) to this "
-                                                   "PC's clipboard"))],
-                           spacing=T.S2),
+                    self.paste_box,
                     ft.Row([C.meta(tr("In the headset, select a text field, then type here."), T.TEXT_2),
                             C.help_icon("type_on_frame", 16)], spacing=T.px(2), tight=True,
                            vertical_alignment=ft.CrossAxisAlignment.CENTER),
@@ -89,6 +109,31 @@ class KeyboardView:
             ], spacing=T.S4, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
         self.start()
         return self.root
+
+    def _paste_layout(self, stacked: bool) -> ft.Control:
+        """The paste field with the buttons after it (one line) or below it, right-aligned (stacked)."""
+        self.paste.expand = not stacked  # (expand inside a Column would ask for unbounded height)
+        if stacked:
+            return ft.Column([self.paste, ft.Row(self.paste_buttons, spacing=T.S2, run_spacing=T.S2, wrap=True,
+                                                 alignment=ft.MainAxisAlignment.END)],
+                             spacing=T.S2, horizontal_alignment=ft.CrossAxisAlignment.STRETCH)
+        return ft.Row([self.paste, ft.Row(self.paste_buttons, spacing=T.S2, tight=True)], spacing=T.S2)
+
+    def _button_sized(self, i: int, width: float) -> None:
+        self._button_w[i] = width
+        self._relayout_paste()
+
+    def _paste_sized(self, e) -> None:
+        self._paste_w = e.width
+        self._relayout_paste()
+
+    def _relayout_paste(self) -> None:
+        stacked = paste_stacked(self._paste_w, [self._button_w.get(i) for i in range(len(self.paste_buttons))])
+        if stacked is None or stacked == self.paste_stacked:
+            return
+        self.paste_stacked = stacked
+        self.paste_box.content = self._paste_layout(stacked)
+        C.update(self.paste_box)
 
     def _set_status(self, text: str, color: str, update: bool = True) -> None:
         self.status.value, self.status.color = text, color

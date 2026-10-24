@@ -73,3 +73,16 @@ def test_session_refused():
     frame, _ = _frame('{"ready": false, "error": "can\'t create a virtual keyboard: denied"}\n')
     with pytest.raises(K.KeyboardRefused, match="denied"):
         K.KeyboardSession(frame)
+
+
+def test_paste_buttons_move_below_a_narrow_field():
+    """The paste field keeps a usable width: its buttons go below it rather than squeezing it (or clipping)."""
+    from frameport.ui import theme as T
+    from frameport.ui.views.keyboard import PASTE_MIN_WIDTH, paste_stacked
+
+    buttons = [110.0, 170.0]
+    need = sum(buttons) + 2 * T.S2 + T.px(PASTE_MIN_WIDTH)
+    assert paste_stacked(need + 1, buttons) is False
+    assert paste_stacked(need - 1, buttons) is True
+    assert paste_stacked(0, buttons) is None  # not measured yet: the layout stays
+    assert paste_stacked(900, [110.0, None]) is None
