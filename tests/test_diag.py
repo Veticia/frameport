@@ -316,6 +316,9 @@ def test_agent_collect_diag(monkeypatch, tmp_path):
     (anchor / "launch.sh").write_text("#!/bin/sh\n")
     (base / "launch.log").write_text("x" * 5000)
     (base / "settings.conf").write_text("scale=1\n")
+    (base / "stop-pause.log").write_text("12:00:00 pausing\nstate=STOPPED after 2 polls\n")
+    (base / "exit-hook.log").write_text("Exit game: pausing the game first\n")
+    (anchor / "plays.log").write_text("start 1\nend 2\n")
     logcat = Path(a.STEAM) / "logs/lepton-logcats/steamlaunch-123"
     logcat.mkdir(parents=True)
     (logcat / "logcat-radio.log").write_text("radio")
@@ -332,7 +335,8 @@ def test_agent_collect_diag(monkeypatch, tmp_path):
     res = a.cmd_collect_diag({"package": "com.x.y", "max_bytes": 1000})
     f = res["files"]
     assert res["installed"] and {"deployment.json", "launch.sh", "settings.conf", "launch.log", "logcat-main.log",
-                                 "lepton-steamlaunch-123.log"} <= set(f)
+                                 "lepton-steamlaunch-123.log", "stop-pause.log", "exit-hook.log", "plays.log"} <= set(f)
+    assert "theater.log" not in f and f["plays.log"] == "start 1\nend 2\n"
     assert [n for n in f if n.startswith("logcat")] == ["logcat-main.log", "logcat-radio.log"]
     assert f["launch.log"].startswith("[... first 4000 bytes cut") and "files" not in json.loads(f["deployment.json"])
     assert res["listing"]["roots"]

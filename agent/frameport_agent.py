@@ -48,7 +48,7 @@ try:
 except ImportError:  # Windows: pc_revive loads this file for its VDF code only (GitHub #131)
     fcntl = None
 
-AGENT_VERSION = 121
+AGENT_VERSION = 122
 HOME = os.path.expanduser("~")
 STEAM = os.path.join(HOME, ".local/share/Steam")
 ANCHORS = os.path.join(HOME, "Applications/quest-frame")
@@ -8633,6 +8633,16 @@ def cmd_collect_diag(args):
                        ("launch.log", os.path.join(base, "launch.log")),
                        ("launch-test.log", os.path.join(base, "launch-test.log"))):
         text = _tail(path, max_bytes)
+        if text is not None:
+            files[name] = text
+    # how the last session ended (GitHub #480): the pause before the stop, Steam's Exit game hook, SteamVR theater
+    # hold, dashboard closer; start/end times from the play log. Each worker's log holds only the last launch.
+    for name, path in (("stop-pause.log", os.path.join(base, "stop-pause.log")),
+                       ("exit-hook.log", os.path.join(base, "exit-hook.log")),
+                       ("theater.log", os.path.join(base, "theater.log")),
+                       ("dashboard.log", os.path.join(base, "dashboard.log")),
+                       ("plays.log", os.path.join(anchor, "plays.log"))):
+        text = _tail(path, max_bytes // 8)
         if text is not None:
             files[name] = text
     for rel in PCVR_LOGS + (f"steam-{appid}.log",):

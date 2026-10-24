@@ -41,6 +41,8 @@ games/<pkg>/package/         stand-in for the game files (no content):
 games/<pkg>/target/          from the Frame (or the PC): launch.sh, settings.conf, deployment.json, launch.log,
                              launch-test.log (PC VR), lepton-steamlaunch-<appid>.log, logcat-{main,crash,system,...}.log,
                              ReviveInjector.txt / steam-<appid>.log / game-log-N.txt (PC VR), files.json (+ missing)
+                             stop-pause.log, exit-hook.log, theater.log, dashboard.log, plays.log (agent v122): how
+                             the last session ended (pause before the stop, Steam's Exit game hook; play start/end)
                              (game-log-N.txt: Unreal Saved/Logs + crash summaries, Unity Player.log / Player-prev.log /
                              output_log.txt + crash error.log from the Proton prefix, agent v67)
                              threads.txt (agent v79): saved while a Quest game runs (e.g. hangs), each thread's

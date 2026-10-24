@@ -1312,6 +1312,14 @@ a made-up one) passed straight through. The End game path went past the hook (no
 headset: pressing Exit game there (same JS call per Steam's code). Not covered: SteamVR's `QuitSceneApp`, Steam
 restarts / power-off.
 
+Diagnostics (agent v122, #480): `collect_diag` returns the last launch's `stop-pause.log`, `exit-hook.log`,
+`theater.log`, `dashboard.log` and the anchor's `plays.log`, so a user's zip shows whether the pause ran and how the
+game was closed. Open question from #480 (dev build with the pause, progress still lost): whether the pause ran in the
+user's session at all, and whether Just Dance VR saves on pause. Its log shows `NetworkApplication.OnApplicationPause`
+throwing a NullReferenceException at every pause while it's offline (`ChatApp.SetStatus`, "not connected to front end
+server"), so a save hooked to that handler would never run; a Quest's own quit also goes through
+XR_SESSION_STATE_EXITING → OVRManager `Application.Quit()` → `OnApplicationQuit`, which FramePort doesn't emulate yet.
+
 
 ## Expansion file names (#450, #481)
 The game opens `Android/obb/<package>/main.<versionCode>.<package>.obb` by exact name (Unreal's `OBBData`, Unity's
