@@ -59,7 +59,7 @@ def test_the_recipe_carries_it_to_the_agent():
     """installer.install sends the whole patch selection (install-stage patches too); the agent's finalize decides
     the launcher line from it (tests/test_shared_video_codec.py)."""
     source = (Path(__file__).resolve().parents[1] / "src/frameport/install/installer.py").read_text()
-    assert 'recipe={"patches": sorted(plan.recipe.patches)' in source
+    assert 'recipe=deployment_recipe(plan.recipe)' in source and '{"patches": sorted(recipe.patches)' in source
     agent = (Path(__file__).resolve().parents[1] / "agent/frameport_agent.py").read_text()
     assert 'HW_VIDEO_PATCH = "frame.hw_video_decode"' in agent
 
