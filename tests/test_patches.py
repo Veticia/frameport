@@ -359,6 +359,14 @@ def test_vk_sanitize_routes_engine_vulkan_through_shim(tmp_path, quest_manifest)
     with ApkWorkspace(apk2) as ws:
         ctx = base.ApkContext(ws, _analysis(engine="Unreal"), {}, Reporter(), {})
         assert not base.get("frame.vk_sanitize").apply(ctx)
+    # Dawn builds the name from two pieces: renaming it in place broke Vulkan (#475), so such a library is left alone
+    apk3 = _apk(tmp_path, quest_manifest)
+    with zipfile.ZipFile(apk3, "a") as z:
+        z.writestr("lib/arm64-v8a/libmelee.so", engine + b"_ZN4dawn6native\0")
+        z.writestr("lib/arm64-v8a/libgame.so", engine)
+    with ApkWorkspace(apk3) as ws:
+        from frameport.patches.frame.vk_sanitize import engine_libs
+        assert engine_libs(ws, _analysis(engine="Other", libs=["libmelee.so", "libgame.so"])) == ["libgame.so"]
 
 
 def test_source_hints_are_generic_and_match_loosely():

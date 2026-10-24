@@ -10,6 +10,9 @@ VULKAN = "libvulkan.so"
 ENGINE_LIBS = ("libUE4.so", "libUnreal.so")
 # not the engine: XR/Meta/FramePort libraries that may name libvulkan.so too
 NOT_ENGINE = ("libopenxr", "libOVR", "libovr", "libvrapi", "libfp_", "libframe", "libVkLayer", "libc++", "libunity")
+# Dawn (WebGPU, e.g. the Aurora engine of PrimedGun and Xelee) builds the name from two pieces, so the in-place rename
+# gave "libfp_vkn.so" and Vulkan failed to load (GitHub #254, #475)
+SPLIT_NAME = (b"_ZN4dawn",)
 
 
 def engine_libs(ws, analysis) -> list[str]:
@@ -23,7 +26,8 @@ def engine_libs(ws, analysis) -> list[str]:
     for lib in analysis.libs:
         if lib.startswith(NOT_ENGINE) or not ws.has(ws.lib(lib)):
             continue
-        if b"\0" + VULKAN.encode() + b"\0" in ws.read_lib(lib):
+        data = ws.read_lib(lib)
+        if b"\0" + VULKAN.encode() + b"\0" in data and not any(m in data for m in SPLIT_NAME):
             out.append(lib)
     return out
 
