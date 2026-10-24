@@ -17,6 +17,7 @@ from ..core.events import Cancelled, Reporter
 from ..core.models import Recipe, data_manifest
 from ..frame.connection import Frame, sh_quote
 from ..patches import base
+from ..sources.quest_dump import frame_names
 
 
 @dataclass
@@ -82,9 +83,12 @@ def update_existing(frame: Frame, entry: dict, deployment: dict, plan, recipe: R
     if plan.data:
         reporter.stage("Check game data")
         prep = frame.agent("prepare", package=entry["package"], title=args["title"])
-        manifest = manifest or {}
-        pending = [(Path(entry["data_dir"]) / rel, f"obb/{rel}", size)
-                   for rel, size in manifest.items() if prep["existing_obb"].get(rel) != size]
+        local = manifest or {}
+        names = frame_names(entry["package"], local)
+        manifest = {names.get(rel, rel): size for rel, size in local.items()}
+        moved = _reuse_renamed(frame, names, local, prep, reporter)
+        pending = [(Path(entry["data_dir"]) / rel, f"obb/{names.get(rel, rel)}", size) for rel, size in local.items()
+                   if names.get(rel, rel) not in moved and prep["existing_obb"].get(names.get(rel, rel)) != size]
         need = sum(size for _, _, size in pending)
         if need > prep["free_bytes"] - (1 << 30):
             raise RuntimeError("not enough space on the Frame for the changed game data + 1 GiB headroom")
@@ -141,11 +145,20 @@ def install(frame: Frame, plan: InstallPlan, reporter: Reporter) -> dict:
     if not prep.get("lepton"):
         raise RuntimeError("Lepton is not installed on the Frame (Setup → Install Lepton)")
     incoming = prep["incoming"]
-    manifest = {} if plan.apk_only else local_data_manifest(plan.data_dir, plan.data_files)
-    existing = prep["existing_obb"]
+    local = {} if plan.apk_only else local_data_manifest(plan.data_dir, plan.data_files)
+    # expansion files with a download's copy suffix or another case go to the Frame under the name the game looks for
+    # (GitHub #450/#481); the PC's files keep theirs. manifest = the data as the Frame stores it.
+    names = frame_names(plan.package, local)
+    source = {names.get(rel, rel): rel for rel in local}
+    manifest = {names.get(rel, rel): size for rel, size in local.items()}
+    for rel, wanted in names.items():
+        reporter.log(f"{rel} goes to the Frame as {wanted} (the name the game looks for)")
+    existing = dict(prep["existing_obb"])
+    for rel in _reuse_renamed(frame, names, local, prep, reporter):
+        existing[rel] = manifest[rel]
     to_send = [rel for rel, size in manifest.items() if existing.get(rel) != size]
     _relink_installed(frame, plan.data_dir, {r: s for r, s in manifest.items() if r not in to_send},
-                      posixpath.join(prep["base"], "lepton-app", "obb"), reporter)
+                      posixpath.join(prep["base"], "lepton-app", "obb"), reporter, source)
     need = sum(manifest[r] for r in to_send) + (0 if prep["same_apk"] else plan.apk.stat().st_size)
     if need > prep["free_bytes"] - (1 << 30):
         raise RuntimeError(f"not enough space on the Frame: need {need / 2**30:.1f} GiB + 1 GiB headroom, "
@@ -171,8 +184,8 @@ def install(frame: Frame, plan: InstallPlan, reporter: Reporter) -> dict:
             sent += plan.apk.stat().st_size
         if to_send:
             reporter.stage(f"Upload data ({len(to_send)} files)")
-            upload_files(xfer, [(plan.data_dir / rel, f"obb/{rel}", manifest[rel]) for rel in to_send], incoming,
-                         reporter, total, sent, speed)
+            upload_files(xfer, [(plan.data_dir / source[rel], f"obb/{rel}", manifest[rel]) for rel in to_send],
+                         incoming, reporter, total, sent, speed)
         elif manifest:
             reporter.log("game data already on the Frame; not re-sending")
 
@@ -628,10 +641,12 @@ def _link_local(frame, items: list[tuple[Path, str, int]], remote_root: str, rep
     return rest, linked
 
 
-def _relink_installed(frame, data_dir: Path, same: dict[str, int], obb_root: str, reporter: Reporter) -> int:
+def _relink_installed(frame, data_dir: Path, same: dict[str, int], obb_root: str, reporter: Reporter,
+                      source: dict[str, str] | None = None) -> int:
     """FramePort on the Frame itself (GitHub #433): data an earlier install copied (before installs linked it, or from a
     PC) and that is unchanged (same size, the test that skips its upload) is replaced by a hardlink to the original,
-    so updating a game frees the second copy without reinstalling it. Returns the bytes freed."""
+    so updating a game frees the second copy without reinstalling it. same is keyed by the Frame's names; source maps
+    a renamed file (frame_names) to its name in data_dir. Returns the bytes freed."""
     from ..frame.local import on_frame
 
     host = getattr(getattr(frame, "target", None), "host", None)
@@ -639,7 +654,7 @@ def _relink_installed(frame, data_dir: Path, same: dict[str, int], obb_root: str
         return 0
     freed = 0
     for rel, size in same.items():
-        src, dest = Path(data_dir) / rel, Path(posixpath.join(obb_root, rel))
+        src, dest = Path(data_dir) / (source or {}).get(rel, rel), Path(posixpath.join(obb_root, rel))
         tmp = dest.with_name(dest.name + ".fplink")
         try:
             if not dest.is_file() or os.path.samefile(src, dest) or src.stat().st_size != size:
@@ -654,6 +669,27 @@ def _relink_installed(frame, data_dir: Path, same: dict[str, int], obb_root: str
     if freed:
         reporter.log(f"replaced copied game data with links to the originals ({freed / 2**30:.1f} GiB freed)")
     return freed
+
+
+def _reuse_renamed(frame, names: dict[str, str], local: dict[str, int], prep: dict, reporter: Reporter) -> set[str]:
+    """A renamed expansion file (frame_names) that an earlier install put on the Frame under its old name is moved to
+    incoming/ under the new one instead of being sent again (finalize moves it into place; resumable like an upload,
+    prepare counts incoming/). Leaves no stale copy under the old name. Returns the Frame names reused."""
+    if not names:
+        return set()
+    existing, done = prep["existing_obb"], set()
+    app_obb = posixpath.join(prep["base"], "lepton-app", "obb")
+    for rel, wanted in names.items():
+        if existing.get(wanted) == local[rel] or existing.get(rel) != local[rel]:
+            continue
+        try:
+            frame.sftp.rename(posixpath.join(app_obb, rel), posixpath.join(prep["incoming"], "obb", wanted))
+        except (OSError, AttributeError) as exc:  # e.g. already moved by an interrupted run: sent the normal way
+            reporter.log(f"{rel} on the Frame not reused as {wanted} ({exc}); sending it")
+            continue
+        reporter.log(f"renamed {rel} to {wanted} on the Frame (no upload needed)")
+        done.add(wanted)
+    return done
 
 
 def upload_files(frame: Frame, items: list[tuple[Path, str, int]], remote_root: str, reporter: Reporter,

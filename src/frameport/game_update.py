@@ -109,6 +109,10 @@ def plan_update(game: dict, deployment: dict | None, *, apk_only: bool = False,
     if data_manifest is None:
         data_manifest = game.get("data_manifest")
     data = False
+    if data_manifest:  # the Frame stores renamed expansion files under the names the game looks for (#481)
+        from .sources.quest_dump import frame_manifest
+
+        data_manifest = frame_manifest(package, data_manifest)
     if not apk_only and data_manifest:
         if "data_manifest" in dep:
             data = any(dep["data_manifest"].get(k) != v for k, v in data_manifest.items())

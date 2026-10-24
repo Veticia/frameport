@@ -596,30 +596,43 @@ def analysis_warnings(entry: dict) -> list[str]:
     out = engine.blocker_notes(library.analysis_from_dict(entry["analysis"]))
     if missing_obb(entry):
         out.append(MISSING_OBB_NOTE.format(package=entry.get("package", "<package>")))
-    for name, wanted in misnamed_obbs(entry):
-        out.append(MISNAMED_OBB_NOTE.format(name=name, wanted=wanted))
+    for o in misnamed_obbs(entry):
+        out.append(MISNAMED_OBB_NOTES[o.reason].format(name=o.name, wanted=o.wanted))
     return out
 
 
-MISNAMED_OBB_NOTE = ("The data file {name} is named for another app, so the game won't find it: rename it to {wanted} "
-                     "(or use the .obb that belongs to this APK), scan again and install it again.")
+MISNAMED_OBB_NOTES = {
+    "another-app": "The data file {name} is named for another app, so the game won't find it: rename it to {wanted} "
+                   "(or use the .obb that belongs to this APK), scan again and install it again.",
+    "duplicate": "The data file {name} looks like a copy of {wanted}, which is there too: the game only reads "
+                 "{wanted}, so the copy can go.",
+    "ambiguous": "Several data files could be {wanted} (e.g. {name}): keep the right one, rename it to {wanted}, "
+                 "scan again and install it again.",
+    "unclear-version": "The data file {name} has no version number in its name, so the number at its end may be "
+                       "the version: rename it to the name the game expects (e.g. {wanted}), scan again and install "
+                       "it again.",
+}
 
 
-def misnamed_obbs(entry: dict) -> list[tuple[str, str]]:
-    """[(file, the name the game looks for)] for expansion files named for another package than the APK's, e.g. a
-    renamed build's main.1716.com.beatgames.beatsaber.lj369vr.obb next to com.beatgames.beatsaber (GitHub #129).
-    Library fields only (no disk access)."""
+def misnamed_obbs(entry: dict) -> list:
+    """Expansion files (quest_dump.ObbName) whose names the game won't find and that FramePort can't fix by itself,
+    e.g. a renamed build's main.1716.com.beatgames.beatsaber.lj369vr.obb next to com.beatgames.beatsaber (GitHub
+    #129). Library fields only (no disk access)."""
+    return [o for o in _obb_names(entry) if not o.rename]
+
+
+def renamed_obbs(entry: dict) -> list:
+    """Expansion files installed on the Frame under the name the game looks for, e.g. a download's
+    main.203.com.Armature.VR4-003.obb as main.203.com.Armature.VR4.obb (GitHub #450/#481); the PC's file keeps its
+    name. Library fields only."""
+    return [o for o in _obb_names(entry) if o.rename]
+
+
+def _obb_names(entry: dict) -> list:
     pkg = entry.get("package") or ""
     if is_rift(entry) or is_linux(entry) or not pkg:
         return []
-    out = []
-    for rel in sorted((entry.get("data_manifest") or {}) or (entry.get("data_files") or [])):
-        name = rel.rsplit("/", 1)[-1]
-        m = quest_dump.OBB_NAME.match(name)
-        if m and m.group(3).lower() != pkg.lower():
-            version = f"{m.group(2)}." if m.group(2) else ""
-            out.append((name, f"{m.group(1).lower()}.{version}{pkg}.obb"))
-    return out
+    return quest_dump.obb_names(pkg, (entry.get("data_manifest") or {}) or (entry.get("data_files") or []))
 
 
 MISSING_OBB_NOTE = ("This game's data file (.obb) wasn't found next to the APK. Put the .obb files in a folder named "

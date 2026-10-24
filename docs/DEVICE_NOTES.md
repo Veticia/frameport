@@ -1277,3 +1277,27 @@ Timings on the dev Frame (AC Nexus, Unity, headless, 2026-10-24):
 | a game that doesn't answer (4 of 9 runs: once during its shader warm-up, three times with Unity's main thread already silent before the stop; one Steam run of the same setup had a render-thread crash in Valve's FDM layer with Eye-tracked foveation) | none | capped: pause gives up after 3 s (`still state=STOPPING`), agent `stop` 4.2-4.3 s |
 | Steam's own Exit game | none (see above) | 0.65-0.8 s, unchanged |
 
+
+## Expansion file names (#450, #481)
+The game opens `Android/obb/<package>/main.<versionCode>.<package>.obb` by exact name (Unreal's `OBBData`, Unity's
+split binary, CryEngine's versionless `main.<package>.obb`); the Frame's filesystem is case-sensitive. Downloads
+sometimes arrive as `main.203.com.Armature.VR4-003.obb` / `patch.203.com.Armature.VR4-001.obb` (#450: VR4 stopped
+right after its graphics started). `quest_dump.obb_names` (names only, no disk access) decides per top-level
+`main`/`patch` file:
+- renamed on the Frame (the PC file keeps its name): a copy suffix after the package (`-NNN`, ` (N)`, ` - Copy`: never
+  part of a package name) or a different case; the versionCode stays what the file says.
+- left alone: exact names, Unreal chunk files (`patch.pakchunk27-Android_ASTC.<pkg>.obb`, #471), split parts
+  (`main.<pkg>.part0.obb`, Phantom), other data (`Audio_*.obb`, `overflow1.…`, `chunk.N.…`) and files in subfolders.
+- warned, sent as they are: another app's name (`main.1716.com.beatgames.beatsaber.lj369vr.obb`, #129), a copy whose
+  right-named file is there too, two copies for one name, a copy suffix on a versionless name (the number may be the
+  versionCode).
+The installer sends `obb/<Frame name>` and passes the Frame-named manifest as `obb_manifest` (no agent change);
+`plan_update` compares `quest_dump.frame_manifest(...)` with the deployment, so a rename doesn't show "Update on Frame"
+again. A game installed earlier under the copy name gets its file renamed on the Frame by SFTP (`installer._reuse_renamed`:
+moved into `incoming/obb/<new name>`, finalize moves it into place) instead of a second upload. On the Frame itself
+(#433) the hardlink keeps the PC's name as its source (`_relink_installed(source=)`). Save backups skip `.obb`
+anyway. Loose copy-named OBBs next to an APK are found by name too (`_named_obbs`), the right-named one wins a tie.
+Survey of the owner's dumps (2026-10-24, 370 OBBs): no copy suffixes or case differences; the non-standard names were
+all the game's own (162 Asgard's Wrath 2 chunks, Phantom's `.partN`, Metro's `chunk.N`, Batman's `Audio_*`, PowerWash's
+DLC, Espire 2's `overflowN`). The old #129 check flagged Asgard's Wrath 2's chunks and Phantom's parts as "named for
+another app"; they're left alone now.

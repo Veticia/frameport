@@ -831,8 +831,9 @@ def test_obb_named_for_another_package_is_flagged():
     entry = {"package": "com.beatgames.beatsaber", "data_manifest": {
         "main.1716.com.beatgames.beatsaber.lj369vr.obb": 1, "patch.1716.com.beatgames.beatsaber.obb": 1,
         "extra.bundle": 1}}
-    assert pipeline.misnamed_obbs(entry) == [("main.1716.com.beatgames.beatsaber.lj369vr.obb",
-                                              "main.1716.com.beatgames.beatsaber.obb")]
+    assert [(o.name, o.wanted, o.rename) for o in pipeline.misnamed_obbs(entry)] == [
+        ("main.1716.com.beatgames.beatsaber.lj369vr.obb", "main.1716.com.beatgames.beatsaber.obb", False)]
+    assert pipeline.renamed_obbs(entry) == []  # another app's file: a warning, never renamed (#481)
     assert pipeline.misnamed_obbs({"package": "com.x", "kind": "rift", "data_manifest": entry["data_manifest"]}) == []
 
 

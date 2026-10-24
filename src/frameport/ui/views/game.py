@@ -442,10 +442,26 @@ class GameView:
             out.append(C.callout(tr("Game data (.obb) is missing. Put it in a folder named {package} next to the APK "
                                     "and add the folder again.").format(package=pkg), "error",
                                  ft.Icons.FOLDER_OFF_OUTLINED))
-        for name, wanted in pipeline.misnamed_obbs(g):  # a renamed build's OBB next to the original APK (#129)
-            out.append(C.callout(tr("{name} is named for another app, so the game won't find it. Rename it to "
-                                    "{wanted}, scan again and install it again.").format(name=name, wanted=wanted),
-                                 "warn", ft.Icons.DRIVE_FILE_RENAME_OUTLINE_OUTLINED))
+        renamed = pipeline.renamed_obbs(g)  # a download's main.203.<pkg>-003.obb (#450/#481): fixed on the Frame
+        if renamed:
+            out.append(C.callout(tr("Data files with a changed name are installed on the Frame under the name the "
+                                    "game looks for; the files on this PC stay as they are: {files}").format(
+                                        files=", ".join(f"{o.name} → {o.wanted}" for o in renamed)),
+                                 "info", ft.Icons.DRIVE_FILE_RENAME_OUTLINE_OUTLINED))
+        notes = {  # names FramePort can't fix by itself: a renamed build's OBB next to the original APK (#129), …
+            "another-app": tr("{name} is named for another app, so the game won't find it. Rename it to {wanted}, "
+                              "scan again and install it again."),
+            "duplicate": tr("{name} looks like a copy of {wanted}, which is there too. The game only reads "
+                            "{wanted}, so the copy can go."),
+            "ambiguous": tr("Several data files could be {wanted} (e.g. {name}). Keep the right one, rename it to "
+                            "{wanted}, scan again and install it again."),
+            "unclear-version": tr("{name} has no version number in its name, so the number at its end may be the "
+                                  "version. Rename it to the name the game expects (e.g. {wanted}), scan again and "
+                                  "install it again."),
+        }
+        for o in pipeline.misnamed_obbs(g):
+            out.append(C.callout(notes[o.reason].format(name=o.name, wanted=o.wanted), "warn",
+                                 ft.Icons.DRIVE_FILE_RENAME_OUTLINE_OUTLINED))
         web = (extra.get("web_wrapper") or None) if not self.rift and not self.linux else None
         if web:
             out.append(C.callout(ft.Column([

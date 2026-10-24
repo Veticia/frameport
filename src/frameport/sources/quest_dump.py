@@ -17,6 +17,7 @@ import contextvars
 import os
 import re
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from ..core.models import SourceGame
@@ -203,6 +204,90 @@ OBB_NAME = re.compile(r"^(main|patch)\.(?:(\d+)\.)?(.+)\.obb$", re.IGNORECASE)
 NAMED_OBB = re.compile(r"^([a-z]+)\.(?:(\d+)\.)?(.+)\.obb$", re.IGNORECASE)
 
 
+# What downloads and copies add after the package (GitHub #450/#481): main.203.com.Armature.VR4-003.obb,
+# "… (1).obb", "… - Copy.obb". A package name has only letters, digits, '_' and '.', so none of these can be part of
+# one: the file is the game's own under a changed name.
+COPY_SUFFIX = re.compile(r"(?:-\d{1,4}|\s*\(\d{1,3}\)|\s+-\s+copy(?:\s*\(\d{1,3}\))?)", re.IGNORECASE)
+_COPY_TAIL = re.compile(f"(?:{COPY_SUFFIX.pattern})$", re.IGNORECASE)
+# a game's own split expansion files: nDreams' main.com.nDreams.PhantomQuest.part0.obb … part5
+SPLIT_PART = re.compile(r"\.part\d{1,3}", re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class ObbName:
+    """An expansion file whose name isn't the one the game looks for. rename: FramePort installs it on the Frame as
+    `wanted` (the file on the PC keeps its name); else it is sent as it is and the game page warns."""
+    name: str
+    wanted: str
+    rename: bool
+    reason: str  # case | copy | another-app | duplicate | ambiguous | unclear-version
+
+
+def obb_names(package: str, rels) -> list[ObbName]:
+    """Expansion files (top level of the game's data, main/patch kinds) not named <kind>.<versionCode>.<package>.obb
+    exactly, with what to do about each. Renamed (the name says which file it is, only its spelling is off): a
+    different case (Main.203.com.armature.vr4.obb) and a copy suffix after the package (-003, " (1)", " - Copy").
+    Warned, sent as they are: another app's name (a renamed build's main.1716.com.beatgames.beatsaber.lj369vr.obb,
+    GitHub #129), a copy of a file that is there under its right name too, two files for one name, a copy suffix
+    on a name without a versionCode (the number may be the versionCode). The versionCode is never changed: expansion
+    files keep the one they were introduced with. Unreal's chunk files (patch.pakchunk27-Android_ASTC.<package>.obb)
+    and split parts (.part0) are the game's own names. Names only, no disk access."""
+    pkg = package or ""
+    if not pkg:
+        return []
+    low = pkg.lower()
+    names = sorted({r for r in rels if "/" not in r})
+    found: list[tuple[str, str, str]] = []  # (name, wanted, reason)
+    for name in names:
+        m = OBB_NAME.match(name)
+        if not m:
+            continue
+        kind, vc, rest = m.group(1).lower(), m.group(2), m.group(3)
+        version = f"{vc}." if vc else ""
+        rl = rest.lower()
+        if rl.endswith("." + low) and not vc:
+            # Unreal chunk files: <kind>.<chunk>.<package>.obb; only the spelling of the package/kind can be off
+            wanted = f"{kind}.{rest[:-len(pkg)]}{pkg}.obb"
+            if wanted != name:
+                found.append((name, wanted, "case"))
+            continue
+        if rl == low:
+            reason, tail = "case", ""
+        elif rl.startswith(low) and SPLIT_PART.fullmatch(rest[len(pkg):]):
+            reason, tail = "case", rest[len(pkg):]
+        elif rl.startswith(low) and COPY_SUFFIX.fullmatch(rest[len(pkg):]):
+            reason, tail = ("copy" if vc else "unclear-version"), ""
+        else:
+            found.append((name, f"{kind}.{version}{pkg}.obb", "another-app"))
+            continue
+        wanted = f"{kind}.{version}{pkg}{tail}.obb"
+        if wanted != name:
+            found.append((name, wanted, reason))
+    out = []
+    present = set(names)
+    for name, wanted, reason in found:
+        if reason in ("case", "copy"):
+            rivals = [n for n, w, r in found if w.lower() == wanted.lower() and r in ("case", "copy")]
+            if wanted in present:
+                reason = "duplicate"
+            elif len(rivals) > 1:
+                reason = "ambiguous"
+        out.append(ObbName(name, wanted, reason in ("case", "copy"), reason))
+    return out
+
+
+def frame_names(package: str, manifest: dict[str, int]) -> dict[str, str]:
+    """{name in the game's data: name on the Frame} for the files obb_names renames (the rest keep theirs)."""
+    return {o.name: o.wanted for o in obb_names(package, manifest) if o.rename}
+
+
+def frame_manifest(package: str, manifest: dict[str, int] | None) -> dict[str, int]:
+    """The data manifest as the Frame stores it (renamed expansion files under their Frame names): what an install
+    sends as obb_manifest and what plan_update compares with the deployment, so a renamed file isn't "changed"."""
+    names = frame_names(package, manifest or {})
+    return {names.get(rel, rel): size for rel, size in (manifest or {}).items()}
+
+
 def _recursive_obb_names(d: Path) -> set[str]:
     """Expansion file paths below d; propagate read errors so callers cannot mistake a partial scan for all files."""
     names = set()
@@ -229,7 +314,9 @@ def _named_obbs(d: Path, pkg: str) -> list[tuple[str, int | None, Path]]:
         if not m or is_dir:
             continue
         rest = m.group(3).lower()
-        if rest == pkg.lower():
+        if rest == pkg.lower() or (m.group(1).lower() in ("main", "patch") and rest.startswith(pkg.lower())
+                                   and COPY_SUFFIX.fullmatch(rest[len(pkg):])):
+            # a download's copy suffix too (main.203.com.Armature.VR4-003.obb, GitHub #481): installed renamed
             out.append((m.group(1).lower(), int(m.group(2)) if m.group(2) else None, f))
         elif not m.group(2) and rest.endswith(suffix) and "." not in rest[:-len(suffix)]:
             out.append((m.group(1).lower() + "." + rest[:-len(suffix)], None, f))
@@ -274,9 +361,11 @@ def _pick_obbs(obbs: list[tuple[str, int | None, Path]], version_code: int | Non
     usable = [o for o in obbs if version_code is None or o[1] is None or o[1] <= version_code] or obbs
     picked = []
     for kind in ("main", "patch", *sorted({k for k, _, _ in usable} - {"main", "patch"})):
-        same = sorted((vc if vc is not None else -1, f) for k, vc, f in usable if k == kind)
+        # the right name before a copy of the same version (main.203.<package>.obb over main.203.<package>-003.obb)
+        same = sorted((vc if vc is not None else -1, not _COPY_TAIL.search(f.name[:-4]), f)
+                      for k, vc, f in usable if k == kind)
         if same:
-            picked.append(same[-1][1])
+            picked.append(same[-1][2])
     return picked
 
 
