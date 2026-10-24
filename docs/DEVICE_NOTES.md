@@ -59,6 +59,25 @@ tested), translator speed. Profiled on the Frame
 main thread). Now lock-free lookups, ltab refill, per-thread flags, per-page block lists: Gunjack's dispatcher
 23.6 % -> 1.6 %, CPU in the same phase about -55 %, still 72 fps.
 
+**Ghost Giant (GitHub #439, Unity 2017.4 il2cpp + OVRPlugin 1.29 on VrApi 1.16, headless 2026-10-24):** the logo,
+then black forever was its intro videos (Thunderful/Zoink logos, Unity VideoPlayer): without libmediandk in the
+bridge Unity took its JNI path, `GetDirectBufferAddress` of the codec's ByteBuffers (host heap, above 4 GiB) gave 0
+→ `AndroidVideoMedia: Error while getting codec input buffers`, and the Splash scene waits for the video for ever
+(never reaches `Scene SplashApp`). With the NDK media functions + `AMEDIAFORMAT_KEY_*` symbols (dcbcce0f, bccd916f)
+both videos play (decoded by `OMX.google.h264.decoder` into a SurfaceTexture), then SplashApp → PersistentObjects →
+Loading → MainMenu, which renders (left-eye snapshots every 3 s: before = pure black from +9 s, mean 0.0; after = the
+two videos, then the island menu from +46 s). Still seen: `VideoPlayback audio buffer overflow. N sample frames
+discarded` during the intros (the videos' sound may crackle; unchecked in the headset). The game hides everything
+behind "Return to play area" when the head is outside `PlayAreaManager`'s height limits (`PlayAreaSettings.heightData`
+min/max above the floor from GetTrackingTransform(3)).
+**Headless snapshots of VrApi games** (`device.lepton_env` / launch.sh `LEPTON_ENV_OVP_HEADLESS_TEST=1` + adapter
+`snapshot=N`): without a worn headset the session stays SYNCHRONIZED (`shouldRender` false), the VrApi bridge ended
+every frame empty (`pacing 2s: … ends=145 (empty 145 …)`) and the a32 bridge dropped every projection with an
+untracked default pose (`a32 submit anomaly … dropped=1`), so there was nothing to snapshot. Under OVP_HEADLESS_TEST
+the VrApi bridge now submits the images anyway, puts the floor (GetTrackingTransform(3)) 1.6 m below the eye origin
+instead of the runtime's headless STAGE (0.865 m: Ghost Giant then showed only "Return to play area"), and the a32
+bridge keeps the game's pose. Never set outside tests.
+
 ## Upload speed
 
 **Upload speed (measured 2026-09-29):** via the home router (PC Wi-Fi → router → Frame wlan0) only 15-18 MB/s, the
