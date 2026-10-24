@@ -2,7 +2,7 @@
 
 # Patches
 
-Every patch and game setting FramePort knows: 197 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
+Every patch and game setting FramePort knows: 198 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
 
 Each entry says what the patch does, whether it changes the APK or only the install, when FramePort suggests it, its options, the catalog games whose recipe names it and the launch-test signatures that suggest it. Patches that are on by default are on for every game, so the catalog rarely names them.
 
@@ -11,7 +11,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 ## Groups
 
 - [Patches from OVRPort](#group-overport) (25)
-- [Steam Frame patches](#group-frame) (67)
+- [Steam Frame patches](#group-frame) (68)
 - [Game settings](#group-adapter) (81)
 - [Files and settings on the Frame](#group-device) (11)
 - [PC VR (Proton and Revive)](#group-pcvr) (13)
@@ -71,6 +71,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Clear android:debuggable](#frame-nodebug) | `frame.nodebug` | Steam Frame patches | 3 |
 | [Oculus OS telemetry class stubs](#frame-oculusos) | `frame.oculusos` | Steam Frame patches | 18 |
 | [Fix crash when the game prepares the microphone](#frame-ovr_microphone) | `frame.ovr_microphone` | Steam Frame patches | 1 |
+| [Answer Meta's org-scoped user id request](#frame-ovr_org_scoped_id) | `frame.ovr_org_scoped_id` | Steam Frame patches | default |
 | [Keep the same Meta user between starts](#frame-ovr_stable_user) | `frame.ovr_stable_user` | Steam Frame patches | default |
 | [Trace Meta platform requests (diagnostics)](#frame-ovr_trace) | `frame.ovr_trace` | Steam Frame patches |  |
 | [Platform compat (ovrMessageType_ToString)](#frame-ovrplatformcompat) | `frame.ovrplatformcompat` | Steam Frame patches | default |
@@ -868,6 +869,20 @@ Stops a crash a few seconds after the logo in games with voice chat.
 - **Source:** [patches/frame/ovr_microphone.py](../src/frameport/patches/frame/ovr_microphone.py)
 
 > OVRPort's Meta platform library opens the microphone only when it's started, but answers a game's question about the microphone buffer size from that not-yet-opened stream: games that ask first (Unreal's Oculus voice chat, for example The Walking Dead: Saints & Sinners Ch. 2) crash a few seconds after the logo (SIGSEGV in libaaudio.so). Adds the missing check (size 0 until the microphone is started).
+
+### <a id="frame-ovr_org_scoped_id"></a>Answer Meta's org-scoped user id request
+
+Answers Meta's request for your org-scoped user id, which games such as Eleven Table Tennis wait for on their loading screen.
+
+- `frame.ovr_org_scoped_id` · on by default
+- **Changes:** Changes the APK (a rebuild and reinstall apply it).
+- **Suggested (on):** The game's Meta start-up waits for an org-scoped user id that OVRPort's platform library never answers (stuck loading screen).
+- **Suggested (on):** … waits for Meta's org-scoped user id, which OVRPort's platform library never answers (stuck loading screen).
+- **Suggested by launch-test signatures:**
+  - `meta-org-scoped-id-wait` (error): The game waits on its loading screen for Meta's org-scoped user id, which OVRPort's platform library never answers.
+- **Source:** [patches/frame/ovr_org_scoped_id.py](../src/frameport/patches/frame/ovr_org_scoped_id.py)
+
+> OVRPort's platform library never answers Meta's org-scoped user id request (ovr_User_GetOrgScopedID returns 'no request'), so Meta's Unity wrapper logs "An unknown error occurred. Request failed." and a game that waits for the id stays on its loading screen (e.g. Eleven Table Tennis, Escaping Wonderland). Adds the small platform library FramePort also uses for language packs and answers that request with a fixed id derived from the game's user id. Every other platform call goes to OVRPort's library unchanged.
 
 ### <a id="frame-ovr_stable_user"></a>Keep the same Meta user between starts
 

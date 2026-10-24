@@ -36,6 +36,22 @@
 // content that comes with the game, IAP status "free"), named after the file. ovr_AssetFile_DownloadById on one of
 // them answers at once with a completed download update and a result carrying the file's path (nothing is copied).
 // E.g. Star Wars: Tales from the Galaxy's Edge, whose seasons and sound banks are such files (ETacoDLC::Season1...).
+//
+// Org-scoped user ids (patch frame.ovr_org_scoped_id, which sets the marker byte g_org_slot; or
+// FRAMEPORT_ORG_SCOPED_ID=1): OVRPort's dispatcher exports ovr_User_GetOrgScopedID, ovr_Message_GetOrgScopedID and
+// ovr_OrgScopedID_GetID as `return 0` (runtimes 3.4.3-23204ea and -aa54c3f: `mov x0, xzr; ret`), so Meta's C# wrapper
+// logs "An unknown error occurred. Request failed." and the game's callback never runs (Eleven Table Tennis, GitHub
+// #452; Cortopia's Escaping Wonderland #360 and TMNT: Empire City #422 wait for it on their loading screens). Here the
+// request gets a fresh request id and a successful ovrMessage_User_GetOrgScopedID answer whose ovrOrgScopedIDHandle
+// gives an id (ovrID, a 64-bit number like every Meta user id) derived from the user id the game passes: FNV-1a 64 over
+// the user id's 8 bytes (little-endian), seeded apart from the other hashes here, top bit cleared (games may keep it as
+// a signed long), never 0. The user id itself is already fixed per game and FramePort user (frame.ovr_stable_user), so
+// the org-scoped id is the same at every start. (ovr_User_GetUserProof, the next request Eleven makes, is answered by
+// the dispatcher itself: it queues an ovrMessage_User_GetUserProof with a nonce string, so it is left alone.)
+//
+// The library can also be linked for that alone: then the language-pack calls are passed through to the dispatcher
+// (marker byte g_langs_slot '0', set by frame.ovr_org_scoped_id when no other patch linked the library;
+// FRAMEPORT_LANGPACK_SERVE=0/1 overrides it).
 #define _GNU_SOURCE
 #include <ctype.h>
 #include <dirent.h>
@@ -101,6 +117,7 @@ static int g_traced;
 #define MSG_LANGUAGEPACK_SETCURRENT 0x5B4FBBE0u
 #define MSG_ASSETFILE_DOWNLOADBYID 0x2D008992u
 #define MSG_NOTIFICATION_DOWNLOADUPDATE 0x2FDD0CCDu
+#define MSG_USER_GETORGSCOPEDID 0x18F0B01Bu
 
 #define MAXP 32
 #define PATHLEN 1024
@@ -213,6 +230,8 @@ DEFORIG(const char *, LanguagePackInfo_GetNativeName, (const void *l), (l))
 DEFORIG(u64, AssetFileDownloadResult_GetAssetId, (const void *r), (r))
 DEFORIG(const char *, AssetFileDownloadResult_GetFilepath, (const void *r), (r))
 DEFORIG(u64, AssetFile_GetList, (void), ())
+DEFORIG(u64, LanguagePack_GetCurrent, (void), ())
+DEFORIG(u64, LanguagePack_SetCurrent, (const char *tag), (tag))
 DEFORIG(u64, AssetFile_StatusById, (u64 id), (id))
 DEFORIG(u64, AssetFile_DownloadById, (u64 id), (id))
 DEFORIG(void *, Message_GetAssetFileDownloadUpdate, (const void *m), (m))
@@ -224,6 +243,9 @@ DEFORIG(int, Error_GetCode, (const void *e), (e))
 DEFORIG(int, Error_GetHttpCode, (const void *e), (e))
 DEFORIG(const char *, Error_GetMessage, (const void *e), (e))
 DEFORIG(const char *, Error_GetDisplayableMessage, (const void *e), (e))
+DEFORIG(u64, User_GetOrgScopedID, (u64 user), (user))
+DEFORIG(void *, Message_GetOrgScopedID, (const void *m), (m))
+DEFORIG(u64, OrgScopedID_GetID, (const void *o), (o))
 
 /* ---------------------------------------------------------------------------------------------------------------
  * Finding the packs
@@ -310,6 +332,27 @@ static int stub_enabled(void) {
     return ((const volatile char *)g_stub_slot)[sizeof STUB_MARK - 1] == '1';
 }
 
+// frame.ovr_org_scoped_id sets the byte after the marker to '1' (frameport.patches.frame.langpack.with_org_id)
+#define ORG_MARK "@FPORGID@"
+__attribute__((used)) static char g_org_slot[sizeof ORG_MARK + 1] = ORG_MARK "0";
+
+static int org_enabled(void) {
+    const char *env = getenv("FRAMEPORT_ORG_SCOPED_ID");
+    if (env && *env) return *env == '1';
+    return ((const volatile char *)g_org_slot)[sizeof ORG_MARK - 1] == '1';
+}
+
+// '1' (default): language packs are served. frame.ovr_org_scoped_id writes '0' when it is the only reason the library
+// is linked: then the language-pack calls go to the dispatcher as without the library.
+#define LANGS_MARK "@FPLANGS@"
+__attribute__((used)) static char g_langs_slot[sizeof LANGS_MARK + 1] = LANGS_MARK "1";
+
+static int langs_enabled(void) {
+    const char *env = getenv("FRAMEPORT_LANGPACK_SERVE");
+    if (env && *env) return *env == '1';
+    return ((const volatile char *)g_langs_slot)[sizeof LANGS_MARK - 1] == '1';
+}
+
 static u64 hash_name(const char *name) {
     u64 h = 1469598103934665603ULL ^ 0x66;  // FNV-1a, seeded apart from the tags
     for (const char *p = name; *p; p++) {
@@ -376,7 +419,7 @@ static void scan_dir(const char *dir, int depth, pack_t *out, int *n) {
             if (depth < MAX_DEPTH) scan_dir(path, depth + 1, out, n);
         } else if (S_ISREG(st.st_mode)) {
             size_t len = strlen(e->d_name);
-            if (len > 5 && strcasecmp(e->d_name + len - 5, ".lang") == 0) {
+            if (len > 5 && strcasecmp(e->d_name + len - 5, ".lang") == 0 && langs_enabled()) {
                 char tag[48];
                 if (len - 5 >= sizeof tag) continue;
                 memcpy(tag, e->d_name, len - 5);
@@ -533,13 +576,18 @@ typedef struct {
     int completed;
 } update_t;
 
+typedef struct {
+    u64 id;
+} org_t;
+
 typedef struct msg {
     struct msg *all_next, *q_next;
     u32 type;
     u64 req;
-    int is_error, has_det, has_res, has_upd;
+    int is_error, has_det, has_res, has_upd, has_org;
     err_t err;
     update_t upd;
+    org_t org;
     details_t det;
     lang_t lng;
     result_t res;
@@ -726,6 +774,7 @@ static msg_t *expire_pending(void) {
  * ------------------------------------------------------------------------------------------------------------- */
 
 EXPORT u64 ovr_LanguagePack_GetCurrent(void) {
+    if (!langs_enabled()) return o_LanguagePack_GetCurrent();
     pack_t packs[MAXP];
     int n = scan(packs), i = pick_current(packs, n);
     fplog("LanguagePack_GetCurrent -> %s", i >= 0 ? packs[i].tag : "none applied");
@@ -743,6 +792,7 @@ EXPORT u64 ovr_LanguagePack_GetCurrent(void) {
 }
 
 EXPORT u64 ovr_LanguagePack_SetCurrent(const char *tag) {
+    if (!langs_enabled()) return o_LanguagePack_SetCurrent(tag);
     pack_t packs[MAXP];
     int n = scan(packs), i = (tag && *tag) ? find_tag(packs, n, tag) : -1;
     fplog("LanguagePack_SetCurrent(\"%s\") -> %s", tag ? tag : "(null)", i >= 0 ? packs[i].path : "not available");
@@ -856,6 +906,30 @@ EXPORT u64 ovr_AssetFile_DownloadById(u64 id) {
     return req;
 }
 
+// The org-scoped id for a user id (see the top of the file): stable, non-zero, fits a signed 64-bit number.
+static u64 org_scoped_id(u64 user) {
+    u64 h = 1469598103934665603ULL ^ 0x6F7267;  // FNV-1a, seeded apart from the tags and names ("org")
+    for (int i = 0; i < 8; i++) {
+        h ^= (user >> (8 * i)) & 0xFF;
+        h *= 1099511628211ULL;
+    }
+    h &= 0x7FFFFFFFFFFFFFFFULL;
+    return h ? h : 1;
+}
+
+EXPORT u64 ovr_User_GetOrgScopedID(u64 user) {
+    if (!org_enabled()) return o_User_GetOrgScopedID(user);
+    msg_t *m = new_msg(MSG_USER_GETORGSCOPEDID, 0);
+    if (!m) return 0;
+    u64 req = m->req;
+    m->org.id = org_scoped_id(user);
+    m->has_org = 1;
+    fplog("User_GetOrgScopedID(%llu) -> request %llu, id %llu", (unsigned long long)user, (unsigned long long)req,
+          (unsigned long long)m->org.id);
+    post(m);
+    return req;
+}
+
 /* ---------------------------------------------------------------------------------------------------------------
  * Message loop
  * ------------------------------------------------------------------------------------------------------------- */
@@ -951,6 +1025,12 @@ EXPORT void *ovr_Message_GetAssetFileDownloadUpdate(const void *h) {
     msg_t *m = owner(h);
     if (!m) return o_Message_GetAssetFileDownloadUpdate(h);
     return m->has_upd ? (void *)&m->upd : NULL;
+}
+
+EXPORT void *ovr_Message_GetOrgScopedID(const void *h) {
+    msg_t *m = owner(h);
+    if (!m) return o_Message_GetOrgScopedID(h);
+    return m->has_org ? (void *)&m->org : NULL;
 }
 
 EXPORT void *ovr_Message_GetAssetDetailsArray(const void *h) {
@@ -1054,6 +1134,10 @@ EXPORT long long ovr_AssetFileDownloadUpdate_GetBytesTransferred(const void *h) 
 }
 EXPORT _Bool ovr_AssetFileDownloadUpdate_GetCompleted(const void *h) {
     return IS_OURS(h) ? (_Bool)((const update_t *)h)->completed : o_AssetFileDownloadUpdate_GetCompleted(h);
+}
+
+EXPORT u64 ovr_OrgScopedID_GetID(const void *h) {
+    return IS_OURS(h) ? ((const org_t *)h)->id : o_OrgScopedID_GetID(h);
 }
 
 EXPORT int ovr_Error_GetCode(const void *h) { return IS_OURS(h) ? ((const err_t *)h)->code : o_Error_GetCode(h); }

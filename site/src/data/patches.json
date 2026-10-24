@@ -589,6 +589,11 @@
   "title": "Fix crash when the game prepares the microphone",
   "group": "Steam Frame patches"
  },
+ "frame.ovr_org_scoped_id": {
+  "anchor": "frame-ovr_org_scoped_id",
+  "title": "Answer Meta's org-scoped user id request",
+  "group": "Steam Frame patches"
+ },
  "frame.ovr_stable_user": {
   "anchor": "frame-ovr_stable_user",
   "title": "Keep the same Meta user between starts",

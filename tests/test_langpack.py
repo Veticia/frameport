@@ -570,3 +570,123 @@ def test_asset_stub_via_platform_loader_handle(built, tmp_path, monkeypatch):
         assert api.pop() is None
     finally:
         _dlclose(loader)
+
+
+ORGSCOPEDID, USERPROOF = 0x18F0B01B, 0x22810483  # ovrMessage_User_GetOrgScopedID / _GetUserProof
+
+
+def _org_id(api, user):
+    """Ask for the org-scoped id of `user`: (request id, the popped message)."""
+    req = api.f("ovr_User_GetOrgScopedID", C.c_uint64, C.c_uint64)(user)
+    return req, api.pop()
+
+
+def _org_value(api, m):
+    return api.f("ovr_OrgScopedID_GetID", C.c_uint64, VOIDP)(api.f("ovr_Message_GetOrgScopedID", VOIDP, VOIDP)(m))
+
+
+def test_org_scoped_id_is_answered_when_switched_on(api, monkeypatch):
+    monkeypatch.setenv("FRAMEPORT_ORG_SCOPED_ID", "1")
+    user = 0x53444835EC5A1B2C  # a frame.ovr_stable_user style id
+    req, m = _org_id(api, user)
+    assert req != 0 and m
+    assert api.msg_type(m) == ORGSCOPEDID and api.req_id(m) == req and not api.is_error(m)
+    assert not api.f("ovr_Message_GetError", VOIDP, VOIDP)(m)
+    assert api.f("ovr_Message_GetOrgScopedID", VOIDP, VOIDP)(m)
+    oid = _org_value(api, m)
+    assert oid and oid < 2**63 and oid != user
+    api.free(m)
+    assert api.pop() is None  # one answer
+    req2, m2 = _org_id(api, user)  # same user: same id, new request
+    assert req2 != req and _org_value(api, m2) == oid
+    api.free(m2)
+    _, m3 = _org_id(api, user + 1)  # another user: another id
+    assert _org_value(api, m3) != oid
+    api.free(m3)
+    assert api.loader.fake_freed() == 0  # nothing went to the loader
+
+
+def test_org_scoped_id_off_reaches_the_loader(api, monkeypatch):
+    monkeypatch.delenv("FRAMEPORT_ORG_SCOPED_ID", raising=False)
+    req, m = _org_id(api, 5)  # the library's default (frame.langpacks builds): OVRPort's own answer, request id 0
+    assert req == 0 and m is None
+
+
+def test_other_requests_still_reach_the_loader_with_org_id_on(api, monkeypatch):
+    monkeypatch.setenv("FRAMEPORT_ORG_SCOPED_ID", "1")
+    req = api.f("ovr_User_GetUserProof", C.c_uint64, lib=api.loader)()  # not ours: the loader's own queue
+    assert req == 100
+    m = api.pop()
+    assert api.msg_type(m) == USERPROOF and api.req_id(m) == req and not api.is_error(m)
+    assert api.f("ovr_Message_GetOrgScopedID", VOIDP, VOIDP)(m) is None  # the loader's accessor (NULL)
+    api.free(m)
+    assert api.loader.fake_freed() == 1
+    assert api.f("ovr_OrgScopedID_GetID", C.c_uint64, VOIDP)(16) == 0  # a foreign handle: the loader's function
+
+
+def test_language_packs_can_be_passed_through(api, packs, monkeypatch):
+    monkeypatch.setenv("FRAMEPORT_LANGPACK_SERVE", "0")  # what frame.ovr_org_scoped_id alone builds
+    assert api.f("ovr_LanguagePack_GetCurrent", C.c_uint64)() == 0  # the loader's own `return 0`
+    assert api.f("ovr_LanguagePack_SetCurrent", C.c_uint64, C.c_char_p)(b"de") == 0
+    assert api.pop() is None
+    assert _list(api) == [{"id": 7, "type": b"store", "status": b"available", "path": b"/store/a", "iap": b"free"}]
+    monkeypatch.setenv("FRAMEPORT_LANGPACK_SERVE", "1")
+    assert {i.get("tag") for i in _list(api)} >= {b"de", b"fr"}
+
+
+def test_org_scoped_id_markers(built, tmp_path, monkeypatch):
+    lib = built["lib"].read_bytes()
+    assert patch_mod.ORG_MARK + b"0" in lib and patch_mod.LANGS_MARK + b"1" in lib
+    on = patch_mod.with_org_id(patch_mod.without_langs(lib))
+    assert len(on) == len(lib) and patch_mod.ORG_MARK + b"1" in on and patch_mod.LANGS_MARK + b"0" in on
+    assert patch_mod.with_org_id(on) == on and patch_mod.without_langs(on) == on
+    monkeypatch.delenv("FRAMEPORT_ORG_SCOPED_ID", raising=False)
+    monkeypatch.delenv("FRAMEPORT_LANGPACK_SERVE", raising=False)
+    root = tmp_path / "obb"
+    root.mkdir()
+    (root / "de.lang").write_bytes(b"1")
+    monkeypatch.setenv("FRAMEPORT_LANGPACK_DIRS", str(root))
+    marked = tmp_path / "marked.so"
+    marked.write_bytes(on)
+    for api in _api({**built, "marked": marked}, tmp_path, monkeypatch, "marked"):
+        req, m = _org_id(api, 42)
+        assert req and api.msg_type(m) == ORGSCOPEDID
+        api.free(m)
+        assert api.f("ovr_LanguagePack_GetCurrent", C.c_uint64)() == 0  # packs off by the marker
+        assert not [i for i in _list(api) if i["type"] == b"language_pack"]
+
+
+def test_org_scoped_id_patch(built, tmp_path, monkeypatch):
+    from frameport.patches.frame import ovr_org_scoped_id
+
+    lib = built["lib"].read_bytes()
+    monkeypatch.setattr(ovr_org_scoped_id, "artifact", lambda abi, name: lib)
+    patch = base.get("frame.ovr_org_scoped_id")
+    plain = _analysis(libs=["libovrplatformloader.so"])
+    assert patch.applies(plain) and patch.detect(plain) is None  # no sign that the game waits for it
+    assert patch.detect(_analysis(package="quest.eleven.forfunlabs", libs=["libovrplatformloader.so"]))
+    assert patch.detect(_analysis(libs=["libovrplatformloader.so"], extra={"size": 1, "cortopia_org_id": True}))
+    assert not patch.applies(_analysis(libs=[]))
+    assert not patch.applies(_analysis(libs=["libovrplatformloader.so"], abis=["armeabi-v7a"]))
+    with ApkWorkspace(_apk(tmp_path, built)) as ws:
+        ctx = base.ApkContext(ws, plain, {}, Reporter(), {})
+        assert patch.apply(ctx)
+        loader = ws.read_lib(patch_mod.LOADER)
+        assert elf.needed(loader)[0] == patch_mod.LIB
+        assert not elf.hide_exports(loader, patch_mod.EXPORTS)[1]  # every library function hidden in the loader
+        out = ws.read_lib(patch_mod.LIB)
+        assert patch_mod.ORG_MARK + b"1" in out and patch_mod.LANGS_MARK + b"0" in out  # language packs stay off
+        assert all(ok for _, ok, _ in patch.validate(ctx))
+        assert not patch.apply(ctx)  # once is enough
+
+
+def test_org_scoped_id_patch_after_language_packs_keeps_them(built, tmp_path, monkeypatch):
+    lib = built["lib"].read_bytes()
+    monkeypatch.setattr(patch_mod, "artifact", lambda abi, name: lib)
+    a = _analysis(libs=["libovrplatformloader.so"], extra={"size": 1, "lang_packs": ["de"]})
+    with ApkWorkspace(_apk(tmp_path, built)) as ws:
+        assert base.get("frame.langpacks").apply(base.ApkContext(ws, a, {}, Reporter(), {}))
+        assert base.get("frame.ovr_org_scoped_id").apply(base.ApkContext(ws, a, {}, Reporter(), {}))
+        out = ws.read_lib(patch_mod.LIB)
+        assert patch_mod.ORG_MARK + b"1" in out and patch_mod.LANGS_MARK + b"1" in out
+        assert elf.needed(ws.read_lib(patch_mod.LOADER)).count(patch_mod.LIB) == 1

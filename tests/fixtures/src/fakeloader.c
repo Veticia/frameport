@@ -1,5 +1,5 @@
 // Test fixture for tests/test_langpack.py: a stand-in for OVRPort's platform loader (libovrplatformloader.so).
-// Like the real one it answers ovr_LanguagePack_GetCurrent/SetCurrent with `return 0` and keeps its own message queue;
+// Like the real one it answers ovr_LanguagePack_GetCurrent/SetCurrent and ovr_User_GetOrgScopedID with `return 0` and keeps its own message queue;
 // AssetFile_GetList/StatusById queue one message that carries one "store" asset (id 7).
 // Build: cc -shared -fPIC -O1 fakeloader.c -o libovrplatformloader.so
 #include <stdint.h>
@@ -32,6 +32,12 @@ u64 ovr_AssetFile_GetList(void) {
 u64 ovr_AssetFile_StatusById(u64 id) { return post(0x5D955D38u, id != 7); }
 u64 ovr_LanguagePack_GetCurrent(void) { return 0; }
 u64 ovr_LanguagePack_SetCurrent(const char *tag) { (void)tag; return 0; }
+// like OVRPort's runtimes 3.4.3: `mov x0, xzr; ret`
+u64 ovr_User_GetOrgScopedID(u64 user) { (void)user; return 0; }
+void *ovr_Message_GetOrgScopedID(const void *m) { (void)m; return NULL; }
+u64 ovr_OrgScopedID_GetID(const void *o) { (void)o; return 0; }
+// answered by OVRPort itself (a queued message with a nonce): must still reach the loader
+u64 ovr_User_GetUserProof(void) { return post(0x22810483u, 0); }
 
 void *ovr_PopMessage(void) {
     if (!qn) return NULL;

@@ -46,6 +46,28 @@ def with_stub(lib: bytes) -> bytes:
     return lib[:at] + b"1" + lib[at + 1:]
 
 
+ORG_MARK = b"@FPORGID@"  # native/langpack: g_org_slot = marker + '0'/'1' (org-scoped id requests answered or not)
+LANGS_MARK = b"@FPLANGS@"  # native/langpack: g_langs_slot = marker + '1'/'0' (language packs served or passed through)
+
+
+def _flag(lib: bytes, mark: bytes, old: bytes, new: bytes) -> bytes:
+    at = lib.find(mark + old)
+    if at < 0:
+        return lib
+    at += len(mark)
+    return lib[:at] + new + lib[at + 1:]
+
+
+def with_org_id(lib: bytes) -> bytes:
+    """The library with ovr_User_GetOrgScopedID answered (frame.ovr_org_scoped_id)."""
+    return _flag(lib, ORG_MARK, b"0", b"1")
+
+
+def without_langs(lib: bytes) -> bytes:
+    """The library with the language-pack calls passed through to the loader (linked for another reason only)."""
+    return _flag(lib, LANGS_MARK, b"1", b"0")
+
+
 # Every function native/langpack/langpack.c defines. The loader's own exports of these are hidden (see
 # elf.hide_exports) so lookups reach LIB first; tests/test_langpack.py keeps this list equal to the C source.
 EXPORTS = (
@@ -63,6 +85,7 @@ EXPORTS = (
     "ovr_Message_GetAssetFileDownloadResult", "ovr_Message_GetAssetFileDownloadUpdate", "ovr_Message_GetError",
     "ovr_Message_GetRequestID",
     "ovr_Message_GetType", "ovr_Message_IsError", "ovr_PopMessage",
+    "ovr_Message_GetOrgScopedID", "ovr_OrgScopedID_GetID", "ovr_User_GetOrgScopedID",
 )
 
 

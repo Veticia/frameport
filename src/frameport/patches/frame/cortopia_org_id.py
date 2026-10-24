@@ -15,7 +15,11 @@ The game's own code skips that request when the device isn't on Wi-Fi/LAN (then 
 does for offline players). This patch takes that path always: the `b.ne` after `cmp w0, #2` that follows the call to
 `get_internetReachability` in that method becomes an unconditional `b`. The licence check and the logged-in user come
 before it and are untouched. Methods are found with Cpp2IL; the site must match exactly once, with the
-GetOrgScopedID call inside the skipped part, or nothing is changed."""
+GetOrgScopedID call inside the skipped part, or nothing is changed.
+
+The generic frame.ovr_org_scoped_id (GitHub #452) answers the request itself (native/langpack) for every game, so this
+per-game rewrite becomes unnecessary once that answer is verified in a headset; until then both are suggested (the
+skip means the request is never made, so they don't interfere)."""
 from __future__ import annotations
 
 from ..base import ApkContext, Patch, Suggestion, register

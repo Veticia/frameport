@@ -626,6 +626,18 @@ def test_meta_request_failed():
     assert "meta-request-failed" not in {x.id for x in triage(other + LOG_OK, "RUNNING").findings}
 
 
+def test_meta_org_scoped_id_wait():
+    log = ("E Unity   : An unknown error occurred. Request failed.\n"
+           "E Unity   : Oculus.Platform.Request`1:OnComplete(Callback)\n"
+           "E Unity   : MetaPlatform:<BuildIdentity>b__0(Message`1)\n")
+    r = triage(log + LOG_OK, "RUNNING", "quest.eleven.forfunlabs")
+    ids = {x.id for x in r.findings}
+    assert "meta-org-scoped-id-wait" in ids and "meta-request-failed" not in ids
+    assert next(f for f in r.findings if f.id == "meta-org-scoped-id-wait").suggest == ["frame.ovr_org_scoped_id"]
+    # another request's failure stays the generic hint
+    assert "meta-org-scoped-id-wait" not in {x.id for x in triage(LOG_META_REQUEST + LOG_OK, "RUNNING").findings}
+
+
 def test_meta_system_activities():
     log = ("W System.err: \tat android.content.ContextWrapper.startActivity(ContextWrapper.java:403)\n"
            "F OVRPlatform-Loader: DisplayErrorAndExit: Failed to launch SystemActivities\n"
