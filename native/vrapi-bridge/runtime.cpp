@@ -885,6 +885,11 @@ VRAPI ovrPosef vrapi_GetTrackingTransform(ovrMobile* mobile, int which) {
         // so an identity fallback here silently puts a floor-level camera at eye level.
         result = fromXrPose(s.eyeOrigin);
         result.Position.y -= 1.6f;
+        // OVP_HEADLESS_TEST: nobody wears the headset, so the runtime's STAGE floor isn't under a head (it sat
+        // 0.865 m below the untracked eye origin): keep the 1.6 m, else games with a minimum head height (Ghost
+        // Giant's play area) only show "return to play area"
+        static const bool headlessTest = getenv("OVP_HEADLESS_TEST") != nullptr;
+        if (headlessTest) return result;
         XrSpaceLocation location{XR_TYPE_SPACE_LOCATION};
         if (s.stageSpace && xrOk(s.xr.xrLocateSpace(s.stageSpace, s.localSpace, s.frame.predictedDisplayTime, &location), "floor transform") &&
             (location.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT)) {

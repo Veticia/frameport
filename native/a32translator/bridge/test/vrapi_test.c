@@ -141,6 +141,10 @@ int a32_vrapi_selftest(void)
     tracking_reset(); test_tracked = 0;
     projection.Header.Flags = 4; submit_prepare(m, &desc); VT(desc.LayerCount == 1);
     projection.Header.Flags = 0; submit_prepare(m, &desc); VT(desc.LayerCount == 0);
+    /* OVP_HEADLESS_TEST: an untracked default pose is submitted as it is (headless snapshots) */
+    headless_test = 1; desc.LayerCount = 1; submit_prepare(m, &desc);
+    VT(desc.LayerCount == 1 && !memcmp(&projection.HeadPose, &identity.HeadPose, sizeof(pose64)));
+    headless_test = 0;
     /* Check the real SubmitFrame2 thunk ends an empty frame with no tracked fallback. */
     memset(buf, 0, 4096);
     st32(g+32,1); st32(g+36,array); st32(array,layer); st32(layer,1);

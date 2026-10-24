@@ -508,8 +508,13 @@ static void submit_diag(void *m, const submit2 *d, const pose64 *pose, int incom
 /* Repair only a default without matching tracked provenance on a world projection, never an arbitrary render pose,
  * head-locked layer or cylinder placement. If no tracked answer exists, end an empty frame
  * rather than reproject an image around the origin. No additional WaitFrame/time advance. */
+/* OVP_HEADLESS_TEST=1 (automated tests without a worn headset, as for the VrApi bridge): no head is ever tracked, so
+ * submit_prepare would drop every frame; it keeps the game's own pose instead, so FrameBridge's snapshots show what the
+ * game draws (-1: not read yet) */
+static int headless_test = -1;
 static void submit_prepare(void *m, submit2 *d)
 {
+    if (headless_test < 0) headless_test = getenv("OVP_HEADLESS_TEST") != NULL;
     pose64 original = {0};
     int have_pose = 0, incoming_match = 1, had_default = 0, repaired = 0, dropped = 0;
     /* Inspect all incoming world projections before any locate adds a cache entry. */
@@ -543,7 +548,7 @@ static void submit_prepare(void *m, submit2 *d)
         if ((tr.Status & 15) != 15) tr = tracking_of(m, 0);
         if ((tr.Status & 15) == 15) {
             p->HeadPose = tr.HeadPose; repaired = 1;
-        } else { dropped = 1; break; }
+        } else if (!headless_test) { dropped = 1; break; }
     }
     /* Record the incoming pose, not the repaired pose. */
     submit_diag(m, d, have_pose ? &original : NULL, incoming_match, had_default, repaired, dropped);

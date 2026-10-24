@@ -160,7 +160,9 @@ python native/a32translator/bridge/build.py [--test]
   Unity only renders with window focus.
 - Debugging: `A32_WATCH=<s>` logs every guest thread's pc and the return addresses on its stack as `lib+offset`;
   `A32B_TRACE=1` logs native registrations and calls; `A32_STRACE`, `A32_INTERP` as for a32run. Set them through the
-  recipe's `device.lepton_env` (`LEPTON_ENV_<NAME>`).
+  recipe's `device.lepton_env` (`LEPTON_ENV_<NAME>`). `OVP_HEADLESS_TEST=1` (tests without a worn headset): the
+  VrApi bridge submits images although the runtime doesn't ask for them and `vrapi.c` keeps untracked default poses
+  instead of dropping the frame, so FrameBridge's `snapshot=N` shows what the game draws.
 
 Learned on the way: `-static-pie` links `crtbegin_dynamic.o`, which leaves `.init_array` to a dynamic linker (so
 none of libc's own constructors ran: bionic's systrace property crashed in an Android process); bionic's arm32

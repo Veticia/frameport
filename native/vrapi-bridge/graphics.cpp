@@ -1222,15 +1222,20 @@ VRAPI ovrResult vrapi_SubmitFrame2(ovrMobile* mobile,
     // otherwise an empty submission replaces it with the runtime's black image.
     // shouldRender is an advisory; actual focus loss keeps the ordinary path.
     const char* keepFocused = std::getenv("FRAMEPORT_VRAPI_KEEP_FOCUSED_IMAGE");
-    const bool retainImage = keepFocused && std::strcmp(keepFocused, "1") == 0 &&
-                             s.sessionState == XR_SESSION_STATE_FOCUSED;
+    // OVP_HEADLESS_TEST=1 (automated tests without a worn headset): the session stays SYNCHRONIZED and never asks for
+    // images; submit them anyway, so FrameBridge's snapshot/layer_debug can show what the game draws
+    static const bool headlessTest = std::getenv("OVP_HEADLESS_TEST") != nullptr;
+    const bool retainImage = headlessTest || (keepFocused && std::strcmp(keepFocused, "1") == 0 &&
+                                              s.sessionState == XR_SESSION_STATE_FOCUSED);
     if (!s.frame.shouldRender && !retainImage) {
         const XrResult result = ovp::endFrame(nullptr, 0);
         return XR_SUCCEEDED(result) ? Success : DeviceUnavailable;
     }
     if (!s.frame.shouldRender && retainImage) {
         static unsigned held = 0;
-        if (held++ % 72 == 0) OVP_LOG("CLIMB visibility: retaining image during held focus dip (%u)", held);
+        if (headlessTest ? held++ == 0 : held++ % 72 == 0)
+            OVP_LOG("%s (%u)", headlessTest ? "OVP_HEADLESS_TEST: submitting images the runtime doesn't ask for"
+                                            : "CLIMB visibility: retaining image during held focus dip", held);
     }
 
     std::array<CopyJob, kMaxCopyJobs> jobs{};
