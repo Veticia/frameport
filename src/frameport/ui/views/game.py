@@ -476,11 +476,11 @@ class GameView:
                               "scan again and install it again."),
             "duplicate": tr("{name} looks like a copy of {wanted}, which is there too. The game only reads "
                             "{wanted}, so the copy can go."),
-            "ambiguous": tr("Several data files could be {wanted} (e.g. {name}). Keep the right one, rename it to "
-                            "{wanted}, scan again and install it again."),
+            "ambiguous": tr("Several data files could be {wanted} (for example {name}). Keep the right one, "
+                            "rename it to {wanted}, scan again and install it again."),
             "unclear-version": tr("{name} has no version number in its name, so the number at its end may be the "
-                                  "version. Rename it to the name the game expects (e.g. {wanted}), scan again and "
-                                  "install it again."),
+                                  "version. Rename it to the name the game expects (for example {wanted}), scan again "
+                                  "and install it again."),
         }
         for o in pipeline.misnamed_obbs(g):
             out.append(C.callout(notes[o.reason].format(name=o.name, wanted=o.wanted), "warn",
