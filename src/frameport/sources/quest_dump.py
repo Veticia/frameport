@@ -219,12 +219,20 @@ def _recursive_obb_names(d: Path) -> set[str]:
 
 
 def _named_obbs(d: Path, pkg: str) -> list[tuple[str, int | None, Path]]:
-    """(kind, versionCode, file) of the package's expansion files directly in d."""
+    """(kind, versionCode, file) of the package's expansion files directly in d. Unreal's extra chunk files
+    (patch.pakchunk27-Android_ASTC.<package>.obb: Asgard's Wrath 2 has 81 of them, ~27 GB, GitHub #471) are each a
+    kind of their own ("patch.pakchunk27-android_astc"), so every one is sent."""
     out = []
+    suffix = "." + pkg.lower()
     for f, is_dir in _list(d):
         m = NAMED_OBB.match(f.name)
-        if m and m.group(3).lower() == pkg.lower() and not is_dir:
+        if not m or is_dir:
+            continue
+        rest = m.group(3).lower()
+        if rest == pkg.lower():
             out.append((m.group(1).lower(), int(m.group(2)) if m.group(2) else None, f))
+        elif not m.group(2) and rest.endswith(suffix) and "." not in rest[:-len(suffix)]:
+            out.append((m.group(1).lower() + "." + rest[:-len(suffix)], None, f))
     return out
 
 

@@ -6,7 +6,10 @@ engine: Unreal
 xr: OpenXR
 status: works
 notes: Very large data set (~31 GiB). Built with disable_space_warp.
-details: Reported working on Pico 4 with overport runtime 3.0.x. 83 OBB/pakchunk files (~32 GB).
+details: 'Reported working on Pico 4 with overport runtime 3.0.x. 83 OBB/pakchunk files (~32 GB): besides main and
+  patch.0, 81 patch.pakchunk<N>-Android_ASTC.com.Sanzaru.Wrath2.obb files (~27 GB). Without them the game hangs at
+  engine start-up (GitHub #471); up to FramePort 1.3.0 they are only sent from a com.Sanzaru.Wrath2 folder next to
+  the APK, not loose next to it.'
 overport_extra:
 - patch_disable_space_warp
 alt_overport:

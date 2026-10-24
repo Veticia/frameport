@@ -1438,6 +1438,21 @@ def _find_late_data(entry: dict, reporter: Reporter | None = None) -> dict:
                                data_bytes=src.data_bytes())
 
 
+def _find_more_data(entry: dict, reporter: Reporter | None = None) -> dict:
+    """A game whose expansion files were picked by name next to its APK: files this version of FramePort recognises
+    that an older scan skipped are added (Unreal's patch.pakchunk<N>-….<package>.obb chunks, GitHub #471)."""
+    files, src_apk = entry.get("data_files"), Path(entry["apk"])
+    if files is None or not entry.get("data_dir") or not src_apk.is_file():
+        return entry
+    src = quest_dump.from_path(src_apk)
+    if (not src or src.data_files is None or not src.data_dir or Path(entry["data_dir"]) != src.data_dir
+            or not set(src.data_files) > set(files)):
+        return entry
+    if reporter:
+        reporter.log(f"found {len(set(src.data_files) - set(files))} more data file(s) next to the game")
+    return library.upsert_game(entry["package"], data_files=src.data_files, data_bytes=src.data_bytes())
+
+
 def install_game(package: str, target: Target, reporter: Reporter, apk_only: bool = False,
                  add_to_library: bool = True, apk: Path | None = None, force: bool = False) -> dict:
     """Install the game's last build (or `apk`, e.g. a test build of the same package signed with the same key)."""
@@ -1457,6 +1472,7 @@ def install_game(package: str, target: Target, reporter: Reporter, apk_only: boo
         deployment = next((d for d in target.installed() if d.get("package") == package), None)
         if not apk_only:
             entry = _find_late_data(entry, reporter) if not entry.get("data_dir") and entry.get("apk") else entry
+            entry = _find_more_data(entry, reporter) if entry.get("apk") else entry
             from .core.models import data_manifest
 
             manifest = data_manifest(Path(entry["data_dir"]) if entry.get("data_dir") else None,
@@ -1522,6 +1538,8 @@ def install_game(package: str, target: Target, reporter: Reporter, apk_only: boo
         recipe = dataclasses.replace(recipe, patches=upstream.without_superseded(recipe.patches, b["superseded"]))
     if not entry.get("data_dir") and entry.get("apk") and not apk_only:
         entry = _find_late_data(entry, reporter)  # OBBs copied next to the APK after it was added (GitHub #156)
+    elif entry.get("apk") and not apk_only and not optimized:
+        entry = _find_more_data(entry, reporter)
     data_dir = Path(entry["data_dir"]) if entry.get("data_dir") else None
     title = steam_title(entry)
     preserve_data = apk_only or (optimized and deployment is not None and not update.data and not force)

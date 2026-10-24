@@ -192,6 +192,23 @@ def test_other_expansion_kinds_next_to_the_apk(tmp_path):
     assert g.data_files == ["main.7.com.x.game.obb", "office.5.com.x.game.obb"]
 
 
+def test_unreal_chunk_obbs_next_to_the_apk(tmp_path):
+    """GitHub #471: Asgard's Wrath 2 has 81 patch.pakchunk<N>-Android_ASTC.<package>.obb files next to main/patch.0;
+    only main and patch.0 were sent and the game hung at engine start-up."""
+    game = tmp_path / "Games" / "AW2"
+    apk(game / "com.x.game_7.apk")
+    obb(game, "main.7.com.x.game.obb")
+    obb(game, "patch.0.com.x.game.obb")
+    obb(game, "patch.pakchunk0-Android_ASTC.com.x.game.obb")
+    obb(game, "patch.pakchunk27_s1-Android_ASTC.com.x.game.obb")
+    obb(game, "patch.pakchunk1-Android_ASTC.com.y.other.obb")  # another package's isn't sent
+    obb(game, "patch.extra.y.com.x.game.obb")  # nor a name with a dot before the package
+    g = quest_dump.scan(tmp_path / "Games")[0]
+    assert sorted(g.data_files) == ["main.7.com.x.game.obb", "patch.0.com.x.game.obb",
+                                    "patch.pakchunk0-Android_ASTC.com.x.game.obb",
+                                    "patch.pakchunk27_s1-Android_ASTC.com.x.game.obb"]
+
+
 def test_obb_folder_next_to_an_apk_folder_inside_a_package_folder(tmp_path):
     """<package>/apk/x.apk + <package>/obb/main.N.<package>.obb: the obb folder isn't named after the package."""
     root = tmp_path / "Quest"
@@ -817,3 +834,19 @@ def test_obb_named_for_another_package_is_flagged():
     assert pipeline.misnamed_obbs(entry) == [("main.1716.com.beatgames.beatsaber.lj369vr.obb",
                                               "main.1716.com.beatgames.beatsaber.obb")]
     assert pipeline.misnamed_obbs({"package": "com.x", "kind": "rift", "data_manifest": entry["data_manifest"]}) == []
+
+
+def test_install_picks_up_chunk_obbs_an_older_scan_skipped(tmp_path, monkeypatch):
+    """GitHub #471: library entries scanned before chunk OBBs were recognised get them at the next install."""
+    from frameport import pipeline
+
+    game = tmp_path / "AW2"
+    a = apk(game / "com.x.game_7.apk")
+    obb(game, "main.7.com.x.game.obb")
+    obb(game, "patch.pakchunk0-Android_ASTC.com.x.game.obb")
+    monkeypatch.setattr(pipeline.library, "upsert_game", lambda pkg, **kw: {**entry, **kw})
+    entry = {"package": "com.x.game", "apk": str(a), "data_dir": str(game), "data_files": ["main.7.com.x.game.obb"]}
+    out = pipeline._find_more_data(entry)
+    assert sorted(out["data_files"]) == ["main.7.com.x.game.obb", "patch.pakchunk0-Android_ASTC.com.x.game.obb"]
+    assert pipeline._find_more_data({**entry, "data_files": out["data_files"]})["data_files"] == out["data_files"]
+    assert pipeline._find_more_data({**entry, "data_files": None}) is not None  # whole-folder data: unchanged
