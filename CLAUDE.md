@@ -149,7 +149,7 @@ Detailed device findings per game/issue: docs/DEVICE_NOTES.md (read before debug
     `ui/popmenu.PopMenu` = `app.popmenu.show(entries, at=(x, y) | below=box)`, drawn in page.overlay (outside-click
     barrier + panels; hover submenus with open/close intent delays, ↑ ↓ → ← Enter Esc via `app._on_key` first, closes
     on outside click/Esc/choice/`app.go`; panels size to the estimated label width between MIN_W and MAX_W, longer
-    labels wrap, flip/clamp into the window, submenus on the side with room; portal edge in dual themes; fade off with
+    labels wrap, flip/clamp into the window, submenus on the side with room; a solid grey left edge (owner: no portal gradient) and a solid soft-accent highlight; fade off with
     Reduce motion; hovering only repaints rows). Flet's stock ContextMenu/PopupMenu can't nest and cap at 280 px, so
     they're only used for button menus (`C.menu_button`, width scaled; `C.menu_label` wraps). Game menus come from
     `app.game_actions()` = `menus.menu_sections`: right-click = Play, Install/Update, Game settings | Open game page,

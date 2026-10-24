@@ -30,6 +30,7 @@ PAD_Y = 5                    # panel padding above the first / below the last ro
 PAD_X = 12                   # a row's inner padding (each side)
 INSET = 4                    # a row's highlight inset from the panel's sides
 GAP = 10                     # icon ↔ label
+EDGE = 3                     # the grey edge along a panel's left side
 OPEN_DELAY, CLOSE_DELAY = 0.12, 0.3  # hover intent (seconds)
 
 # rough glyph widths in em for the UI font (Flet can't measure text): generous, so a label estimated to fit really
@@ -286,14 +287,13 @@ class PopMenu:
         column = ft.Column(controls, spacing=0, tight=True,
                            scroll=ft.ScrollMode.AUTO if too_tall else None)
         inner = ft.Container(column, bgcolor=T.SURFACE_2, padding=ft.Padding(0, _px(PAD_Y), 0, _px(PAD_Y)),
-                             width=panel.width - (_px(3) if T.DUAL else 0),
+                             width=panel.width - _px(EDGE),
                              height=(win_h - 2 * _px(MARGIN) - 2) if too_tall else None)
         reduce = getattr(self.app, "reduce_motion", False)
         panel.control = ft.Container(
             inner, left=panel.left, top=panel.top, width=panel.width,
-            # dual themes: the portal's blue → orange along the left edge (the gradient shows in the left padding)
-            gradient=C.portal_gradient(vertical=True) if T.DUAL else None,
-            padding=ft.Padding(_px(3), 0, 0, 0) if T.DUAL else 0, bgcolor=T.SURFACE_2,
+            # a solid grey edge on the left (the panel's colour shows in its left padding), in every theme
+            padding=ft.Padding(_px(EDGE), 0, 0, 0), bgcolor=T.BORDER_STRONG,
             border=ft.Border.all(1, T.BORDER_STRONG), border_radius=T.RADIUS_SM,
             clip_behavior=ft.ClipBehavior.ANTI_ALIAS,
             shadow=ft.BoxShadow(blur_radius=_px(18), spread_radius=0, color=T.soft("#000000", 0.55),
@@ -325,11 +325,7 @@ class PopMenu:
         if i is None or i >= len(panel.controls) or panel.controls[i] is None:
             return
         row = panel.controls[i]
-        if T.DUAL:
-            row.gradient = C.portal_gradient(opacity=0.22) if on else None
-            row.bgcolor = None
-        else:
-            row.bgcolor = T.soft(T.ACCENT, 0.16) if on else None
+        row.bgcolor = T.soft(T.ACCENT, 0.16) if on else None  # one solid soft highlight in every theme
         C.update(row)
 
     def _highlight(self, panel: Panel, i: int | None) -> None:
