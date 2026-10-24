@@ -224,23 +224,6 @@ fwd_xrEnumerateReferenceSpaces:
     .word frame_unsupported
     .text
     .p2align 2
-    .globl xrEnumerateSwapchainFormats
-    .type xrEnumerateSwapchainFormats, %function
-xrEnumerateSwapchainFormats:
-    ldr ip, 1f
-2:  add ip, pc, ip
-    ldr ip, [ip]
-    bx ip
-1:  .word fwd_xrEnumerateSwapchainFormats - (2b + 8)
-    .size xrEnumerateSwapchainFormats, .-xrEnumerateSwapchainFormats
-    .data
-    .p2align 2
-    .globl fwd_xrEnumerateSwapchainFormats
-    .hidden fwd_xrEnumerateSwapchainFormats
-fwd_xrEnumerateSwapchainFormats:
-    .word frame_unsupported
-    .text
-    .p2align 2
     .globl xrEnumerateViewConfigurations
     .type xrEnumerateViewConfigurations, %function
 xrEnumerateViewConfigurations:

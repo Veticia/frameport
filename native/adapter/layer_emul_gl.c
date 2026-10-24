@@ -1007,8 +1007,10 @@ static void emul_on_destroy_session(XrSession session) {
     pthread_mutex_unlock(&emul_lock);
 }
 
+static void sw_session_destroy(XrSession session);
 static XRAPI_ATTR XrResult XRAPI_CALL hook_xrDestroySession(XrSession session) {
     cube_session_destroy(session);
+    sw_session_destroy(session);
     emul_on_destroy_session(session);
     pool_cleanup(session);
     PFN_xrDestroySession fn = (PFN_xrDestroySession)lookup(active_instance, "xrDestroySession");

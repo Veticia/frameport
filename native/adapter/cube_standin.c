@@ -220,11 +220,11 @@ static int layer_uses_standin(const XrCompositionLayerBaseHeader *layer) {
 static PFN_xrUpdateSwapchainFB real_update_swapchain;
 static PFN_xrGetSwapchainStateFB real_get_swapchain_state;
 static XRAPI_ATTR XrResult XRAPI_CALL standin_update_swapchain(XrSwapchain swapchain, const XrSwapchainStateBaseHeaderFB *state) {
-    if (is_standin(swapchain)) return XR_SUCCESS;
+    if (is_standin(swapchain) || sw_is_fake(swapchain)) return XR_SUCCESS;
     return real_update_swapchain ? real_update_swapchain(swapchain, state) : XR_ERROR_FUNCTION_UNSUPPORTED;
 }
 static XRAPI_ATTR XrResult XRAPI_CALL standin_get_swapchain_state(XrSwapchain swapchain, XrSwapchainStateBaseHeaderFB *state) {
-    if (is_standin(swapchain)) return XR_ERROR_VALIDATION_FAILURE;  // no state to report (apps treat it as "unsupported")
+    if (is_standin(swapchain) || sw_is_fake(swapchain)) return XR_ERROR_VALIDATION_FAILURE;  // no state to report (apps treat it as "unsupported")
     return real_get_swapchain_state ? real_get_swapchain_state(swapchain, state) : XR_ERROR_FUNCTION_UNSUPPORTED;
 }
 

@@ -2,7 +2,7 @@
 
 # Patches
 
-Every patch and game setting FramePort knows: 198 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
+Every patch and game setting FramePort knows: 199 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
 
 Each entry says what the patch does, whether it changes the APK or only the install, when FramePort suggests it, its options, the catalog games whose recipe names it and the launch-test signatures that suggest it. Patches that are on by default are on for every game, so the catalog rarely names them.
 
@@ -12,7 +12,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 
 - [Patches from OVRPort](#group-overport) (25)
 - [Steam Frame patches](#group-frame) (68)
-- [Game settings](#group-adapter) (81)
+- [Game settings](#group-adapter) (82)
 - [Files and settings on the Frame](#group-device) (11)
 - [PC VR (Proton and Revive)](#group-pcvr) (13)
 
@@ -131,7 +131,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [360° 3D](#adapter-equirect_stereo) | `adapter.equirect_stereo` | Game settings |  |
 | [Per-eye diagnostics (log)](#adapter-eye_debug) | `adapter.eye_debug` | Game settings |  |
 | [Draw fades over the picture](#adapter-fade_quad) | `adapter.fade_quad` | Game settings | 2 |
-| [Colour space support](#adapter-fb_color_space) | `adapter.fb_color_space` | Game settings |  |
+| [Colour space support](#adapter-fb_color_space) | `adapter.fb_color_space` | Game settings | 1 |
 | [Keep full resolution (no dynamic resolution)](#adapter-fixed_resolution) | `adapter.fixed_resolution` | Game settings | 1 |
 | [Upside-down panel images (diagnostics)](#adapter-flip_dump) | `adapter.flip_dump` | Game settings |  |
 | [Fix upside-down menus](#adapter-flip_emul) | `adapter.flip_emul` | Game settings |  |
@@ -174,6 +174,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Scan when requested](#adapter-scene_scan_request) | `adapter.scene_scan_request` | Game settings |  |
 | [Room width](#adapter-scene_width) | `adapter.scene_width` | Game settings |  |
 | [Eye-image snapshots (diagnostics)](#adapter-snapshot) | `adapter.snapshot` | Game settings |  |
+| [Provide space warp](#adapter-space_warp_emul) | `adapter.space_warp_emul` | Game settings | 1 |
 | [Keep menus in place](#adapter-stable_local) | `adapter.stable_local` | Game settings | 1 |
 | [Drop layer color fades](#adapter-strip_color_bias) | `adapter.strip_color_bias` | Game settings |  |
 | [Strip depth layers](#adapter-strip_depth) | `adapter.strip_depth` | Game settings |  |
@@ -1706,6 +1707,7 @@ For games that stop at start because the headset reports no colour space (for ex
 - **Options:**
   - Value: int, default `0`.
   - Game settings → Troubleshooting → "Colour space support" (advanced).
+- **Catalog games (1):** OutRun Quest VR.
 - **Suggested by launch-test signatures:**
   - `color-space-missing` (fatal): The game needs Meta's colour-space extension, which the Frame's runtime doesn't offer, and quits before it starts VR (for example OutRun Quest VR).
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
@@ -2332,6 +2334,23 @@ Saves what the game draws every few seconds, for testing without the headset.
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
 
 > Every N seconds, saves the left-eye image the game submits (a quarter of its size) as fb_snap_0-7.ppm in the game's files folder on the Frame. Launch tests run without anyone wearing the headset, so the headset view stays black; this shows what the game itself draws. Vulkan games: both eyes at half size (fb_snap_vk_N_vV.ppm), the whole swapchain image with the submitted rect and FOV in the log.
+
+### <a id="adapter-space_warp_emul"></a>Provide space warp
+
+For games that stop at start because they require Meta's space warp (for example OutRun Quest VR). The game then renders every frame normally.
+
+- `adapter.space_warp_emul`
+- **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
+- **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
+- **Options:**
+  - Value: int, default `0`.
+  - Game settings → Troubleshooting → "Provide space warp" (advanced).
+- **Catalog games (1):** OutRun Quest VR.
+- **Suggested by launch-test signatures:**
+  - `appsw-required` (fatal): The game requires Meta's space warp (Application SpaceWarp) and quits because the Frame reports no buffer size for it (for example OutRun Quest VR).
+- **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
+
+> For games that require Meta's Application SpaceWarp and quit without it ("AppSW recommended buffers unavailable", for example OutRun Quest VR, GitHub #336). FrameBridge offers XR_FB_space_warp, reports a motion-vector size (the runtime's, else a quarter of the eye size), serves the game's motion-vector and space-warp depth images itself (OpenGL ES textures or Vulkan images, which the Frame's runtime wouldn't take) and removes the space warp info from every frame: the game renders every frame normally and its motion vectors are not used. Overrides Turn off space warp.
 
 ### <a id="adapter-stable_local"></a>Keep menus in place
 

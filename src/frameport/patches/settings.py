@@ -52,6 +52,13 @@ SETTINGS = [
      "Hides XR_FB_space_warp, so the game renders every frame itself instead of half of them plus motion vectors "
      "(Application SpaceWarp). For games whose picture flickers or smears on the Frame (for example Unreal Engine 5 "
      "games such as Into The Radius 2)."),
+    ("space_warp_emul", "int", 0, "Provide space warp",
+     "For games that require Meta's Application SpaceWarp and quit without it (\"AppSW recommended buffers "
+     "unavailable\", for example OutRun Quest VR, GitHub #336). FrameBridge offers XR_FB_space_warp, reports a "
+     "motion-vector size (the runtime's, else a quarter of the eye size), serves the game's motion-vector and "
+     "space-warp depth images itself (OpenGL ES textures or Vulkan images, which the Frame's runtime wouldn't take) "
+     "and removes the space warp info from every frame: the game renders every frame normally and its motion "
+     "vectors are not used. Overrides Turn off space warp."),
     ("controller_fix", "int", 1, "Report Touch controllers",
      "Reports Frame controllers as Oculus Touch and hides synthetic hand tracking. Set 0 for games that require hand "
      "tracking (for example Silhouette)."),
@@ -474,6 +481,9 @@ UI: dict[str, dict] = {
     "hide_space_warp": dict(group="troubleshooting", level="advanced", label="Turn off space warp",
                 help="For games whose picture flickers or smears (for example Into The Radius 2).",
                 control=("switch",)),
+    "space_warp_emul": dict(group="troubleshooting", level="advanced", label="Provide space warp",
+                help="For games that stop at start because they require Meta's space warp (for example OutRun "
+                     "Quest VR). The game then renders every frame normally.", control=("switch",)),
     "swapchain_fix": dict(group="troubleshooting", level="advanced", label="Retry refused picture formats",
                 help="Lets OpenGL ES games start when the Frame refuses their picture format. Leave it on.",
                 control=("switch",)),
@@ -670,6 +680,7 @@ class AdapterSetting(Patch):
             "vk_validation": lambda a: a.engine == "Unreal",
             "vk_pipeline_log": lambda a: a.engine in ("Unreal", "Other") and "arm64-v8a" in a.abis,
             "fb_color_space": lambda a: a.xr == "OpenXR",
+            "space_warp_emul": lambda a: a.xr == "OpenXR",
             "vk_no_fossilize": lambda a: a.engine in ("Unreal", "Other") and "arm64-v8a" in a.abis,
             "vk_pipeline_fallback": lambda a: a.engine in ("Unreal", "Other") and "arm64-v8a" in a.abis,
             # wherever the Vulkan shim can be (vk_sanitize); Unreal's Vulkan builds are rarely detected as such

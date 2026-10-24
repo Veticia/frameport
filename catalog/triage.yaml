@@ -368,6 +368,16 @@ signatures:
     diagnosis: The game needs Meta's colour-space extension, which the Frame's runtime doesn't offer, and quits before
       it starts VR (for example OutRun Quest VR). FrameBridge can offer it.
     suggest: [adapter.fb_color_space]
+  - id: appsw-required
+    # GitHub #336: OutRun Quest VR requires Application SpaceWarp: without a motion-vector size (the Frame's runtime
+    # reports none) or without XR_FB_space_warp it logs this line and quits before its first frame
+    pattern: 'AppSW recommended buffers unavailable'
+    unless: 'per-game: space_warp_emul=1'
+    severity: fatal
+    diagnosis: The game requires Meta's space warp (Application SpaceWarp) and quits because the Frame reports no
+      buffer size for it (for example OutRun Quest VR). Turning space warp off can't help; FrameBridge can provide
+      space warp itself (the game renders every frame normally, its motion vectors are not used).
+    suggest: [adapter.space_warp_emul]
   - id: vulkan-pipeline-refused
     # GitHub #349: with Lepton's Fossilize layer loaded every Transformers pipeline failed with -1; without it a few
     # multiview vertex shaders still fail in Turnip. Unreal ends at the first one.

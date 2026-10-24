@@ -126,6 +126,7 @@ static PFN_xrVoidFunction lookup(XrInstance instance, const char *name) {
 }
 static int runtime_has_fb_passthrough, runtime_has_render_model;
 static int hide_fb_foveation, foveation_fix, hide_space_warp, scene_emul, passthrough_emul;
+static int space_warp_emul, sw_runtime_has_extension;
 static int controller_models, render_models_available;
 static int fb_color_space = 1;  // the setting is off by default; on here
 #define SCENE_EXTENSION_COUNT 1

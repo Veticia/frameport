@@ -32,6 +32,8 @@
 //  * optionally logs controller-input diagnostics: suggested interaction profiles and the runtime's answers, each
 //    hand's current profile, functions the runtime lacks, failing input/haptics/perf calls (input_diag,
 //    input_diag.c, off by default);
+//  * optionally emulates XR_FB_space_warp for games that require it: motion-vector size, adapter-owned motion-vector
+//    and depth images, space warp info removed at xrEndFrame (space_warp_emul, space_warp.c, off by default);
 //  * optionally shows 360° (equirect/equirect2) layers as cube-face quads drawn by a worker thread with a shared
 //    GLES context (equirect_emul, layer_emul_gl.c; GLES sessions only, off by default).
 //
@@ -104,6 +106,11 @@ static int hide_fb_foveation_vulkan;
 // hide XR_FB_space_warp: games then render every frame themselves (UE5 Application SpaceWarp flickered on the Frame,
 // e.g. Into The Radius 2; OVRPort's patch_disable_space_warp doesn't reach UE5's OpenXR plugin)
 static int hide_space_warp = 0;
+// emulate XR_FB_space_warp for games that refuse to start without it (OutRun Quest VR, #336): space_warp.c
+static int space_warp_emul = 0;
+static int sw_enabled;                // the app enabled XR_FB_space_warp with space_warp_emul on
+static int sw_runtime_has_extension;  // the runtime offers XR_FB_space_warp itself
+static uint32_t runtime_eye_width, runtime_eye_height;  // the runtime's recommended eye size (before scale)
 static int strip_color_bias = 0;
 // fade_quad.c: draw colour-scale fades (fade to black) as a black quad over the picture; 2 = also remove the scale
 static int fade_quad = 0;
@@ -201,6 +208,7 @@ static void read_settings(const char *path) {
         if (sscanf(line, "foveation_eye=%f", &value) == 1) foveation_eye = value != 0;
         if (sscanf(line, "hide_fb_foveation=%f", &value) == 1) hide_fb_foveation = value != 0;
         if (sscanf(line, "hide_space_warp=%f", &value) == 1) hide_space_warp = value != 0;
+        if (sscanf(line, "space_warp_emul=%f", &value) == 1) space_warp_emul = value != 0;
         if (sscanf(line, "strip_color_bias=%f", &value) == 1) strip_color_bias = (int)value;
         if (sscanf(line, "fade_quad=%f", &value) == 1) fade_quad = value > 0 ? (int)value : 0;
         if (sscanf(line, "frame_balance=%f", &value) == 1) frame_balance = value != 0;
@@ -309,6 +317,11 @@ static void initialize(void) {
                             proximity_emul > 1 ? "thumb + index" : "thumb");
     if (fixed_resolution) LOG("per-game: fixed_resolution=1 (full swapchain recommendations)");
     if (hide_fb_foveation) LOG("per-game: hide_fb_foveation=1 (Quest Vulkan foveation suppressed)");
+    if (space_warp_emul) {
+        LOG("per-game: space_warp_emul=1 (XR_FB_space_warp emulated: motion-vector size, FrameBridge images, space "
+            "warp info removed)%s", hide_space_warp ? "; hide_space_warp ignored" : "");
+        hide_space_warp = 0;  // the game needs the extension: offered, and its space warp info removed all the same
+    }
     if (hide_space_warp) LOG("per-game: hide_space_warp=1 (XR_FB_space_warp hidden, space warp info removed)");
     if (strip_color_bias) LOG("per-game: strip_color_bias=%d (layer color scale/bias removed)", strip_color_bias);
     if (fade_quad) LOG("per-game: fade_quad=%d (colour-scale fades drawn as a black quad%s)", fade_quad,
@@ -394,8 +407,14 @@ XRAPI_ATTR XrResult XRAPI_CALL xrCreateInstance(const XrInstanceCreateInfo *info
             LOG("hide_space_warp: XR_FB_space_warp not enabled");
             continue;
         }
+        if (space_warp_emul && !strcmp(ext, XR_FB_SPACE_WARP_EXTENSION_NAME)) {
+            sw_enabled = 1;
+            LOG("space_warp_emul: the app enabled XR_FB_space_warp (%s)", supported ? "the runtime has it too" : "emulated");
+        }
         if (supported) names[kept++] = ext;
-        else if (!strcmp(ext, XR_FB_COLOR_SPACE_EXTENSION_NAME)) {
+        else if (space_warp_emul && !strcmp(ext, XR_FB_SPACE_WARP_EXTENSION_NAME)) {
+            // emulated entirely by FrameBridge (no runtime function belongs to it)
+        } else if (!strcmp(ext, XR_FB_COLOR_SPACE_EXTENSION_NAME)) {
             requested_color_space = 1;
         } else if (scene_emul && is_scene_extension(ext)) {
             if (!emulate_scene) LOG("emulating Meta scene/spatial-entity extensions from room file or guardian bounds");
@@ -516,6 +535,11 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEnumerateViewConfigurationViews(XrInstance inst
     if (!fn) return XR_ERROR_FUNCTION_UNSUPPORTED;
     XrResult result = fn(instance, system, type, capacity, count, views);
     static int runtime_logged;
+    if (XR_SUCCEEDED(result) && views && count && *count && capacity && views[0].recommendedImageRectWidth >= 64 &&
+        views[0].recommendedImageRectHeight >= 64) {
+        runtime_eye_width = views[0].recommendedImageRectWidth;
+        runtime_eye_height = views[0].recommendedImageRectHeight;
+    }
     if (XR_SUCCEEDED(result) && views && count && *count && capacity && !runtime_logged++)
         // the runtime's own size, before scale (FramePort's agent reads it to keep games' saved resolutions in step)
         LOG("runtime recommended eye size %ux%u (max %ux%u, scale %.2f)", views[0].recommendedImageRectWidth,
@@ -682,6 +706,19 @@ static void standin_destroy(XrSwapchain handle);
 static void cube_outputs_destroy(void);
 static void cube_session_destroy(XrSession session);
 static XrResult standin_enumerate(XrSwapchain handle, uint32_t capacity, uint32_t *count, XrSwapchainImageBaseHeader *images);
+// space_warp.c
+static int sw_create(XrSession session, const XrSwapchainCreateInfo *info, XrSwapchain *out);
+static int sw_is_fake(XrSwapchain handle);
+static void sw_destroy(XrSwapchain handle);
+static int sw_served_wait(XrSwapchain handle);
+static int sw_served_release(XrSwapchain handle);
+static XrResult sw_enumerate(XrSwapchain handle, uint32_t capacity, uint32_t *count, XrSwapchainImageBaseHeader *images);
+static XrResult sw_acquire(XrSwapchain handle, uint32_t *index);
+static XRAPI_ATTR XrResult XRAPI_CALL sw_enumerate_formats(XrSession session, uint32_t capacity, uint32_t *count,
+                                                         int64_t *formats);
+static void sw_properties(XrInstance instance, XrSystemId system, XrSystemProperties *properties);
+static XrResult sw_properties_retry(PFN_xrGetSystemProperties fn, XrInstance instance, XrSystemId system,
+                                    XrSystemProperties *properties, XrResult result);
 
 static int pool_find(XrSwapchain h);
 static int pool_should_create(XrSession session);
@@ -776,6 +813,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrCreateSwapchain(XrSession session, const XrSwap
         fixed.usageFlags |= XR_SWAPCHAIN_USAGE_TRANSFER_SRC_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
     // Vulkan eye snapshots (snapshot_vk.c) copy from the shown images
     if (snap_vk_wants_transfer(&fixed)) fixed.usageFlags |= XR_SWAPCHAIN_USAGE_TRANSFER_SRC_BIT;
+    if (space_warp_emul && sw_create(session, info, swapchain)) return XR_SUCCESS;  // motion vectors / their depth
     if (equirect_emul && swapchain && emul_virtual_create(session, &fixed, swapchain)) {
         remember_swapchain(*swapchain);
         emul_on_create_swapchain(*swapchain, &fixed);
@@ -841,6 +879,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrDestroySwapchain(XrSwapchain swapchain) {
     int pooled = pool_find(swapchain);
     if (pooled >= 0) { pool_destroy(pooled); return XR_SUCCESS; }
     if (is_standin(swapchain)) { standin_destroy(swapchain); return XR_SUCCESS; }
+    if (sw_is_fake(swapchain)) { sw_destroy(swapchain); return XR_SUCCESS; }
     surf_scene_destroy(swapchain);
     forget_swapchain(swapchain);
     surf_on_destroy(swapchain);
@@ -1038,6 +1077,8 @@ XRAPI_ATTR XrResult XRAPI_CALL xrGetSystemProperties(XrInstance instance, XrSyst
     PFN_xrGetSystemProperties fn = (PFN_xrGetSystemProperties)lookup(instance, "xrGetSystemProperties");
     if (!fn) return XR_ERROR_FUNCTION_UNSUPPORTED;
     XrResult result = fn(instance, system, properties);
+    result = sw_properties_retry(fn, instance, system, properties, result);
+    if (XR_SUCCEEDED(result)) sw_properties(instance, system, properties);
     if (XR_SUCCEEDED(result)) headset_model_properties(properties);
     if (XR_SUCCEEDED(result)) color_space_properties(properties);
     if (XR_SUCCEEDED(result) && properties && properties->graphicsProperties.maxLayerCount)
@@ -1182,6 +1223,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrDestroySpace(XrSpace space) {
 #include "layer_emul_gl.c"
 #include "swapchain_pool.c"
 #include "cube_standin.c"
+#include "space_warp.c"
 #include "snapshot_vk.c"
 #include "fdm_views.c"
 #include "snapshot_gl.c"
@@ -1434,6 +1476,14 @@ XRAPI_ATTR XrResult XRAPI_CALL xrApplyHapticFeedback(XrSession session, const Xr
 
 #include "hide_foveation_images.h"
 
+// space_warp_emul lists the formats space warp asks for (space_warp.c); else the runtime's list unchanged.
+XRAPI_ATTR XrResult XRAPI_CALL xrEnumerateSwapchainFormats(XrSession session, uint32_t capacity, uint32_t *count,
+        int64_t *formats) {
+    if (space_warp_emul) return sw_enumerate_formats(session, capacity, count, formats);
+    PFN_xrEnumerateSwapchainFormats fn = (PFN_xrEnumerateSwapchainFormats)lookup(active_instance, "xrEnumerateSwapchainFormats");
+    return fn ? fn(session, capacity, count, formats) : XR_ERROR_FUNCTION_UNSUPPORTED;
+}
+
 XRAPI_ATTR XrResult XRAPI_CALL xrEnumerateSwapchainImages(XrSwapchain swapchain, uint32_t capacity, uint32_t *count,
         XrSwapchainImageBaseHeader *images) {
     PFN_xrEnumerateSwapchainImages fn = (PFN_xrEnumerateSwapchainImages)lookup(active_instance, "xrEnumerateSwapchainImages");
@@ -1448,6 +1498,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEnumerateSwapchainImages(XrSwapchain swapchain,
         return r;
     }
     if (is_standin(swapchain)) return standin_enumerate(swapchain, capacity, count, images);
+    if (sw_is_fake(swapchain)) return sw_enumerate(swapchain, capacity, count, images);
     XrResult result = equirect_emul && emul_is_virtual(swapchain) ? emul_virtual_enumerate(swapchain, capacity, count, images)
                                                                   : hide_fb_foveation_vulkan ? fb_hide_foveation_images(fn, swapchain, capacity, count, images)
                                                                   : fn(swapchain, capacity, count, images);
@@ -1465,7 +1516,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrWaitSwapchainImage(XrSwapchain swapchain, const
     if (!fn) return XR_ERROR_FUNCTION_UNSUPPORTED;
     int pooled = pool_find(swapchain);
     if (pooled >= 0) return pool_cycle(pooled, 1, NULL);
-    if (is_standin(swapchain)) return XR_SUCCESS;
+    if (is_standin(swapchain) || sw_served_wait(swapchain)) return XR_SUCCESS;
     XrResult result = fn(swapchain, info);
     __atomic_add_fetch(&sc_waits, 1, __ATOMIC_RELAXED);
     if (result != XR_SUCCESS) __atomic_add_fetch(&sc_wait_fails, 1, __ATOMIC_RELAXED);
@@ -1476,7 +1527,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrReleaseSwapchainImage(XrSwapchain swapchain, co
     PFN_xrReleaseSwapchainImage fn = (PFN_xrReleaseSwapchainImage)lookup(active_instance, "xrReleaseSwapchainImage");
     if (!fn) return XR_ERROR_FUNCTION_UNSUPPORTED;
     int pooled = pool_find(swapchain);
-    if (is_standin(swapchain)) return XR_SUCCESS;
+    if (is_standin(swapchain) || sw_served_release(swapchain)) return XR_SUCCESS;
     XrResult result = pooled >= 0 ? pool_cycle(pooled, 2, NULL) : fn(swapchain, info);
     if (pooled < 0) __atomic_add_fetch(&sc_releases, 1, __ATOMIC_RELAXED);
     if (XR_SUCCEEDED(result)) flip_on_release(swapchain);
@@ -1496,6 +1547,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrAcquireSwapchainImage(XrSwapchain swapchain, co
         }
         return r;
     }
+    if (sw_is_fake(swapchain)) return sw_acquire(swapchain, index);  // space_warp_emul's own images
     if (is_standin(swapchain)) {  // adapter-served cube stand-in: one image
         if (!index) return XR_ERROR_VALIDATION_FAILURE;
         *index = 0;
@@ -1857,7 +1909,8 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEndFrame(XrSession session, const XrFrameEndInf
         }
     }
     if (swapchain_pool && info && info->layerCount > 64) return XR_ERROR_LAYER_LIMIT_EXCEEDED;
-    if ((!swapchain_pool && !cube_standin && !layer_fix && !swap_eyes && !emulate_passthrough && !flip_quads && !flip_emul && !strip_depth && !fade_quad) || !info || !info->layerCount ||
+    if ((!swapchain_pool && !cube_standin && !layer_fix && !swap_eyes && !emulate_passthrough && !flip_quads && !flip_emul && !strip_depth && !fade_quad &&
+         !hide_space_warp && !space_warp_emul) || !info || !info->layerCount ||
         info->layerCount > 64)
         return fn(session, info);
     if (layer_debug) {  // the submitted layer list (order, flags, eyes, chained structs) whenever its shape changes
@@ -2093,28 +2146,30 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEndFrame(XrSession session, const XrFrameEndInf
                 ++swapped;
             }
         }
-        if (hide_space_warp && layer->type == XR_TYPE_COMPOSITION_LAYER_PROJECTION &&
-            ((const XrCompositionLayerProjection *)layer)->viewCount == 2) {
+        if ((hide_space_warp || space_warp_emul) && layer->type == XR_TYPE_COMPOSITION_LAYER_PROJECTION &&
+            ((const XrCompositionLayerProjection *)layer)->viewCount <= 2) {
             // The game may still attach XrCompositionLayerSpaceWarpInfoFB (1000171000) to its views: OVRPort's
-            // dispatcher offers XR_FB_space_warp itself even when hidden here. Unlink it (keeping what follows when
-            // it heads the chain, else the whole chain) so the runtime never uses the motion vectors.
+            // dispatcher offers XR_FB_space_warp itself even when hidden here, and space_warp_emul offers it on
+            // purpose. Unlinked (sw_strip_chain keeps eye depth info), so the runtime never uses the motion vectors.
             const XrCompositionLayerProjection *src = (const XrCompositionLayerProjection *)layer;
-            int found = 0;
-            for (uint32_t v = 0; v < 2; ++v)
-                for (const XrBaseInStructure *n = (const XrBaseInStructure *)src->views[v].next; n; n = n->next)
-                    found |= n->type == 1000171000;
-            if (found) {
+            static XrCompositionLayerDepthInfoKHR depth_copies[64][2][4];
+            int changed = 0;
+            const void *chains[2] = {NULL, NULL};
+            for (uint32_t v = 0; v < src->viewCount; ++v)
+                chains[v] = sw_strip_chain(src->views[v].next, depth_copies[count][v], &changed);
+            if (changed) {
                 if (layer != (const XrCompositionLayerBaseHeader *)&projections[count]) projections[count] = *src;
-                for (uint32_t v = 0; v < 2; ++v) {
-                    views[count][v] = src->views[v];
-                    const XrBaseInStructure *head = (const XrBaseInStructure *)src->views[v].next;
-                    if (head && head->type == 1000171000) views[count][v].next = head->next;
-                    else if (head) views[count][v].next = NULL;
+                for (uint32_t v = 0; v < src->viewCount; ++v) {
+                    if (projections[count].views != views[count]) views[count][v] = src->views[v];
+                    views[count][v].next = chains[v];
                 }
                 projections[count].views = views[count];
                 layer = (const XrCompositionLayerBaseHeader *)&projections[count];
-                static int logged;
-                if (!logged++) LOG("hide_space_warp: removed space warp info from the eye images");
+                static int logged, frames;
+                if (!logged++)
+                    LOG("%s: removed space warp info from the eye images", space_warp_emul ? "space_warp_emul" : "hide_space_warp");
+                if (space_warp_emul && ++frames == 600)
+                    LOG("space_warp_emul: 600 frames submitted with their space warp info removed");
                 ++swapped;
             }
         }
@@ -2385,7 +2440,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEnumerateInstanceExtensionProperties(const char
     if (!fn) return XR_ERROR_INITIALIZATION_FAILED;
     if (!count || (capacity && !properties)) return XR_ERROR_VALIDATION_FAILURE;
     if ((!foveation_fix && !hide_fb_foveation && !hide_space_warp && !passthrough_emul && !scene_emul && !controller_models &&
-         !fb_color_space) || layer)
+         !fb_color_space && !space_warp_emul) || layer)
         return fn(layer, capacity, count, properties);
 
     uint32_t total = 0;
@@ -2403,6 +2458,7 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEnumerateInstanceExtensionProperties(const char
         if (!strcmp(all[i].extensionName, XR_FB_COLOR_SPACE_EXTENSION_NAME)) has_color_space = 1;
         if (!strcmp(all[i].extensionName, "XR_FB_passthrough")) runtime_has_fb_passthrough = 1;
         if (!strcmp(all[i].extensionName, XR_FB_RENDER_MODEL_EXTENSION_NAME)) runtime_has_render_model = 1;
+        if (!strcmp(all[i].extensionName, XR_FB_SPACE_WARP_EXTENSION_NAME)) sw_runtime_has_extension = 1;
         if (hide_fb_foveation && fb_is_foveation_extension(all[i].extensionName)) continue;
         if (foveation_fix && strstr(all[i].extensionName, "foveation")) continue;
         if (hide_space_warp && !strcmp(all[i].extensionName, "XR_FB_space_warp")) continue;
@@ -2428,6 +2484,12 @@ XRAPI_ATTR XrResult XRAPI_CALL xrEnumerateInstanceExtensionProperties(const char
     if (controller_models && render_models_available && !runtime_has_render_model) {
         XrExtensionProperties fake = {XR_TYPE_EXTENSION_PROPERTIES, NULL, XR_FB_RENDER_MODEL_EXTENSION_NAME,
                                       XR_FB_render_model_SPEC_VERSION};
+        if (properties && kept < capacity) properties[kept] = fake;
+        ++kept;
+    }
+    if (space_warp_emul && !sw_runtime_has_extension) {
+        XrExtensionProperties fake = {XR_TYPE_EXTENSION_PROPERTIES, NULL, XR_FB_SPACE_WARP_EXTENSION_NAME,
+                                      XR_FB_space_warp_SPEC_VERSION};
         if (properties && kept < capacity) properties[kept] = fake;
         ++kept;
     }
@@ -2612,6 +2674,24 @@ XRAPI_ATTR XrResult XRAPI_CALL xrGetInstanceProcAddr(XrInstance instance, const 
     HOOK(xrEnumerateInstanceExtensionProperties)
     // Per-game hooks: only installed when their setting is on, so other games run through exactly the same calls.
 #define HOOK_AS(fn, impl) if (!strcmp(name, #fn)) { *function = (PFN_xrVoidFunction)impl; return XR_SUCCESS; }
+    if (space_warp_emul) {
+        // FrameBridge's space-warp images: wait/release succeed at once, in front of whichever hook (or the runtime)
+        // the other settings pick for every other swapchain
+        static __thread int resolving;
+        int wait = !strcmp(name, "xrWaitSwapchainImage"), release = !strcmp(name, "xrReleaseSwapchainImage");
+        if ((wait || release) && !resolving) {
+            PFN_xrVoidFunction inner = NULL;
+            resolving = 1;
+            XrResult r = xrGetInstanceProcAddr(instance, name, &inner);
+            resolving = 0;
+            if (XR_FAILED(r) || !inner) return r;
+            if (wait) { sw_next_wait = (PFN_xrWaitSwapchainImage)inner; *function = (PFN_xrVoidFunction)sw_wait; }
+            else { sw_next_release = (PFN_xrReleaseSwapchainImage)inner; *function = (PFN_xrVoidFunction)sw_release; }
+            return XR_SUCCESS;
+        }
+        HOOK(xrEnumerateSwapchainFormats)
+        HOOK_AS(xrDestroySession, hook_xrDestroySession)
+    }
     if (surface_native) {
         HOOK(xrGetVulkanGraphicsDeviceKHR)
         HOOK(xrGetVulkanDeviceExtensionsKHR)

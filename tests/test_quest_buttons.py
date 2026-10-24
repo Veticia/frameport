@@ -42,6 +42,7 @@ static int hide_fb_foveation_vulkan, hide_fb_foveation, hide_space_warp, scene_e
 static int controller_models, render_models_available, emulate_render_model, passthrough_emul, emulate_passthrough;
 static int foveation_eye_enabled, foveation_eye, foveation_fix, surface_emul, runtime_has_image_layout;
 static int no_equirect, no_equirect2, no_cylinder, no_cube, fb_color_space, emulate_color_space;
+static int space_warp_emul, sw_enabled;
 static void *android_vm;
 static void mx_audio_initialize(void) {}
 static void mx_batman_geometry_initialize(void) {}

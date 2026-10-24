@@ -304,6 +304,11 @@
   "title": "Eye-image snapshots (diagnostics)",
   "group": "Game settings"
  },
+ "adapter.space_warp_emul": {
+  "anchor": "adapter-space_warp_emul",
+  "title": "Provide space warp",
+  "group": "Game settings"
+ },
  "adapter.stable_local": {
   "anchor": "adapter-stable_local",
   "title": "Keep menus in place",

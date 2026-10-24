@@ -724,6 +724,51 @@ per game; add_from_link clears the offer and keeps a name the user gave). CLI `f
 
 OutRun Quest VR (`org.outrun.quest.vr`, its own Khronos loader, no OVRPlugin) logs "Rec.709 color space unavailable" right after xrCreateInstance and quits ~20 s later without a session: the Frame's runtime (and OVRPort's dispatcher) list no XR_FB_color_space. Adapter setting `fb_color_space` (off by default, `native/adapter/color_space.c`) offers the extension when the runtime lacks it, strips it from the runtime's create info, fills XrSystemColorSpacePropertiesFB with Rec.709 and answers xrEnumerateColorSpacesFB / xrSetColorSpaceFB (no conversion: the runtime has no API for it). The functions are reachable through FrameBridge's xrGetInstanceProcAddr and `framebridge_extension_proc` (xrshim); OVRPort's fixed dispatcher table can't forward them, hence off by default. Not yet tried on the device (the build was not downloaded: it ships Sega's game data). Log: `color_space: emulating XR_FB_color_space`.
 
+## XR_FB_space_warp emulation (#336)
+
+**OutRun Quest VR (2026-10-24):** with colour space solved, OutRun logs `E OutRunQuest: AppSW recommended buffers
+unavailable` right after its session, reference spaces and view sizes, then quits (ANR). Same line with
+XR_FB_space_warp enabled (10-19) and hidden (`hide_space_warp`, 10-24): the game requires Application SpaceWarp, so
+hiding can't help. OutRun's binary isn't available (Sega content), so the exact check is unknown; the emulation covers
+the two plausible ones: the motion-vector size and the formats.
+
+**What the Frame reports (dev Frame, 2026-10-24):** SteamVR's Android runtime lists XR_FB_space_warp (spec 2) and
+answers XrSystemSpaceWarpPropertiesFB with the **full eye size, 1728x1728** (Meta: about a quarter). It accepts
+Vulkan motion-vector/depth swapchains (`376x376 format=97` / `format=129`, Pinball FX VR, ITR2); its GLES swapchain
+formats are the sRGB colour ones. OVRPlugin/Unreal ignore the reported size and make 376x376 themselves.
+
+**`space_warp_emul` (adapter setting, off by default; `native/adapter/space_warp.c`):** offers XR_FB_space_warp
+(passed to the runtime when it has it, else emulated; overrides `hide_space_warp`); reports eye/4 (432x432 on the
+Frame) unless the runtime's answer is already below half the eye; adds RGBA16F + D24S8/D24/D32F/D16 (GLES) or 97 +
+129/126/125/124 (Vulkan) after the runtime's formats in xrEnumerateSwapchainFormats (exported too: OVRPort's
+dispatcher can call core functions by symbol); serves motion-vector swapchains (RGBA16F/RG16F at the reported size
+or at most half the eye) and their depth (depth usage at the reported size, or the size of a served motion-vector
+swapchain of the session) as FrameBridge-owned GL textures (2D arrays for multiview) / Vulkan images (attachment
+layout, META extra usage honoured), three images round robin; wait/release succeed at once (a gipa wrapper sits in
+front of whichever wait/release hook the other settings chose); xrEndFrame drops XrCompositionLayerSpaceWarpInfoFB and
+depth info showing a served image (`sw_strip_chain` keeps eye depth info: depth infos are copied past a removed node;
+the old hide_space_warp strip dropped the whole chain when space warp info wasn't first). The game renders every
+frame: SteamVR doesn't halve the frame rate the way Meta's runtime does. No new runtime functions, so OVRPort's
+dispatcher table needs nothing (xrshim not involved). Logs: `space warp: runtime motion-vector size`, `space_warp_emul:`.
+Triage `appsw-required` suggests it; catalog `org.outrun.quest.vr` = fb_color_space + space_warp_emul. The
+reporter's recipe is a user recipe: the setting has to be switched on by hand (Customize → Game settings → Provide
+space warp).
+
+**Headless test (Pinball FX VR, Unreal 5 + OVRPlugin, Vulkan, owner's build re-signed with its own key, only
+FrameBridge replaced; original APK + settings restored after):** `space_warp_emul=1 force_render=1 layer_debug=1`,
+`hide_space_warp=0`: `the app enabled XR_FB_space_warp (the runtime has it too)`, `runtime motion-vector size
+1728x1728` → `432x432 reported`, both 376x376 pairs (format 97 + 129, after each eye swapchain) `served by FrameBridge
+(Vulkan images, 3 images)`, `space warp images: 600 acquired, 599 waited, 598 released (all by FrameBridge)`, `removed space warp info from the eye images`, `600 frames submitted with their space warp
+info removed`, 0 xrEndFrame failures, 72.2 fps steady after the loading phase (the same series as the game's own
+recipe: 62/71/56/46/70 then 72.2), RUNNING after 117 s, the same 12 OVRPlugin errors as the baseline (interaction
+profiles, perf settings, refresh rate). No GLES space-warp game was available: the GL path is covered by the host
+harness (`tests/native/space_warp_harness.c`) only. OutRun itself is unverified.
+
+**Space-warp games that flicker (ITR2, Metro Awakening, Pinball FX, The Boys VR, Lawn Mowing Simulator):** keep
+`hide_space_warp`. With the emulation the runtime never sees space warp either (same picture as hidden), but the game
+renders motion vectors into images nobody reads; it doesn't make space warp work (no frame synthesis). It is only for
+games that refuse to start without the extension.
+
 ## Per-game headset identity (#373, 2026-10-17)
 
 Owner decision: all Quest / OVRPort conversions default to Quest 3; Customize → Headset model offers Quest 3,

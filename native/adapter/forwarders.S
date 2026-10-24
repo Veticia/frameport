@@ -196,21 +196,6 @@ fwd_xrEnumerateReferenceSpaces:
     .quad frame_unsupported
     .text
     .p2align 2
-    .globl xrEnumerateSwapchainFormats
-    .type xrEnumerateSwapchainFormats, %function
-xrEnumerateSwapchainFormats:
-    adrp x16, fwd_xrEnumerateSwapchainFormats
-    ldr x16, [x16, :lo12:fwd_xrEnumerateSwapchainFormats]
-    br x16
-    .size xrEnumerateSwapchainFormats, .-xrEnumerateSwapchainFormats
-    .data
-    .p2align 3
-    .globl fwd_xrEnumerateSwapchainFormats
-    .hidden fwd_xrEnumerateSwapchainFormats
-fwd_xrEnumerateSwapchainFormats:
-    .quad frame_unsupported
-    .text
-    .p2align 2
     .globl xrEnumerateViewConfigurations
     .type xrEnumerateViewConfigurations, %function
 xrEnumerateViewConfigurations:
