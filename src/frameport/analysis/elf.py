@@ -262,9 +262,10 @@ def rename_imports(data: bytes, renames: dict[str, str]) -> tuple[bytes, list[st
     return bytes(buf), sorted(set(done))
 
 
-def add_needed(data: bytes, library: str) -> bytes:
+def add_needed(data: bytes, library: str, first: bool = True) -> bytes:
     """Add a DT_NEEDED entry in front of the existing ones (same effect as `patchelf --add-needed`; being first matters
-    for symbol interposition, e.g. the GL shim must precede libEGL).
+    for symbol interposition, e.g. the GL shim must precede libEGL). `first=False` puts it after the existing ones,
+    for libraries that must only be loaded, never interpose (a Vulkan layer exports vkEnumerate*Properties).
 
     Nothing already in the file moves: the extended .dynstr and a rebuilt .dynamic are appended in a new PT_LOAD
     (page aligned to 16 KiB), which reuses the PT_NOTE program header (bionic ignores notes in shared libraries).
@@ -335,8 +336,9 @@ def add_needed(data: bytes, library: str) -> bytes:
     name_off = len(old_str)
 
     body_entries = [e for e in entries if e[0] != DT_NULL]
-    first_needed = next((k for k, e in enumerate(body_entries) if e[0] == DT_NEEDED), 0)
-    body_entries.insert(first_needed, [DT_NEEDED, name_off])
+    needed_at = [k for k, e in enumerate(body_entries) if e[0] == DT_NEEDED]
+    at = (needed_at[0] if first else needed_at[-1] + 1) if needed_at else 0
+    body_entries.insert(at, [DT_NEEDED, name_off])
     body_entries += [[DT_NULL, 0]] * 2
 
     file_end = (len(buf) + PAGE - 1) // PAGE * PAGE
@@ -415,6 +417,6 @@ def add_needed(data: bytes, library: str) -> bytes:
             struct.pack_into(sh_fmt, buf, shoff + i * shentsize, *h)
     result = bytes(buf)
     got = needed(result)
-    if not got or got[0] != library:
+    if not got or (got[0] if first else got[-1]) != library:
         raise RuntimeError(f"add_needed({library}) produced NEEDED={got}")
     return result

@@ -204,22 +204,70 @@ def test_installed_only_dialog_reads_supported_level(monkeypatch, level, expecte
 
 
 def test_dormant_diagnostic_stays_out_of_cryengine_renderers(monkeypatch):
-    # GitHub #432/#449: linked into libCryRenderVulkan.so, The Climb 2 failed CrySystem initialization at start
+    # GitHub #432/#449: linked into libCryRenderVulkan.so, The Climb 2 failed CrySystem initialization at start.
+    # The layer file still ships: FrameBridge (libopenxr_loader_generic.so) is linked against it and doesn't load
+    # without it (The Climb 1: xrInitializeLoaderKHR failed: OpenXR result -7).
     from frameport.patches.frame import adapter, foveation
 
     class Ws:
         abi = "arm64-v8a"
-        written = []
+
+        def __init__(self):
+            self.written = {}
+            self.add = {}
+
+        def lib(self, name):
+            return f"lib/arm64-v8a/{name}"
+
+        def has(self, path):
+            return path in self.written
 
         def read_lib(self, name):
+            if self.lib(name) in self.written:
+                return self.written[self.lib(name)]
             raise AssertionError(f"read {name}")
 
-        def put(self, *a):
-            self.written.append(a)
+        def put(self, path, data):
+            self.written[path] = data
 
+    monkeypatch.setattr(foveation, "artifact", lambda abi, name: b"layer")
     for lib in ("libCryRenderVulkan.so", "libAndroidLauncher.so"):  # The Climb 2 / The Climb 1 (monolithic)
         monkeypatch.setattr(foveation, "engine_lib", lambda ws, lib=lib: lib)
         ws = Ws()
-        assert foveation.diagnostic_support(ws) is False and not ws.written
-    assert adapter.FrameBridgeAdapter().revision_for("com.crytek.climb") == 4
+        assert foveation.diagnostic_support(ws) is True
+        assert ws.written == {f"lib/arm64-v8a/{foveation.LAYER}": b"layer"}
+    assert adapter.FrameBridgeAdapter().revision_for("com.crytek.climb") == 5
     assert adapter.FrameBridgeAdapter().revision_for("com.crytek.climb2") > adapter.FrameBridgeAdapter.revision
+
+
+def test_dormant_diagnostic_never_interposes_vulkan(monkeypatch):
+    # The layer exports vkEnumerate*Properties; linked in front of libvulkan.so, an engine importing them directly
+    # got the layer's answers (no extensions) and failed to start (GitHub #432/#449).
+    from frameport.analysis import elf
+    from frameport.analysis.stubgen import build_stub_library
+    from frameport.patches.frame import foveation
+
+    engine = elf.add_needed(build_stub_library(["main"], soname="libengine.so"), "libvulkan.so")
+    files = {"lib/arm64-v8a/libengine.so": engine}
+
+    class Ws:
+        abi = "arm64-v8a"
+        add = {}
+
+        def lib(self, name):
+            return f"lib/arm64-v8a/{name}"
+
+        def has(self, path):
+            return path in files
+
+        def read_lib(self, name):
+            return files[self.lib(name)]
+
+        def put(self, path, data):
+            files[path] = data
+
+    monkeypatch.setattr(foveation, "artifact", lambda abi, name: b"layer")
+    monkeypatch.setattr(foveation, "engine_lib", lambda ws: "libengine.so")
+    assert foveation.diagnostic_support(Ws()) is True
+    assert elf.needed(files["lib/arm64-v8a/libengine.so"]) == ["libvulkan.so", foveation.LAYER]
+    assert files[f"lib/arm64-v8a/{foveation.LAYER}"] == b"layer"

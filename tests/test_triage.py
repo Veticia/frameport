@@ -683,6 +683,13 @@ def test_cryengine_init_failure_is_named():
     assert "cryengine-init-failed" in [f.id for f in triage(log, package="com.crytek.climb2").findings]
 
 
+def test_vrapi_bridge_without_framebridge_is_named():
+    # GitHub #432: The Climb 1 built without the layer FrameBridge is linked against
+    log = ("10-24 22:34:39.134  1198  1223 E OVRPortVrApi: xrInitializeLoaderKHR failed: OpenXR result -7\n"
+           "10-24 22:34:39.134  1198  1223 F libc    : Fatal signal 5 (SIGTRAP), code -6 (SI_TKILL) in tid 1223\n")
+    assert "vrapi-bridge-no-loader" in [f.id for f in triage(log, package="com.crytek.climb").findings]
+
+
 def test_decoder_held_by_steam_is_named():
     """GitHub #437: Steam's web helper kept the Iris decoder; Batman's 8K cutscenes went to software."""
     log = "FramePort: hardware video decoder /dev/video22 in use by: steamwebhelper(2953) \n"

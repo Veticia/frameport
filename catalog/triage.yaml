@@ -38,6 +38,12 @@ signatures:
     diagnosis: CryEngine's start-up failed (CrySystem initialization), and the crash that follows comes from its shutdown. FramePort 1.3.0 builds of The Climb 1/2 failed like this because a dormant diagnostic layer was linked into CryEngine's renderer; a newer FramePort leaves it out, so update FramePort and press Update on Frame. Otherwise attach the diagnostics zip to a report.
     report: true
     suggest: []
+  - id: vrapi-bridge-no-loader
+    pattern: 'OVRPortVrApi: xrInitializeLoaderKHR failed: OpenXR result -7'
+    severity: fatal
+    diagnosis: The VrApi bridge found no OpenXR loader because FrameBridge didn't load (a library it needs is missing from the APK). Dev builds of FramePort before this was fixed left that library out of The Climb 1; update FramePort and press Update on Frame. Otherwise attach the diagnostics zip to a report.
+    report: true
+    suggest: []
   - id: questcraft-no-java-runtime
     pattern: 'libjvm\.so[^\r\n]*(?:not found|No such file)'
     severity: fatal

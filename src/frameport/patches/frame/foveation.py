@@ -117,7 +117,7 @@ def apply(ctx):
             raise ValueError("Foveation test: no supported renderer library found")
         data = ws.read_lib(lib)
         if LAYER not in elf.needed(data):
-            ws.put(ws.lib(lib), elf.add_needed(data, LAYER))
+            ws.put(ws.lib(lib), elf.add_needed(data, LAYER, first=False))  # see diagnostic_support
             changed = True
         layer = artifact(ws.abi, LAYER)
         if not ws.has(ws.lib(LAYER)) or ws.read_lib(LAYER) != layer:
@@ -142,25 +142,31 @@ def validate(ctx):
 
 
 def diagnostic_support(ws):
-    """The diagnostic constructor is dormant without FRAMEPORT_FOVEATION_TEST=1."""
+    """The diagnostic constructor is dormant without FRAMEPORT_FOVEATION_TEST=1.
+
+    The layer file always ships: frame.adapter links every arm64 FrameBridge build against it, and without the file
+    FrameBridge doesn't load at all (The Climb 1 on a dev build: `xrInitializeLoaderKHR failed: OpenXR result -7`,
+    GitHub #432). In the engine library it goes after the existing DT_NEEDED entries: the layer exports
+    vkEnumerate{Instance,Device}{Extension,Layer}Properties for the Vulkan loader, and linked first, an engine that
+    imports those from libvulkan.so directly gets the layer's (no extensions, VK_ERROR_LAYER_NOT_PRESENT) instead.
+    That is what stopped CryEngine (The Climb 1/2 on 1.3.0, GitHub #432/#449)."""
+    changed = False
+    layer = artifact(ws.abi, LAYER)
+    if not ws.has(ws.lib(LAYER)) or ws.read_lib(LAYER) != layer:
+        ws.put(ws.lib(LAYER), layer)
+        changed = True
     lib = engine_lib(ws) or "libopenxr_loader_generic.so"
     if lib.startswith(CRYENGINE_RENDERER):
-        # Linked into CryEngine's renderer, The Climb 1/2 fail CrySystem initialization at start (GitHub #432/#449,
-        # headless on the dev Frame). Climb 2's private VrApi bridge loads the layer itself. The Climb 1 has no
-        # separate renderer: its whole engine is libAndroidLauncher.so, which engine_lib() picks.
-        return False
+        # CryEngine's renderer (Climb 2: libCryRender*; The Climb 1: its monolithic libAndroidLauncher.so) stays
+        # untouched; Climb 2's private VrApi bridge loads the layer itself.
+        return changed
     data = ws.read_lib(lib)
-    changed = False
     if LAYER not in elf.needed(data):
         target = ws.lib(lib)
-        updated = elf.add_needed(data, LAYER)
+        updated = elf.add_needed(data, LAYER, first=False)
         if target in ws.add:
             ws.add[target] = updated
         else:
             ws.put(target, updated)
-        changed = True
-    layer = artifact(ws.abi, LAYER)
-    if not ws.has(ws.lib(LAYER)) or ws.read_lib(LAYER) != layer:
-        ws.put(ws.lib(LAYER), layer)
         changed = True
     return changed

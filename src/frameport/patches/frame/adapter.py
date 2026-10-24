@@ -25,8 +25,9 @@ def settings_text(recipe_patches: dict) -> bytes:
 class FrameBridgeAdapter(Patch):
     id = "frame.adapter"
     # above revision 2: Batman builds before #389 are outdated; The Climb 1/2 builds with the diagnostic layer linked
-    # into CryEngine's renderer don't start (#432/#449); AC Nexus builds before the Vulkan panel pool (#424)
-    package_revisions = {"com.camouflaj.manta": 3, "com.crytek.climb": 4, "com.crytek.climb2": 3,
+    # into CryEngine's renderer don't start (#432/#449; The Climb 1: 5 = builds without the layer file FrameBridge
+    # needs); AC Nexus builds before the Vulkan panel pool (#424)
+    package_revisions = {"com.camouflaj.manta": 3, "com.crytek.climb": 5, "com.crytek.climb2": 3,
                          "com.Ubisoft.ACNexusVR": 3}
     a32 = True  # also for 32-bit games on the bridge
     title = "FrameBridge OpenXR adapter"
@@ -90,6 +91,7 @@ class FrameBridgeAdapter(Patch):
         if ws.abi == "arm64-v8a":
             from .foveation import LAYER
             expected = elf.add_needed(expected, LAYER)
+            ok = ok and ws.has(ws.lib(LAYER))  # FrameBridge doesn't load without it (#432)
         ok = ok and ws.read_lib(GENERIC) == expected
         return [("FrameBridge adapter present", ok, "adapter, original loader and settings library")]
 

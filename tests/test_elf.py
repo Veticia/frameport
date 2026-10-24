@@ -49,6 +49,16 @@ def test_add_needed(variant):
     assert elf.add_needed(out, "libglshim.so") == out
 
 
+def test_add_needed_last():
+    # a Vulkan layer linked into an engine must not interpose libvulkan's vkEnumerate*Properties (GitHub #432)
+    base = elf.add_needed(elf.add_needed(build_stub_library(["ovr_X"], soname="libgame.so"), "libvulkan.so"),
+                          "liblog.so")
+    out = elf.add_needed(base, "libVkLayer_x.so", first=False)
+    assert elf.needed(out) == ["liblog.so", "libvulkan.so", "libVkLayer_x.so"]
+    assert elf.dyn_symbols(out, True) == {"ovr_X"}
+    assert elf.add_needed(out, "libVkLayer_x.so", first=False) == out
+
+
 def _scramble_section_names(lib: bytes) -> bytes:
     """Rotate every section's sh_name by one, like a shipped libOVRPlugin.so whose names are shifted (GitHub #349:
     .dynamic named "dding", .dynsym "text"); types and links stay right."""
