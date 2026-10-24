@@ -132,6 +132,8 @@ These settings concern game shortcuts; installing a missing Steam runtime such a
 - Your own game files are never changed. The patched copy is deleted once the game is on the Frame (Settings →
   Installing).
 - In the downloaded app you can also **drag files onto the Library**: games, Linux apps, Windows programs or folders.
+- App bundles (`.xapk`, `.apks`, `.apkm`, `.apkx` or a folder of split APKs) are added like an APK. FramePort merges
+  their parts into one APK; see [the FAQ](FAQ.md#can-i-add-xapk-apks-apkm-or-apkx-files-app-bundles).
 
 **Game settings…** (in the game's menu) shows the settings that matter for that game in plain words: sharpness,
 refresh rate, controllers, menus, 360° video and mixed reality. Changes are used the next time the game starts.

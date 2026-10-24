@@ -134,6 +134,13 @@ signatures:
     severity: fatal
     diagnosis: 32-bit-only APK (e.g. a Gear VR or Oculus Go game). The Steam Frame has no 32-bit ARM support; FramePort's 32-bit bridge translates the game (experimental).
     suggest: [frame.a32_bridge]
+  - id: missing-split
+    pattern: 'INSTALL_FAILED_MISSING_SPLIT'
+    severity: fatal
+    diagnosis: Only the base APK of a split app was installed (the base requires its split APKs). Add the whole app
+      bundle (.xapk, .apks, .apkm or .apkx) or the folder with all its split APKs instead; FramePort merges them into
+      one APK. Then install the game again.
+    suggest: []
   - id: a32-jit-overflow
     pattern: 'a32: block at 0x[0-9a-f]+ overflowed the code buffer'
     severity: fatal

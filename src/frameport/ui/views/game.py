@@ -985,6 +985,8 @@ class GameView:
                      C.kv(tr("Graphics"), a.get("graphics") or "", "graphics"), C.kv(tr("APK"), g.get("apk") or ""),
                      C.kv(tr("Data"), tr("{value:.1f} GiB").format(value=(g.get('data_bytes') or 0) / 2**30)
                           + (f" · {g.get('data_dir')}" if g.get("data_dir") else ""))]
+            if g.get("bundle"):  # added from an app bundle: APK/Data above are FramePort's unpacked copy
+                rows.append(C.kv(tr("App bundle"), g["bundle"]))
         b = g.get("build") or {}
         if b.get("apk"):
             rows.append(C.kv(tr("Last build"), b["apk"]))

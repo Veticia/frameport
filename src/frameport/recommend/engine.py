@@ -285,7 +285,8 @@ def _non_quest(analysis: Analysis, recipe: Recipe) -> None:
     kind = analysis.vr_kind
     if (analysis.extra or {}).get("split_apk"):
         recipe.notes = _add(recipe.notes, "Split APK: only the base APK was found; the game's code may live in the "
-                                          "other parts of the set, which FramePort can't install.")
+                                          "other parts of the set. Add the whole app bundle (.xapk/.apks/.apkm) or "
+                                          "the folder with all its split APKs instead: FramePort merges them.")
     if kind == "none":
         # an ordinary (2D) Android app: no OpenXR to translate. Install it unchanged, or with only the launcher fix
         recipe.overport = False

@@ -792,3 +792,63 @@ def add_browser_activity(manifest: bytes, activity: str) -> bytes | None:
     data = x.data[:at] + chunk + x.data[at:]
     struct.pack_into("<I", data, 4, len(data))
     return bytes(data)
+
+
+def manifest_attrs(manifest: bytes) -> dict[str, str | int | bool]:
+    """The <manifest> element's attributes by name (package, split, versionCode, configForSplit, isFeatureSplit…):
+    strings, ints or bools. App bundles (sources/bundles.py) tell the base APK from its splits with them."""
+    x = Axml(manifest)
+    names = x.strings()
+    el = next((e for e in x.elements() if e.name == "manifest"), None)
+    out: dict = {}
+    for a in el.attrs if el else ():
+        if a.name >= len(names):
+            continue
+        key = names[a.name]
+        if a.raw < len(names):
+            out[key] = names[a.raw]
+        elif a.dtype == TYPE_STRING and a.value < len(names):
+            out[key] = names[a.value]
+        elif a.dtype == TYPE_INT_BOOLEAN:
+            out[key] = a.value != 0
+        elif a.dtype in (TYPE_INT_DEC, TYPE_INT_HEX):
+            out[key] = a.value
+    return out
+
+
+def has_attr(manifest: bytes, element: str, attr: str) -> bool:
+    x = Axml(manifest)
+    names = x.strings()
+    return any(el.name == element and any(a.name < len(names) and names[a.name] == attr for a in el.attrs)
+               for el in x.elements())
+
+
+def remove_attrs(manifest: bytes, element: str, attrs: set[str]) -> bytes | None:
+    """Drop the named attributes from the first <element> (only the attribute records; their strings stay in the
+    pool). None when it has none of them. App bundles: a merged base loses isSplitRequired/requiredSplitTypes, else
+    Android refuses it without its splits (INSTALL_FAILED_MISSING_SPLIT)."""
+    x = Axml(manifest)
+    names = x.strings()
+    el = next((e for e in x.elements() if e.name == element), None)
+    if el is None:
+        return None
+    drop = [i for i, a in enumerate(el.attrs) if a.name < len(names) and names[a.name] in attrs]
+    if not drop:
+        return None
+    data = bytearray(x.data)
+    ext = el.offset + struct.unpack_from("<H", data, el.offset + 2)[0]
+    start, stride, count = struct.unpack_from("<HHH", data, ext + 8)
+    for i in reversed(drop):  # from the end: the records before it stay where they are
+        at = ext + start + i * stride
+        del data[at:at + stride]
+        count -= 1
+        for offset in (14, 16, 18):  # one-based id/class/style attribute indices
+            value = struct.unpack_from("<H", data, ext + offset)[0]
+            if value == i + 1:
+                struct.pack_into("<H", data, ext + offset, 0)
+            elif value > i + 1:
+                struct.pack_into("<H", data, ext + offset, value - 1)
+    struct.pack_into("<I", data, el.offset + 4, el.size - len(drop) * stride)
+    struct.pack_into("<H", data, ext + 12, count)
+    struct.pack_into("<I", data, 4, len(data))
+    return bytes(data)

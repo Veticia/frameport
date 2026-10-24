@@ -1301,3 +1301,48 @@ Survey of the owner's dumps (2026-10-24, 370 OBBs): no copy suffixes or case dif
 all the game's own (162 Asgard's Wrath 2 chunks, Phantom's `.partN`, Metro's `chunk.N`, Batman's `Audio_*`, PowerWash's
 DLC, Espire 2's `overflowN`). The old #129 check flagged Asgard's Wrath 2's chunks and Phantom's parts as "named for
 another app"; they're left alone now.
+
+## App bundles (.xapk / .apks / .apkm / .apkx, discussion #482)
+
+**Formats (2026-10-24):** `.xapk` (APKPure: `manifest.json` with `split_apks` [{file, id}] and `expansions`
+[{file, install_location, install_path}], numbers sometimes as strings), `.apks` (bundletool: `toc.pb`,
+`splits/<module>-master.apk` + `splits/<module>-<targeting>.apk`, `standalones/`, `universal.apk`, plus `instant/`,
+`system/`, `archive/` which FramePort skips; SAI: flat `base.apk` + `split_*.apk` + `meta.sai_v1|2.json`), `.apkm`
+(APKMirror: `base.apk` + `split_config.*.apk` + `info.json`; plain zips since 2021-01, older ones are libsodium
+secretstream files: not `PK`, byte 1 = pwhash algorithm 1/2, see github.com/souramoo/unapkm; FramePort detects and
+explains, never decrypts). **`.apkx` isn't a defined format**: no store or tool documents it, FramePort treats it as a
+zip of APKs and reads the contents. **FrameDrop takes no bundles** (closed source; framedropvr.com/about: "one .apk
+file. Split packages (.apks, .xapk, .aab) need to be merged into a single APK first"; OBBs only from an `obb` folder
+next to the APK), so there is no FrameDrop behaviour to match beyond install-link manifests: a manifest `files` entry
+may now be a bundle (`deeplink.classify` → APK kind).
+
+**Design (`sources/bundles.py`):** Lepton installs exactly one APK per app folder and OVRPort converts one APK, so
+`pm install-multiple` inside the container is out; the parts are merged into one APK at scan time, into
+`<data>/bundles/<package>/<key>/<package>.apk` + `obb/<package>/` (key = sha256 of the zip's member names, CRCs and
+sizes: a moved/renamed bundle finds the same copy; `bundle.json` records what was used/left out). Library entries keep
+`bundle` (the user's file); `check_source` unpacks again when the copy is gone; `library.remove_game` deletes the
+copy; "delete files on this PC" takes the bundle + copy. Base = `universal.apk`, else an arm64 standalone, else the
+APK without a `split` manifest attribute. Splits: per module one ABI (arm64-v8a; armeabi-v7a only without any 64-bit
+code: then the a32 bridge rules apply; x86 never), one texture format (astc > etc2 > …), all density/language/feature
+splits. lib/ + assets/-only splits are merged in Python (base entries keep compression and dates, v1 signature files
+dropped; manifest: `isSplitRequired`/`requiredSplitTypes`/`splitTypes` attribute records removed by
+`axml.remove_attrs`, `com.android.vending.splits.required` = false, else Android 11 refuses the lone base with
+INSTALL_FAILED_MISSING_SPLIT and Play Core's missing-split check stops the app). Splits with resources/code go through
+REAndroid's APKEditor (Apache-2.0, `tools/apkeditor.py`, newest release ≥ 1.4.9 downloaded into tools/; 1.4.3-1.4.8
+corrupted some merges; `m -i <dir of exactly the chosen APKs>`: it merges every split it is given, drops the split
+attributes and every `com.android.vending.*`/`com.android.stamp.*` meta-data). Without Java/network a bundle whose
+extra splits are only language/density/texture ones falls back to the Python merge (translations/densities lost, base
+defaults stay); feature modules then fail with a clear error. The merged APK is unsigned: builds sign it with the
+game's key as usual, `prepare_as_is` signs a copy. `analysis.extra.split_apk` now reads the attributes, not the pool
+strings (a merged base keeps the strings). A single-APK `.xapk` is extracted unchanged (signature intact).
+
+**Device check (2026-10-24, headless, dev Frame, isolated FRAMEPORT_HOME):** Escaping Wonderland 1.0.1.1354
+(`com.CortopiaStudios.Spectre`, Unity, catalog "works", not installed on the Frame) split into a bundletool-style
+base (everything but `lib/`) + `config.arm64_v8a` split (the 22 `lib/arm64-v8a` libraries, synthetic split manifest),
+packed as `.xapk` and `.apks`. `frameport scan <xapk>` unpacked and merged it (Python path) in ~30 s incl. analysis;
+the merged APK has the same 712 entries with identical CRCs/sizes/compression as the original. Built (catalog recipe,
+OVRPort + Frame fixes, signed with a fresh test key), installed, launch test: RUNNING, FrameBridge loaded, OpenXR
+instance, submitting frames at 72 fps (pass). Uninstalled afterwards (no saves kept, shortcut removed). APKEditor
+1.4.9 downloaded and merged the same base + arm64 split in 4 s (split attributes gone, unsigned output); a real
+language/density split merge through APKEditor wasn't tried on the device (no such bundle in the dumps).
+

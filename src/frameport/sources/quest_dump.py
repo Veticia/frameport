@@ -9,6 +9,8 @@ Accepted layouts:
   <folder>/x.apk + (main|patch).<versionCode>.<package>.obb anywhere nearby    found by file name (next to the APK,
                                                                                <package>/apk/ + <package>/obb/, ...)
   a single .apk file
+  app bundles: .xapk / .apks / .apkm / .apkx files and folders of split APKs (base.apk + split_config.*.apk), unpacked
+  into FramePort's data folder first (sources/bundles.py)
 (find_data has the details.)
 """
 from __future__ import annotations
@@ -419,8 +421,16 @@ APK_FOLDERS = ("apk", "apks")
 BACKUP_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}[-:.]\d{2}[-:.]\d{2}([-:.]\d+)?Z?$")
 
 
-def from_path(path: Path) -> SourceGame | None:
+def from_path(path: Path, reporter=None) -> SourceGame | None:
+    """The game at path (an APK, an app bundle or a game folder); None when there is none. A bundle that can't be
+    used raises bundles.BundleError (it says why)."""
+    from . import bundles
+
     path = Path(path)
+    if bundles.is_bundle_file(path):
+        return bundles.source_game(path, reporter)
+    if path.is_dir() and bundles.split_folder(path):
+        return bundles.source_game(path, reporter)
     if path.is_file() and path.suffix.lower() == ".apk":
         pkg, vc = _apk_ids(path)
         data, files = find_data(path.parent, pkg, vc)
@@ -466,21 +476,45 @@ def _other_folders(d: Path, game: SourceGame) -> list[Path]:
     return [p for p in subs if p.resolve() not in own and p.name.lower() not in (*OBB_FOLDERS, "android")]
 
 
-def scan(root: Path, depth: int = 5) -> list[SourceGame]:
+def _bundle_files(d: Path) -> list[Path]:
+    from .bundles import EXTS
+
+    return [p for p, is_dir in _list(d) if not is_dir and p.suffix.lower() in EXTS]
+
+
+def scan(root: Path, depth: int = 5, reporter=None, on_error=None) -> list[SourceGame]:
     """Find games under root, up to `depth` folder levels down (e.g. a download manager's
     "<library>/data/downloads/<game>/game.apk"). A folder with an APK and nothing but that game's data folder is one
     game; a folder that also has other folders is a collection: its loose APKs are games and its folders are searched
-    (a "VR" folder with a stray APK next to the game folders used to count as one game). PC program folders and code
-    checkouts aren't searched."""
+    (a "VR" folder with a stray APK next to the game folders used to count as one game). App bundles (.xapk, .apks,
+    .apkm, .apkx) are games of their own wherever they lie; on_error(path, exc) hears about the ones that can't be
+    used (a root that is one raises). PC program folders and code checkouts aren't searched."""
+    from .bundles import BundleError
+
     found: list[SourceGame] = []
 
+    def failed(path: Path, exc: Exception) -> None:
+        if on_error:
+            on_error(path, exc)
+
     def walk(d: Path, level: int) -> None:
-        game = from_path(d)
+        for b in _bundle_files(d):
+            try:
+                found.append(from_path(b, reporter))
+            except (BundleError, OSError) as exc:
+                failed(b, exc)
+        try:
+            game = from_path(d, reporter)
+        except (BundleError, OSError) as exc:  # a folder of split APKs that can't be merged
+            failed(d, exc)
+            return
         if game and (level >= depth or not _other_folders(d, game)):
             found.append(game)
             return
-        if game:  # a collection with loose APKs: each is a game of its own
+        if game and game.bundle is None:  # a collection with loose APKs: each is a game of its own
             found.extend(g for g in (from_path(p) for p in sorted(d.glob("*.apk")) if _is_apk(p)) if g)
+        elif game:
+            found.append(game)
         if level >= depth:
             return
         try:
@@ -490,12 +524,12 @@ def scan(root: Path, depth: int = 5) -> list[SourceGame]:
         for child in children:
             if game and game.data_dir and child.resolve() == game.data_dir.resolve():
                 continue
-            if from_path(child) or not _no_quest_games_below(child):
+            if _has_apks(child) or _bundle_files(child) or not _no_quest_games_below(child):
                 walk(child, level + 1)
 
     root = Path(root)
     if root.is_file():
-        g = from_path(root)
+        g = from_path(root, reporter)
         return [g] if g else []
     token = _LISTINGS.set({})
     try:

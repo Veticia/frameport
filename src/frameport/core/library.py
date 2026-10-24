@@ -497,7 +497,11 @@ def games() -> list[dict]:
 
 def remove_game(package: str) -> None:
     with edit() as data:
-        data["games"].pop(package, None)
+        gone = data["games"].pop(package, None) or {}
+    if gone.get("bundle"):  # FramePort's unpacked copy of an app bundle (the user's bundle file stays)
+        from ..sources import bundles
+
+        bundles.remove_unpacked(gone.get("apk"))
 
 
 def setting(key: str, default=None):

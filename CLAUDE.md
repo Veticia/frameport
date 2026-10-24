@@ -232,6 +232,11 @@ Rick and Morty runs on the Frame via its catalog recipe (OpenVR, no Revive),
     `FRAMEPORT_DESKTOP=1` skips the Steam-parent watchdog and Steam's display; ensure_host_fixes refreshes entries
     (older installs, stale ones removed), uninstall/purge remove them. Per app: library entry field `desktop_entry`
     (default on; patches don't apply to Linux apps) → game page switch → agent `desktop_entry`. Untested on device.
+  - App bundles (discussion #482, `sources/bundles.py`, docs/DEVICE_NOTES.md#app-bundles-xapk--apks--apkm--apkx-discussion-482):
+    .xapk/.apks/.apkm/.apkx files and folders of split APKs are unpacked + merged into ONE APK (Lepton: one APK per app;
+    OVRPort: one APK) in `<data>/bundles/<pkg>/<key>/` (lib/assets splits in Python, resource/feature splits via
+    APKEditor `tools/apkeditor.py`); arm64-v8a split only; library field `bundle`; merged APKs are unsigned (builds sign).
+    FrameDrop itself takes no bundles; `.apkx` is no defined format (read as a zip of APKs); old encrypted .apkm: refused.
   - Scanning: SideQuest backups (`<package>/<time>/apk|obb|data`) and AXRB downloads (`AXRB/<app id>/<binary id>/base.apk`
     + OBBs/assets; its `patched/`/`*-axrb.apk` PC builds are skipped) are recognised (`sources/quest_dump.py`, FAQ).
   - Quest/Rift twins stay separate entries, shown and named in Steam "Title (Quest)"/"(Rift)" (`core/titles.py`).

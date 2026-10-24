@@ -4,6 +4,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from ..deeplink import BUNDLE_EXTS
+
 MAX_LOOK = 5000  # entries looked at in a dropped folder before deciding
 
 
@@ -19,7 +21,7 @@ def _folder_kind(folder: Path) -> str:
         for name in files:
             seen += 1
             low = name.lower()
-            if low.endswith((".apk", ".exe")):
+            if low.endswith((".apk", ".exe", *BUNDLE_EXTS)):
                 return "folder"
             if not elf and ("." not in name or low.endswith(".appimage")):
                 elf = linux.elf_machine(Path(root) / name) is not None or linux.is_appimage(Path(root) / name)
@@ -29,7 +31,7 @@ def _folder_kind(folder: Path) -> str:
 
 
 def route(paths: list[str]) -> list[tuple[str, str]]:
-    """[(kind, path)] with kind apk | linux | exe | manifest | folder | unknown."""
+    """[(kind, path)] with kind apk | linux | exe | manifest | folder | unknown (an app bundle is an "apk")."""
     from ..analysis import linux
 
     out = []
@@ -38,7 +40,7 @@ def route(paths: list[str]) -> list[tuple[str, str]]:
         low = p.name.lower()
         if p.is_dir():
             out.append((_folder_kind(p), raw))
-        elif low.endswith(".apk"):
+        elif low.endswith((".apk", *BUNDLE_EXTS)):
             out.append(("apk", raw))
         elif low.endswith(".exe"):
             out.append(("exe", raw))

@@ -143,6 +143,11 @@ def output_dir() -> Path:
     return _sub("output")
 
 
+def bundles_dir() -> Path:
+    """App bundles (.xapk/.apks/.apkm/.apkx, split APK sets) unpacked into one APK + OBB folder (sources/bundles.py)."""
+    return _sub("bundles")
+
+
 def ssh_dir() -> Path:
     return _sub("ssh")
 

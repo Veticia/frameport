@@ -199,6 +199,7 @@
  "Answers Meta's request for your org-scoped user id, which games such as Eleven Table Tennis wait for on their loading screen.": "",
  "Any": "",
  "APK": "",
+ "App bundle": "",
  "Appearance": "",
  "AppImage": "",
  "Applied to {n} game. Takes effect at the next launch.": [
@@ -265,7 +266,7 @@
  "Built for the Frame (arm64)": "",
  "Cable connected.": "",
  "Camera": "",
- "Can't add {name} — drop an APK, a Linux app, a Windows program (.exe) or a folder": "",
+ "Can't add {name} — drop an APK or app bundle, a Linux app, a Windows program (.exe) or a folder": "",
  "can't hold games": "",
  "can't hold games: {reason}": "",
  "Can't reach the Frame. Wake it or turn it on; uploads resume by themselves.": "",

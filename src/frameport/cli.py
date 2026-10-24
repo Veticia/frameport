@@ -230,7 +230,8 @@ def tools_import_keys(dirs: list[Path] = typer.Argument(..., help="folders with 
 
 # ------------------------------------------------------------------------------------------ library
 @app.command()
-def scan(path: Path = typer.Argument(..., help="a folder with game backups (APKs or PC VR game folders), or an APK")):
+def scan(path: Path = typer.Argument(..., help="a folder with game backups (APKs, app bundles or PC VR game "
+                                     "folders), an APK or an app bundle (.xapk/.apks/.apkm/.apkx)")):
     """Find games under PATH, analyze them and suggest patches. A folder is remembered for `frameport rescan`
     (`frameport folders` lists them). Games of the library found here after a move get their new place."""
     from .core import folders
@@ -503,8 +504,9 @@ def rename(package: str = typer.Argument(..., help="the game (package or part of
 
 @app.command("new-version")
 def new_version(package: str = typer.Argument(..., help="the game (package or part of its title)"),
-                path: Path = typer.Argument(..., exists=True, help="the newer version: an APK (Quest/Android games), "
-                                            "an AppImage/archive/folder (Linux apps) or the game folder (PC VR)")):
+                path: Path = typer.Argument(..., exists=True, help="the newer version: an APK or app bundle "
+                                            "(Quest/Android games), an AppImage/archive/folder (Linux apps) or "
+                                            "the game folder (PC VR)")):
     """Point a game at a newer version of it (GitHub #161). Its name, artwork, tags and your own recipe stay; install
     it again (frameport install) to update it on the Frame."""
     [pkg] = _pkgs(package, False)

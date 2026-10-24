@@ -44,7 +44,8 @@ LOOPBACK = ("localhost", "127.0.0.1", "[::1]", "::1")
 APK, LINUX, EXE, OBB = "apk", "linux", "exe", "obb"
 DEMO_MANIFEST = "https://frameport.app/demo/cool-game.json"  # the homepage's example button
 DEMO_NAME = "Cool Game"
-LINUX_EXTS = (".zip", ".tar.gz", ".tgz", ".tar.xz", ".txz", ".tar.bz2", ".tar", ".appimage")
+BUNDLE_EXTS = (".xapk", ".apks", ".apkm", ".apkx")  # = sources.bundles.EXTS (kept here: no import at start)
+LINUX_EXTS = (".zip",".tar.gz", ".tgz", ".tar.xz", ".txz", ".tar.bz2", ".tar", ".appimage")
 
 
 class LinkError(ValueError):
@@ -100,7 +101,8 @@ class Manifest:
             for f in self.files:
                 if f.kind == kind:
                     return f
-        raise LinkError("The link has no APK, Linux build (.zip/.tar/AppImage) or Windows program (.exe) to install.")
+        raise LinkError("The link has no APK or app bundle (.xapk/.apks/.apkm), Linux build (.zip/.tar/AppImage) or "
+                        "Windows program (.exe) to install.")
 
 
 # ------------------------------------------------------------------------------------------------- links
@@ -110,7 +112,7 @@ def filename_of(url: str) -> str:
 
 def classify(filename: str) -> str | None:
     name = filename.lower()
-    if name.endswith(".apk"):
+    if name.endswith((".apk", *BUNDLE_EXTS)):  # an app bundle (.xapk/.apks/.apkm/.apkx) is unpacked by the scan
         return APK
     if name.endswith(".obb"):
         return OBB

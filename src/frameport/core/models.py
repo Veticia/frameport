@@ -18,6 +18,9 @@ class SourceGame:
     # only these files of data_dir are the game's data (expansion files found by name, e.g. next to the APK); None =
     # everything below data_dir
     data_files: list[str] | None = None
+    # an app bundle (.xapk/.apks/.apkm/.apkx or a folder of split APKs) the APK and data were unpacked from
+    # (sources/bundles.py): apk/data_dir are then FramePort's unpacked copy
+    bundle: Path | None = None
 
     def data_bytes(self) -> int:
         return sum(data_manifest(self.data_dir, self.data_files).values())

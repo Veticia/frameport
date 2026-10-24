@@ -34,6 +34,9 @@ from . import theme as T
 from .components import install_state  # noqa: F401  (re-exported: tests and older callers import it from here)
 from .jobs import Job
 
+# what "Add an APK…" and "Update with a newer APK…" offer: APKs and app bundles (sources/bundles.py)
+APP_EXTENSIONS = ["apk", *(e.lstrip(".") for e in deeplink.BUNDLE_EXTS)]
+
 NAV = [("library", tr("Library"), ft.Icons.GRID_VIEW_OUTLINED),
        ("frame", tr("Steam Frame"), G.FRAME),
        ("files", tr("Files"), ft.Icons.FOLDER_OPEN_ROUNDED),
@@ -1660,7 +1663,7 @@ class FramePortApp:
         if self.jobs.busy_with(pkg):
             return
         paths = await C.pick_files(self.page, dialog_title=tr("Newer APK of {title}").format(title=self._title(pkg)),
-                                   extensions=["apk"])
+                                   extensions=APP_EXTENSIONS)
         if not paths:
             return
         on_frame = self.frame_state == "connected" and \
@@ -2226,7 +2229,7 @@ class FramePortApp:
             self.scan(path, single=True)
 
     async def pick_apk(self, e=None):
-        for path in await C.pick_files(self.page, multiple=True, extensions=["apk"]):
+        for path in await C.pick_files(self.page, multiple=True, extensions=APP_EXTENSIONS):
             self.scan(path)
 
     async def pick_windows_exe(self, e=None):
@@ -2282,8 +2285,8 @@ class FramePortApp:
             elif kind == "folder":
                 self.scan(path)
             else:
-                self.toast(tr("Can't add {name} — drop an APK, a Linux app, a Windows program (.exe) or a "
-                              "folder").format(name=Path(path).name), error=True)
+                self.toast(tr("Can't add {name} — drop an APK or app bundle, a Linux app, a Windows program "
+                              "(.exe) or a folder").format(name=Path(path).name), error=True)
 
     async def pick_linux_app(self, e=None):
         """An AppImage or an archive (.zip/.tar.*) with an arm64 Linux app. Any file can be picked: AppImages often

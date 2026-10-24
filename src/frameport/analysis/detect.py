@@ -193,6 +193,16 @@ def _features(manifest: bytes) -> dict[str, bool]:
     return out
 
 
+def _split_base(manifest: bytes) -> bool:
+    """The base of a split APK set (Play "app bundle" installs): android:isSplitRequired is true or the manifest
+    names requiredSplitTypes."""
+    try:
+        return bool(axml.Axml(manifest).get_bool("application", "isSplitRequired")) or axml.has_attr(
+            manifest, "manifest", "requiredSplitTypes")
+    except Exception:  # noqa: BLE001 - an unusual manifest isn't a split base
+        return False
+
+
 def requires_6dof(manifest: bytes) -> bool:
     """The app requires 6DoF head tracking (uses-feature android.hardware.vr.headtracking, version 1, required): Meta's
     Quest declaration, which Gear VR and Go apps don't make."""
@@ -457,7 +467,8 @@ def analyze(path: Path, deep: bool = True, data_bytes: int | None = None) -> Ana
             # a Google Daydream / Cardboard build (GVR / Cardboard SDK): no path to the Frame's headset (GitHub #335)
             "google_vr": google_vr(libset, cats, manifest_strings, gvr_java, boot),
             # the base of a split APK set (Play "app bundle" installs): the code/libraries live in split APKs
-            "split_apk": bool({"isSplitRequired", "requiredSplitTypes"} & set(manifest_strings)),
+            # (the attributes, not their strings: a base merged from its bundle keeps the strings in its pool)
+            "split_apk": _split_base(manifest),
             # Unity (IL2CPP) text fields: they close at once on the Frame (frame.unity_text_input)
             "text_fields": unity_text_fields(il2cpp_meta) if il2cpp_meta else [],
             # Meta's OVRManager raises MSAA at runtime (frame.unity_runtime_msaa_off); Oculus XR Plugin (multiview)

@@ -82,6 +82,34 @@ AXRB/                                   ← AXRB's download folder (Downloads/AX
 - **The game starts and stops at once (Steam shows Resume):** add the game again from its original download or
   backup, click **Update on Frame**, then report it (last answer on this page) if it still stops.
 
+## Can I add .xapk, .apks, .apkm or .apkx files (app bundles)?
+
+Yes. Add them like an APK: **Add an APK…**, drag them onto the Library, scan a folder that holds them, an install
+link that points at one, or `frameport scan <file>`. These formats are supported:
+
+| File | Made by | Inside |
+|---|---|---|
+| `.xapk` | APKPure and others | `manifest.json`, the APK (or `base.apk` + `config.*.apk` splits), `Android/obb/<package>/` |
+| `.apks` | bundletool, SAI | `splits/base-master.apk` + `splits/base-arm64_v8a.apk` …, or `universal.apk`; SAI: `base.apk` + `split_*.apk` |
+| `.apkm` | APKMirror | `base.apk` + `split_config.*.apk`, `info.json` |
+| `.apkx` | various | the same kind of zip under another name |
+| a folder of split APKs | `adb pull` of `pm path`, unpacked bundles | `base.apk` + `split_config.arm64_v8a.apk` … |
+
+- Your file isn't changed. FramePort unpacks it once into its own data folder (`bundles/`). Removing the game from the
+  Library deletes that copy.
+- The Frame installs one APK per game, so FramePort merges the parts into one APK. It uses the 64-bit ARM part
+  (`arm64_v8a`) and leaves out the x86 and 32-bit parts. If a bundle only has a 32-bit part, it uses that one.
+  Language and screen-density parts are merged with [APKEditor](https://github.com/REAndroid/APKEditor), which
+  FramePort downloads the first time it needs it.
+- OBB files in the bundle (`Android/obb/<package>/`), or in an `obb/` or `<package>` folder next to it, are sent to the
+  Frame like a normal game's data.
+- A merged APK has no signature from the original publisher. FramePort signs it with the game's own key, like every
+  build. A game that checks its own signature may refuse to run.
+- **"is a protected APKMirror bundle":** older `.apkm` files are encrypted for APKMirror's own installer app, and
+  FramePort can't open them. Download the app from APKMirror again (current `.apkm` files are plain zips), or get it
+  as an `.apk` or `.xapk`.
+- A bundle needs about twice its size in free space while it's unpacked.
+
 ## Where are a game's settings in FramePort?
 
 Every game has three places; the answers below refer to them.

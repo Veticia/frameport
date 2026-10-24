@@ -105,7 +105,7 @@ def relink_quest(package: str, src: SourceGame) -> dict | None:
     manifest = data_manifest(src.data_dir, src.data_files)
     fields = dict(name=src.name, apk=str(src.apk), data_dir=str(src.data_dir) if src.data_dir else None,
                   data_files=src.data_files, data_bytes=sum(manifest.values()), data_manifest=manifest,
-                  origin=str(src.origin) if src.origin else None)
+                  origin=str(src.origin) if src.origin else None, bundle=str(src.bundle) if src.bundle else None)
     return library.update_game(package, lambda g: g.update(fields))
 
 
@@ -150,8 +150,12 @@ def add_path(path: Path, reporter: Reporter | None = None, on_added=None, force_
         added.append(entry)
         if on_added:
             on_added(entry)
+    def bundle_failed(p: Path, exc: Exception) -> None:
+        if reporter:
+            reporter.log(f"skipped {p.name}: {exc}")
+
     if not force_rift:
-        for src in quest_dump.scan(path):
+        for src in quest_dump.scan(path, reporter=reporter, on_error=bundle_failed):
             if reporter:
                 reporter.check_cancel()
             if only_new and str(Path(src.apk).resolve()) in known_apks:
@@ -956,7 +960,7 @@ def add_game(src: SourceGame, reporter: Reporter | None = None) -> dict:
         a.package, **names, name=src.name, apk=str(src.apk),
         data_dir=str(src.data_dir) if src.data_dir else None, data_files=src.data_files,
         data_bytes=sum(manifest.values()), data_manifest=manifest, source_sha256=builder.sha256(src.apk),
-        origin=str(src.origin),
+        origin=str(src.origin), bundle=str(src.bundle) if src.bundle else None,
         analysis=a.to_dict(), suggested=library.recipe_to_dict(recipe), **own,
     )
 
@@ -984,7 +988,9 @@ def replace_apk(package: str, apk: Path, reporter: Reporter | None = None, found
     if entry is None or is_rift(entry) or is_linux(entry):
         raise ValueError("only Quest/Android games can get a newer APK")
     apk = Path(apk)
-    src = found or quest_dump.from_path(apk)
+    src = found or quest_dump.from_path(apk, reporter)
+    if src is not None and src.bundle is not None:  # an app bundle: its unpacked APK
+        apk = src.apk
     new_pkg, new_vc = quest_dump._apk_ids(apk)
     if src is None or new_pkg is None:
         raise ValueError(f"{apk.name} isn't a readable APK")
@@ -1000,7 +1006,8 @@ def replace_apk(package: str, apk: Path, reporter: Reporter | None = None, found
     a.extra["lang_packs"] = langpacks.find_tags(_data_folder(src))
     a.extra["asset_files"] = langpacks.find_content_files(_data_folder(src))
     fields = dict(apk=str(apk), data_dir=str(src.data_dir) if src.data_dir else None, data_files=src.data_files,
-                  data_bytes=src.data_bytes(), source_sha256=builder.sha256(apk))
+                  data_bytes=src.data_bytes(), source_sha256=builder.sha256(apk),
+                  bundle=str(src.bundle) if src.bundle else None)
     if found is not None:  # found by a scan: where it was found
         from .core.models import data_manifest
 
@@ -1196,6 +1203,15 @@ def check_source(entry: dict) -> SourceGame:
     from .errors import MissingGameSource
 
     src = source_of(entry)
+    if not src.apk.is_file() and entry.get("bundle") and Path(entry["bundle"]).exists():
+        # FramePort's unpacked copy of an app bundle is gone (data folder cleaned up, a new PC): unpack it again
+        from .sources import bundles
+
+        plan = bundles.prepare(Path(entry["bundle"]))
+        if plan.package == entry.get("package") and plan.apk_path != src.apk:  # (the bundle changed)
+            library.upsert_game(entry["package"], apk=str(plan.apk_path),
+                                data_dir=str(plan.data_dir) if plan.data_dir else entry.get("data_dir"))
+            src = source_of(library.game(entry["package"]) or entry)
     if not src.apk.is_file():
         raise MissingGameSource(src.apk)
     if src.data_dir is not None:
@@ -1308,6 +1324,17 @@ def prepare_as_is(package: str, reporter: Reporter) -> dict:
     except Exception as exc:  # noqa: BLE001
         check("Manifest", None, str(exc))
     art, store_title = artwork.fetch(package, apk)
+    from .sources import bundles
+
+    if bundles.owned(apk) and not bundles.is_signed(apk):  # merged from an app bundle: signed with the game's key
+        from .apk import sign
+
+        reporter.stage("Signing the merged APK")
+        out = output_dir() / quest_dump.display_name(entry.get("name") or package)
+        out.mkdir(parents=True, exist_ok=True)
+        signed = out / f"{package}.apk"
+        sign.sign(apk, signed, package)
+        apk = signed
     info = {"apk": str(apk), "alt_apk": None, "sha256": sha256(apk), "alt_sha256": None, "applied": [],
             "checks": checks, "ok": all(c["ok"] is not False for c in checks), "as_is": True,
             "recipe_fp": recipe_fingerprint(entry["recipe"], package), "source_version": _source_version(entry),
@@ -1458,7 +1485,7 @@ def _find_more_data(entry: dict, reporter: Reporter | None = None) -> dict:
     """A game whose expansion files were picked by name next to its APK: files this version of FramePort recognises
     that an older scan skipped are added (Unreal's patch.pakchunk<N>-….<package>.obb chunks, GitHub #471)."""
     files, src_apk = entry.get("data_files"), Path(entry["apk"])
-    if files is None or not entry.get("data_dir") or not src_apk.is_file():
+    if entry.get("bundle") or files is None or not entry.get("data_dir") or not src_apk.is_file():
         return entry
     src = quest_dump.from_path(src_apk)
     if (not src or src.data_files is None or not src.data_dir or Path(entry["data_dir"]) != src.data_dir
@@ -1618,6 +1645,12 @@ def local_game_files(package: str) -> list[Path]:
         paths += [Path(g["game_dir"])] if g.get("game_dir") else []
     elif is_linux(g):
         paths += linux_local_files(g)
+    elif g.get("bundle"):  # an app bundle: the user's file (or split folder) and FramePort's unpacked copy of it
+        from .sources import bundles
+
+        paths += [Path(g["bundle"])]
+        paths += [Path(g["apk"]).parent] if bundles.owned(g.get("apk")) else []
+        paths += [p for p in data_paths(g) if not bundles.owned(p)]
     else:
         paths += [Path(g["apk"])] if g.get("apk") else []
         paths += data_paths(g)
