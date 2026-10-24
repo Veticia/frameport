@@ -97,6 +97,56 @@ def click_usb_setup(app) -> None:
         button.on_click(None)
 
 
+APP: list = []  # the running app (app_main sets it): menu mouse actions read the open menu's rows from it
+T_EDGE = 40      # a right-click this far from the window's right edge (the menu has to open to the left)
+
+
+def click_named(page, name: str) -> bool:
+    """Click the element called `name` (its tooltip or text), found through Flutter's semantics tree as the
+    showcase does (scripts/showcase/web.py)."""
+    from showcase.web import _ENABLE_SEMANTICS, _NODES, pick
+
+    page.evaluate(_ENABLE_SEMANTICS)
+    time.sleep(0.5)
+    hit = pick(page.evaluate(_NODES), name)
+    if not hit:
+        ERRORS.append(f"no element named {name!r} to click")
+        return False
+    page.mouse.click(hit["x"] + hit["w"] / 2, hit["y"] + hit["h"] / 2)
+    return True
+
+
+def menu_mouse(out: Path, name: str, sub: str, click: str | None = None):
+    """Mouse + keyboard on a FramePort menu (ui/popmenu): click `click` first if given (e.g. the game page's "…")
+    and shoot <name>-open.png; hover the submenu row `sub` (its window position from the app's layout) and shoot
+    <name>-submenu.png; ↓ (the submenu's first item) and shoot <name>-keys.png; Esc twice closes it."""
+    def run(page):
+        if click:
+            if not click_named(page, click):
+                return True
+            time.sleep(1.5)
+            page.screenshot(path=str(out / f"{name}-open.png"))
+        menu = APP[0].popmenu
+        pt = menu.row_center(sub) if menu.is_open else None
+        if pt is None:
+            ERRORS.append(f"{name}: no menu row {sub!r}")
+            return True
+        page.mouse.move(*pt, steps=6)
+        time.sleep(1.5)
+        page.screenshot(path=str(out / f"{name}-submenu.png"))
+        page.keyboard.press("ArrowDown")
+        time.sleep(0.8)
+        page.screenshot(path=str(out / f"{name}-keys.png"))
+        page.keyboard.press("Escape")
+        time.sleep(0.3)
+        page.keyboard.press("Escape")
+        time.sleep(0.5)
+        if menu.is_open:
+            ERRORS.append(f"{name}: Esc didn't close the menu")
+        return True
+    return run
+
+
 def open_selection_menu(app, game: str) -> None:
     """Select `game` and the next two shown games, then right-click `game`: the menu for the whole selection."""
     lv = app.library_view
@@ -194,9 +244,10 @@ def main() -> int:
             steps.append(("restore-saves-dialog", lambda a: (a.page.pop_dialog(), fake_save_backups(game),
                                                              a.restore_saves(game))))
         # last: the menus stay open over whatever comes next (the page's "…" menu, then the right-click menu)
-        steps.append(("game-menu", lambda a: (a.show_activity(False), a.open_game_menu(game))))
+        # (the "…" menu opens from a real click: see menu_mouse below)
+        steps.append(("game-menu", lambda a: (a.page.pop_dialog(), a.show_activity(False), a.open_game(game))))
         steps.append(("library-menu", lambda a: (a.show_activity(False), a.navigate(0), time.sleep(3),
-                                                 a.library_view.open_menu(game))))
+                                                 a.library_view.open_menu(game, (vw * 0.42, vh * 0.4)))))
         # right-click on one of several selected games: the selection's actions (GitHub #414)
         steps.append(("library-selection-menu", lambda a: open_selection_menu(a, game)))
     if args.docs:
@@ -326,9 +377,10 @@ def main() -> int:
                  ("linux-move", lambda a: a.move_game(LINUX_APPIMAGE) if args.fake_frame else None),
                  # GitHub #361: Files lists drives and the install folders of PC VR games and Linux apps
                  ("linux-files", lambda a: (a.page.pop_dialog(), a.go("files"))),
-                 ("linux-game-menu", lambda a: (a.page.pop_dialog(), a.open_game_menu(LINUX_FOLDER))),
+                 ("linux-game-menu", lambda a: (a.page.pop_dialog(), a.open_game(LINUX_FOLDER))),
+                 # near the window's right edge: the menu opens to the left, its submenus too
                  ("linux-menu", lambda a: (a.page.pop_dialog(), a.navigate(0), time.sleep(3),
-                                           a.library_view.open_menu(LINUX_APPIMAGE)))]
+                                           a.library_view.open_menu(LINUX_APPIMAGE, (vw - T_EDGE, vh * 0.45))))]
     if args.links:
         from frameport import deeplink
         from frameport.ui import components as C
@@ -565,6 +617,12 @@ def main() -> int:
             steps.append(("game-connected", lambda a: a.open_game(game)))
         if not args.no_test:
             steps.append(("launch-test-job", job))
+    # FramePort's menus: a submenu open, then the keyboard (GitHub #414)
+    for step, sub, click in (("game-menu", "Name and artwork", "More actions"), ("library-menu", "Name and artwork",
+                             None), ("linux-game-menu", "Troubleshoot", "More actions"),
+                             ("linux-menu", "Name and artwork", None)):
+        if any(n == step for n, _ in steps) and not args.gestures:
+            mouse[step] = menu_mouse(args.out, step, sub, click)
     if args.only:  # in the order given (e.g. frame-connected,monitor)
         by_name = dict(steps)
         steps = [(n, by_name[n]) for n in args.only.split(",") if n in by_name]
@@ -583,6 +641,7 @@ def main() -> int:
     def app_main(page: ft.Page):
         try:
             app = FramePortApp(page)
+            APP.append(app)
             if args.fake_frame:
                 attach_fake_frame(app)
 

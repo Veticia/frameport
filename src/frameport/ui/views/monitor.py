@@ -268,9 +268,9 @@ class MonitorView:
         self.no_game = C.callout(tr("No FramePort game is running. Start one, or switch the filter to see everything."),
                                  icon=ft.Icons.SPORTS_ESPORTS_OUTLINED)
         self.no_game.visible = False
-        self.menu = ft.ContextMenu(content=C.card(ft.Column(
+        self.menu = C.card(ft.Column(  # the process table (right-click a row: open_menu → app.popmenu)
             [self.header, ft.Column([r.control for r in self.rows], spacing=0), self.proc_note],
-            spacing=T.px(4)), padding=T.S2), secondary_trigger=None, tertiary_trigger=None)
+            spacing=T.px(4)), padding=T.S2)
         self._update_sort_labels()
 
     def _sort_btn(self, key: str, label: str) -> ft.TextButton:
@@ -671,9 +671,7 @@ class MonitorView:
         handlers = {"toggle": lambda e: self.toggle_group(p), "copy_name": lambda e: self.app.copy(name),
                     "copy_pid": lambda e: self.app.copy(str(pid)), "term": lambda e: self.ask_kill(p, "TERM"),
                     "kill": lambda e: self.ask_kill(p, "KILL"), "end_game": lambda e: self.ask_end_game(p["game"])}
-        self.menu.items = C.menu_items(process_menu(p, handlers.__getitem__))
-        C.update(self.menu)
-        self.app.page.run_task(self.menu.open, global_position=position)
+        self.app.popmenu.show(process_menu(p, handlers.__getitem__), at=position)
 
     def ask_kill(self, p: dict, sig: str) -> None:
         name, pid = p.get("name", "?"), p.get("pid")

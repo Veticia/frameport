@@ -182,7 +182,8 @@ HELP: dict[str, str] = _Translated({
     "save_backups": "Steam doesn't sync Quest games' saves. This copies each installed Quest game's saves to this PC "
                     "(caches and big downloaded content stay out). Restore one from the game's menu → Restore saves….",
     "install_drive": "Where new games go on the Frame, such as a microSD card. Installed games stay put; the game's "
-                     "menu → Move to… moves one. Cards formatted as FAT, exFAT or NTFS can't hold games.",
+                     "menu → On the Frame → Move to… moves one. Cards formatted as FAT, exFAT or NTFS can't hold "
+                     "games.",
     "move_game": "Copies the game and its saves to the other drive, checks the copy, then removes the old one. The "
                  "game must be closed. A game on a microSD card only starts while the card is in.",
     "vr_overlay": "A SteamVR overlay app: SteamVR on the Frame draws it over whatever you play, Quest and PC VR "

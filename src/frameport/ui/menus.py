@@ -1,7 +1,9 @@
-"""A game's menu (Library right-click, game page "…") as sections: a pure builder, no controls and no app.
+"""A game's menu (Library right-click, game page "…") and the other context menus: pure builders, no controls and
+no app.
 
-Entries: (label, icon, handler) | Header(label) | None (divider). C.menu_items renders them (headers as small caps,
-compact rows). Flet 1.0's PopupMenuItem can't nest, so groups get a header instead of a submenu."""
+Entries: (label, icon, handler) | Item(label, icon, handler, danger) | Submenu(label, icon, entries) | Header(label)
+| None (divider). ui/popmenu.PopMenu draws them (FramePort's own menu, with hover submenus); C.menu_items renders
+the flat ones for Flet's stock popup menus (filter chips, Add games)."""
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -19,10 +21,32 @@ class Header(NamedTuple):
     label: str
 
 
+class Item(NamedTuple):
+    """A menu item that needs more than (label, icon, handler): `danger` = drawn as destructive (red icon)."""
+    label: str
+    icon: object
+    handler: Callable | None
+    danger: bool = False
+
+
+class Submenu(NamedTuple):
+    """A group that opens to the side (hover, click, or → on the keyboard)."""
+    label: str
+    icon: object
+    entries: list
+
+
+def group(label: str, icon, items: list) -> list:
+    """A submenu for two or more items; a single item stays in the menu as it is, none gives nothing."""
+    if len(items) > 1:
+        return [Submenu(label, icon, items)]
+    return list(items)
+
+
 @dataclass
 class MenuState:
     """What the menu depends on, gathered by the app (FramePortApp.game_actions)."""
-    quick: bool = True             # True: Library right-click (quick_menu); False: the game page's full "…" menu
+    quick: bool = True             # True: Library right-click; False: the game page's "…" (its hero has the rest)
     connected: bool = False        # a Frame is connected
     on_frame: bool = False         # installed on the Frame (current or outdated)
     on_pc: bool = False            # a PC VR game installed on this PC
@@ -41,34 +65,55 @@ class MenuState:
 
 
 def menu_sections(g: dict, st: MenuState, act: Callable[[str], Callable]) -> list:
-    """The game's menu. `act(key)` gives the handler for an action key (tests pass `lambda k: k`)."""
+    """The game's menu, the same structure in the Library (right-click, quick=True) and on the game page ("…",
+    quick=False, which leaves out what the page's hero has: play/install, its page, Select, Add videos):
+
+        Play / Install-Update / Game settings… | Open game page / Select | Update ▸ / On the Frame ▸ / Saves ▸ /
+        Name and artwork ▸ / Recipe ▸ / Troubleshoot ▸ | Uninstall… / Remove from library…
+
+    A group with a single item shows that item instead of a submenu (`group`). `act(key)` gives the handler for an
+    action key (tests pass `lambda k: k`)."""
     rift = g.get("kind") == "rift"
     linux = g.get("kind") == "linux"  # installed as it is: nothing to analyze, convert or share as a recipe
-    if st.quick:
-        return quick_menu(st, act)
-    job = st.job
-    top: list = []
+    job, quick = st.job, st.quick
+    out: list = []
+    if job:  # the game's install/test runs: its progress first (the page's hero shows it already)
+        if quick:
+            out += [(tr("Show progress"), ft.Icons.SYNC_ROUNDED, act("progress")),
+                    (tr("Cancel"), ft.Icons.CLOSE_ROUNDED, act("cancel"))]
+    elif quick:
+        out += [*st.plays, *st.installs]
     if st.settings and not job:
-        top.append((tr("Game settings…"), ft.Icons.TUNE_ROUNDED, act("settings")))
-    if st.connected:
-        top.append((tr("Screenshots"), G.SHOT, act("screenshots")))
-    if st.on_frame and not rift and not linux and not job and not st.media_button:
-        top.append((tr("Add videos and files"), ft.Icons.VIDEO_LIBRARY_OUTLINED, act("files")))
-    if st.movable and st.on_frame and not job:
-        top.append((tr("Move to…"), ft.Icons.DRIVE_FILE_MOVE_ROUNDED, act("move")))
+        out.append((tr("Game settings…"), ft.Icons.TUNE_ROUNDED, act("settings")))
+    if quick:
+        out.append(None)
+        out.append((tr("Open game page"), ft.Icons.OPEN_IN_NEW_ROUNDED, act("open")))
+        if st.selectable:
+            out.append((tr("Select"), ft.Icons.CHECKLIST_ROUNDED, act("select")))
+
+    update: list = []
     if st.android and not job:  # GitHub #161: the game keeps its name, art and recipe
-        top.append((tr("Update with a newer APK…"), ft.Icons.UPGRADE_ROUNDED, act("new_apk")))
+        update.append((tr("Update with a newer APK…"), ft.Icons.UPGRADE_ROUNDED, act("new_apk")))
     if st.new_version and not job:  # the same for Linux apps and PC VR games
-        top.append((tr("Update with a newer version…"), ft.Icons.UPGRADE_ROUNDED, act("new_version")))
-    if st.link and not job:  # ask the install link now instead of waiting for the 6-hourly check
-        top.append((tr("Check for updates"), ft.Icons.REFRESH_ROUNDED, act("check_link")))
+        update.append((tr("Update with a newer version…"), ft.Icons.UPGRADE_ROUNDED, act("new_version")))
     if st.on_frame and not rift and not linux and not job:
         # the new build only; the Frame's game data stays (e.g. changed OBBs a normal update would replace)
-        top.append((tr("Update app only…"), ft.Icons.SYSTEM_UPDATE_ALT_ROUNDED, act("update_app")))
+        update.append((tr("Update app only…"), ft.Icons.SYSTEM_UPDATE_ALT_ROUNDED, act("update_app")))
+    if st.link and not job:  # ask the install link now instead of waiting for the 6-hourly check
+        update.append((tr("Check for updates"), ft.Icons.REFRESH_ROUNDED, act("check_link")))
+
+    frame: list = []
+    if st.connected:
+        frame.append((tr("Screenshots"), G.SHOT, act("screenshots")))
+    if st.on_frame and not rift and not linux and not job and (quick or not st.media_button):
+        frame.append((tr("Add videos and files"), ft.Icons.VIDEO_LIBRARY_OUTLINED, act("files")))
+    if st.movable and st.on_frame and not job:
+        frame.append((tr("Move to…"), ft.Icons.DRIVE_FILE_MOVE_ROUNDED, act("move")))
 
     saves: list = []  # GitHub discussion #352: Steam doesn't sync Quest games' saves
-    if st.saves and not job:  # "Back up saves" is a button next to Play (same condition)
-        saves.append((tr("Restore saves…"), ft.Icons.RESTORE_ROUNDED, act("restore_saves")))
+    if st.saves and not job:
+        saves += [(tr("Back up saves"), ft.Icons.BACKUP_ROUNDED, act("backup_saves")),
+                  (tr("Restore saves…"), ft.Icons.RESTORE_ROUNDED, act("restore_saves"))]
     if st.android:
         saves.append((tr("Open backups folder"), ft.Icons.FOLDER_OPEN_ROUNDED, act("saves_folder")))
 
@@ -78,10 +123,11 @@ def menu_sections(g: dict, st: MenuState, act: Callable[[str], Callable]) -> lis
     if not job and st.on_frame:
         artwork.append((tr("Update art on Frame"), ft.Icons.WALLPAPER_ROUNDED, act("steam_art")))
 
-    # the recipe's own actions (reset, save as known-good, share) are buttons on the page's recipe card:
-    # recipe_actions()
-
-    trouble: list = []  # launch tests and uninstalls are on the page's "Where it's installed" cards
+    trouble: list = []  # (launch tests and uninstalls are also on the page's "Where it's installed" cards)
+    if st.on_frame and not job:
+        trouble.append((tr("Run launch test on Frame"), G.TEST, act("test_frame")))
+    if st.on_pc and not job:
+        trouble.append((tr("Run launch test on this PC"), G.TEST, act("test_pc")))
     if not job and not rift and not linux:
         trouble.append((tr("Analyze again"), ft.Icons.MANAGE_SEARCH_ROUNDED, act("analyze")))
     if not job and not linux:
@@ -92,39 +138,40 @@ def menu_sections(g: dict, st: MenuState, act: Callable[[str], Callable]) -> lis
                 (tr("Collect logs"), ft.Icons.FOLDER_ZIP_OUTLINED, act("logs")),
                 (tr("Report a problem…"), ft.Icons.BUG_REPORT_OUTLINED, act("report"))]
 
-    danger = [(tr("Remove from library…"), ft.Icons.REMOVE_CIRCLE_OUTLINE_ROUNDED, act("remove"))]
+    out.append(None)
+    out += group(tr("Update"), ft.Icons.UPGRADE_ROUNDED, update)
+    out += group(tr("On the Frame"), G.FRAME, frame)
+    out += group(tr("Saves"), ft.Icons.SAVE_ROUNDED, saves)
+    out += group(tr("Name and artwork"), ft.Icons.IMAGE_OUTLINED, artwork)
+    out += group(tr("Recipe"), G.RECIPE, recipe_actions(g, act))
+    out += group(tr("Troubleshoot"), ft.Icons.BUILD_ROUNDED, trouble)
 
-    out: list = list(top)
-    for head, items in ((tr("Saves"), saves), (tr("Name and artwork"), artwork), (tr("Troubleshoot"), trouble)):
-        if items:
-            out += [None, Header(head), *items]
-    return out + [None, *danger]
+    out.append(None)
+    if st.on_frame and not job:
+        out.append(Item(tr("Uninstall from Frame…"), ft.Icons.DELETE_OUTLINE_ROUNDED, act("uninstall_frame"), True))
+    if st.on_pc and not job:
+        out.append(Item(tr("Uninstall from this PC…"), ft.Icons.DELETE_OUTLINE_ROUNDED, act("uninstall_pc"), True))
+    out.append(Item(tr("Remove from library…"), ft.Icons.REMOVE_CIRCLE_OUTLINE_ROUNDED, act("remove"), True))
+    return out
 
 
-def quick_menu(st: MenuState, act: Callable[[str], Callable]) -> list:
-    """The Library's right-click menu: only what's used all the time (play, install/update, settings, the page,
-    select), no section headers. Flet's menus can't nest, so everything else is behind "More actions…" = the game
-    page's full "…" menu (menu_sections with quick=False); uninstalls are also on the page's "Where it's installed"
-    cards and the Frame page."""
-    opened = (tr("Open game page"), ft.Icons.OPEN_IN_NEW_ROUNDED, act("open"))
-    if st.job:
-        return [(tr("Show progress"), ft.Icons.SYNC_ROUNDED, act("progress")),
-                (tr("Cancel"), ft.Icons.CLOSE_ROUNDED, act("cancel")), opened]
-    out: list = [*st.plays[:1], *st.installs[:1]]
-    if st.settings:
-        out.append((tr("Game settings…"), ft.Icons.TUNE_ROUNDED, act("settings")))
-    out += [None, opened]
-    if st.selectable:
-        out.append((tr("Select"), ft.Icons.CHECKLIST_ROUNDED, act("select")))
-    return out + [(tr("More actions…"), ft.Icons.MORE_HORIZ_ROUNDED, act("more"))]
+def labels(entries: list) -> list[str]:
+    """Every clickable item's label, submenus included (depth first): what a menu can do."""
+    out: list[str] = []
+    for e in entries:
+        if isinstance(e, Submenu):
+            out += labels(e.entries)
+        elif e is not None and not isinstance(e, Header):
+            out.append(e[0])
+    return out
 
 
 RECIPE_HELP = ("reset_recipe", "save_recipe", "share_config")  # ui/help.py keys of recipe_actions, in order
 
 
 def recipe_actions(g: dict, act: Callable[[str], Callable]) -> list:
-    """The recipe's own actions: buttons on the game page's recipe card ("What FramePort will do"). Linux apps are
-    installed as they are and have no recipe."""
+    """The recipe's own actions: the menus' Recipe ▸ and buttons on the game page's recipe card ("What FramePort will
+    do"). Linux apps are installed as they are and have no recipe."""
     if g.get("kind") == "linux":
         return []
     return [(tr("Reset to suggested recipe…"), ft.Icons.SETTINGS_BACKUP_RESTORE_ROUNDED, act("reset_recipe")),

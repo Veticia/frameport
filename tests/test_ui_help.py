@@ -52,10 +52,16 @@ def _app(monkeypatch, game, frame_info=None, busy=None, pc=()):
 
 
 def _labels(actions):
-    """Item labels in order ("—" = divider); group headers are left out."""
-    from frameport.ui.menus import Header
+    """Item labels in order ("—" = divider), submenus' items in place of the submenu; headers are left out."""
+    from frameport.ui.menus import Header, Submenu
 
-    return [a[0] if a else "—" for a in actions if not isinstance(a, Header)]
+    out = []
+    for a in actions:
+        if isinstance(a, Submenu):
+            out += _labels(a.entries)
+        elif not isinstance(a, Header):
+            out.append(a[0] if a else "—")
+    return out
 
 
 def test_right_click_menu_follows_install_state(monkeypatch):
@@ -63,9 +69,10 @@ def test_right_click_menu_follows_install_state(monkeypatch):
     app = _app(monkeypatch, g, {"installed": [{"package": "com.q", "sha256": "old"}]})
     installed = _labels(app.game_actions("com.q"))
     assert installed[:3] == ["Play on Frame", "Update on Frame", "Game settings…"]
-    assert {"Open game page", "More actions…"} <= set(installed)
-    # GitHub #414: uninstalls and Remove from library are on the game page (its cards, its "…" menu)
-    assert not {"Uninstall from Frame…", "Remove from library…", "Rename…"} & set(installed)
+    # GitHub #414: everything is in the right-click menu (grouped in submenus), nothing behind "More actions…"
+    assert {"Open game page", "Uninstall from Frame…", "Remove from library…", "Rename…",
+            "Run launch test on Frame"} <= set(installed)
+    assert "More actions…" not in installed and installed[-1] == "Remove from library…"
 
     missing = _labels(_app(monkeypatch, g, {"installed": []}).game_actions("com.q"))
     assert "Install on Frame" in missing and "Play on Frame" not in missing
@@ -106,12 +113,12 @@ def test_menus_offer_sharing_and_diagnostics(monkeypatch):
     labels = _labels(_app(monkeypatch, g, {"installed": []}).game_actions("com.q", quick=False))
     assert {"Collect logs", "Report a problem…"} <= set(labels)
     assert labels[-1] == "Remove from library…"
-    # the recipe's actions are buttons on the page's recipe card
+    # the recipe's actions: the menus' Recipe ▸ and the page's recipe card
     recipe = _labels(_app(monkeypatch, g, {"installed": []}).game_actions("com.q", recipe=True))
     assert recipe == ["Reset to suggested recipe…", "Save as known-good recipe", "Share working recipe…"]
-    assert not set(recipe) & set(labels)
-    quick = _labels(_app(monkeypatch, g, {"installed": []}).game_actions("com.q"))  # the short right-click menu
-    assert quick[-1] == "More actions…" and "Collect logs" not in quick
+    assert set(recipe) <= set(labels)
+    quick = _labels(_app(monkeypatch, g, {"installed": []}).game_actions("com.q"))  # the right-click menu
+    assert quick[-1] == "Remove from library…" and {"Collect logs", *recipe} <= set(quick)
 
 
 def test_install_browser_explains_known_folders():
@@ -154,9 +161,9 @@ def test_linux_app_menus_have_no_conversion_actions(monkeypatch):
             assert gone not in labels, gone
         if not quick:
             assert {"Find artwork…", "Report a problem…", "Collect logs", "Screenshots"} <= set(labels)
-        assert labels[-1] == ("More actions…" if quick else "Remove from library…")
+        assert labels[-1] == "Remove from library…"
     quick = _labels(_app(monkeypatch, g, on_frame).game_actions("linux.tool"))
-    assert {"Play on Frame", "Reinstall on Frame", "More actions…"} <= set(quick)
+    assert {"Play on Frame", "Reinstall on Frame", "Uninstall from Frame…", "Find artwork…"} <= set(quick)
     assert _app(monkeypatch, g, on_frame).game_actions("linux.tool", recipe=True) == []  # no recipe
     several = _linux_app(candidates=["tool", "tool-helper"])
     page = _app(monkeypatch, several, {"installed": []}).game_actions("linux.tool", quick=False)

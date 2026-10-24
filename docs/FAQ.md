@@ -118,9 +118,10 @@ Every game has three places; the answers below refer to them.
   controllers, menus and more, in plain words. Changes apply the next time the game starts.
 - **Patches:** click the game in the **Library** to open its page, then **Customize** (in the **Patches** section).
   Turn a patch on or off, then click **Update on Frame** at the top of the page.
-- **The game's menu:** the **…** button at the top of its page (or right-click in the Library → **More actions…**).
-  It has **Rename…**, **Update with a newer APK…** and **Report a problem…**, among others.
-- **The recipe:** **Reset to suggested recipe…**, **Save as known-good recipe** and **Share working recipe…** sit
+- **The game's menu:** right-click the game in the **Library**, or the **…** button at the top of its page. Its
+  groups open to the side: **Update**, **On the Frame**, **Saves**, **Name and artwork**, **Recipe** (with **Reset to
+  suggested recipe…**) and **Troubleshoot** (with **Report a problem…**). The arrow keys, Enter and Esc work too.
+- **The recipe:** **Reset to suggested recipe…**, **Save as known-good recipe** and **Share working recipe…** are also
   under **What FramePort will do** on the game's page.
 
 The sidebar has two tabs for troubleshooting: **Monitor** (the running game's frame rate, CPU and graphics) and

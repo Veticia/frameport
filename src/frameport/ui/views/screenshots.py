@@ -103,11 +103,10 @@ class ScreenshotsView:
         # one right-click menu for the grid: filled with the clicked screenshot's actions (or the tab's) when it opens
         # click and drag across screenshots to select them (C.DragSelect)
         self.drag = C.DragSelect(lambda p: p in self.selected, self._toggle)
-        self.menu = ft.ContextMenu(content=ft.GestureDetector(
+        self.menu = ft.Container(ft.GestureDetector(
             content=C.card(self.grid, padding=T.S3, expand=True), expand=True,
             on_secondary_tap_down=lambda e: self.open_menu(None, e.global_position),
-            on_pan_start=self.drag.start, on_pan_end=self.drag.end),
-            secondary_trigger=None, tertiary_trigger=None, expand=True)
+            on_pan_start=self.drag.start, on_pan_end=self.drag.end), expand=True)
         self.root = None
 
     # ---------------------------------------------------------------- building
@@ -300,9 +299,7 @@ class ScreenshotsView:
         return out
 
     def open_menu(self, s: dict | None, position=None) -> None:
-        self.menu.items = C.menu_items(self.menu_actions(s))
-        C.update(self.menu)
-        self.app.page.run_task(self.menu.open, global_position=position)
+        self.app.popmenu.show(self.menu_actions(s), at=position)
 
     def _later(self, coro_fn, *args) -> None:
         """Run an async action (it asks for a folder) from a plain click handler: Flet only awaits handlers that

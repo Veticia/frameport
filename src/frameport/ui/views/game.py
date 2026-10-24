@@ -178,14 +178,36 @@ class GameView:
                 C.install_state(g, app.frame_info) in ("installed", "outdated"):
             buttons.append(C.secondary(tr("Back up saves"), ft.Icons.SAVE_ROUNDED,
                                        lambda e: app.backup_saves(pkg)))
-        more = C.menu_button(C.menu_items(app.game_actions(pkg, quick=False)), icon=ft.Icons.MORE_HORIZ_ROUNDED,
-                             icon_color=T.TEXT_2, tooltip=tr("More actions"))
-        # the same menu, opened from code (Library right-click → "More actions…", app.open_game_menu): a
-        # PopupMenuButton can't be opened programmatically, a ContextMenu can (no mouse triggers of its own)
-        self.more_menu = ft.ContextMenu(content=more, items=C.menu_items(app.game_actions(pkg, quick=False)),
-                                        secondary_trigger=None, tertiary_trigger=None)
-        self.hero_buttons = ft.Row(buttons + [self.more_menu], spacing=T.S2, wrap=True)
+        # "…": the game's menu (app.popmenu, built when it opens) under the button; the tap's local + global
+        # positions give the button's box (Flet can't report where a control is)
+        size = T.px(40)
+        btn = ft.Container(ft.Icon(ft.Icons.MORE_HORIZ_ROUNDED, color=T.TEXT_2, size=T.ICON_M), width=size,
+                           height=size, border_radius=size / 2, alignment=ft.Alignment.CENTER,
+                           tooltip=tr("More actions"))
+
+        def hover(e):
+            btn.bgcolor = T.soft(T.TEXT, 0.08) if e.data in (True, "true") else None
+            C.update(btn)
+        btn.on_hover = hover
+
+        def down(e):
+            gx, gy = e.global_position.x, e.global_position.y
+            lx, ly = (e.local_position.x, e.local_position.y) if e.local_position else (size / 2, size / 2)
+            self._more_box = (gx - lx, gy - ly, gx - lx + size, gy - ly + size)
+            self.open_more_menu()
+        self.more_button = ft.GestureDetector(content=btn, on_tap_down=down, mouse_cursor=ft.MouseCursor.CLICK)
+        self.hero_buttons = ft.Row(buttons + [self.more_button], spacing=T.S2, wrap=True,
+                                   vertical_alignment=ft.CrossAxisAlignment.CENTER)
         return self.hero_buttons
+
+    def open_more_menu(self, at=None) -> None:
+        """The game's "…" menu: at `at`, else under the "…" button (once it was clicked), else near the hero."""
+        entries = self.app.game_actions(self.package, quick=False)
+        box = getattr(self, "_more_box", None)
+        if at is not None or box is None:
+            self.app.popmenu.show(entries, at=at or (T.px(560), T.px(300)))
+        else:
+            self.app.popmenu.show(entries, below=box)
 
     def _starting(self, i: int, handler, text: str):
         """A Play button that starts the game, then says "Starting on Frame…" with a spinner for as long as a card's

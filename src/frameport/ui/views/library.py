@@ -318,16 +318,16 @@ class LibraryView:
         app.search_field = self.search
         self.filters = ft.Container()
         self.hint = ft.Container(visible=False)
-        # one right-click menu for every card: filled with that game's actions when it opens (open_menu)
+        # a right-click on a card opens that game's menu (open_menu → app.popmenu); `menu` is the grid's area
         # click and drag across cards to select them (turns on select mode; C.DragSelect)
         self.drag = C.DragSelect(lambda pkg: pkg in self.selected,
                                  lambda pkg, on: self.toggle_selected(pkg) if (pkg in self.selected) != on else None,
                                  can_select=lambda pkg: pkg in self.cards,
                                  on_start=lambda: None if self.select_mode else self.set_select_mode(True))
-        self.menu = ft.ContextMenu(content=ft.Column([
+        self.menu = ft.Container(ft.Column([
             self.shelf,
             ft.GestureDetector(content=self.grid, expand=True, on_pan_start=self.drag.start, on_pan_end=self.drag.end),
-        ], spacing=T.S4, expand=True), secondary_trigger=None, tertiary_trigger=None, expand=True)
+        ], spacing=T.S4, expand=True), expand=True)
         self.body = ft.Container(self.menu, expand=True)
         add = C.primary_menu(tr("Add games"), ft.Icons.ADD_ROUNDED, C.menu_items([
             (tr("Scan a folder…"), ft.Icons.FOLDER_OPEN_ROUNDED, app.pick_folder),
@@ -890,9 +890,7 @@ class LibraryView:
     def open_menu(self, pkg: str, position=None) -> None:
         """Right-click on a card: that game's quick actions (built now, so they match the game's current state); on
         one of several selected games, the selection's actions for all of them (C.menu_targets)."""
-        self.menu.items = C.menu_items(self.menu_actions(pkg))
-        C.update(self.menu)
-        self.app.page.run_task(self.menu.open, global_position=position)
+        self.app.popmenu.show(self.menu_actions(pkg), at=position)
 
     def menu_actions(self, pkg: str) -> list:
         """What the right-click menu on `pkg`'s card offers (see open_menu)."""

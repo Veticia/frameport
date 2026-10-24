@@ -1246,8 +1246,8 @@ def menu_entries(actions: list) -> list:
     return out
 
 
-# Flutter's popup menus are as wide as their widest row, but at most MENU_MAX_W logical px. A right-click ContextMenu
-# can't change that limit (and it doesn't grow with the UI scale); a PopupMenuButton can (menu_button).
+# Flutter's popup menus are as wide as their widest row, but at most MENU_MAX_W logical px, whatever the UI scale;
+# menu_button scales it. (Context menus and the game's "…" are FramePort's own: ui/popmenu.py.)
 MENU_MAX_W = 280
 
 
@@ -1277,7 +1277,7 @@ def menu_items(actions: list) -> list[ft.PopupMenuItem]:
                 height=T.px(24), padding=ft.Padding(T.px(14), T.px(6), T.px(16), 0), disabled=True,
                 mouse_cursor=ft.MouseCursor.BASIC))
         else:
-            label, icon, handler = a
+            label, icon, handler = a[0], a[1], a[2]  # (menus.Item has a 4th field)
             out.append(ft.PopupMenuItem(
                 content=menu_label(label, icon, T.TEXT if handler else T.TEXT_3, T.TEXT_2 if handler else T.TEXT_3),
                 height=T.px(32), padding=ft.Padding(T.px(14), T.px(4), T.px(18), T.px(4)), on_click=handler,

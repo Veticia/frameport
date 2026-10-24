@@ -148,11 +148,10 @@ class FilesView:
         self.drag = C.DragSelect(lambda p: p in self.selected, self._toggle,
                                  can_select=lambda p: any(x.path == p and self._selectable(x) for x in self.entries))
         # one right-click menu for the listing: filled with the clicked entry's actions (or the folder's) when it opens
-        self.menu = ft.ContextMenu(content=ft.GestureDetector(
+        self.menu = ft.Container(ft.GestureDetector(
             content=C.card(self.listing, padding=T.px(4), expand=True), expand=True,
             on_secondary_tap_down=lambda e: self.open_menu(None, e.global_position),
-            on_pan_start=self.drag.start, on_pan_end=self.drag.end),
-            secondary_trigger=None, tertiary_trigger=None, expand=True)
+            on_pan_start=self.drag.start, on_pan_end=self.drag.end), expand=True)
         self.root = None
 
     # ---------------------------------------------------------------- building
@@ -472,9 +471,7 @@ class FilesView:
     def open_menu(self, e, position=None) -> None:
         if not self.loc:
             return
-        self.menu.items = C.menu_items(self.menu_actions(e))
-        C.update(self.menu)
-        self.app.page.run_task(self.menu.open, global_position=position)
+        self.app.popmenu.show(self.menu_actions(e), at=position)
 
     def _shown_path(self, path: str) -> str:
         """The path as games see it (/sdcard/…) where the location has one, else the Frame's own path."""

@@ -74,7 +74,7 @@ Detailed device findings per game/issue: docs/DEVICE_NOTES.md (read before debug
     canvas: `view3d.pick`) + doors/windows on a wall (`mr.room.plane_on_wall`), Save = `rooms.put_room` → `room_put
     edited` (keeps raw files, `edits.txt` survives a new clean-up; "Back to the scan's boxes" = keep_edits false); no
     eraser in the GUI (`rooms.refine(erase=)` only)); settings; welcome; activity panel). Files, Screenshots and the Library share right-click menus
-    (one `ft.ContextMenu` per view, filled on right-click; on one of several selected items they act on the whole
+    (`app.popmenu`, filled on right-click; on one of several selected items they act on the whole
     selection, `C.menu_targets`) and click-and-drag multi-select (`C.DragSelect`: pan start/end on the area + item
     hover events, which Flutter also sends with the button held; Flet can't report item positions, so no rubber band).
     Selection bars sit below the list: above it, their appearing shifted the items mid-drag. Async handlers (they
@@ -144,14 +144,19 @@ Detailed device findings per game/issue: docs/DEVICE_NOTES.md (read before debug
     in Containers with `ft.ScrollKey`), the header stays; `app.settings_view.show_section(key)` (ui_smoke
     `settings-index`).
     Help hints: wording for non-obvious terms lives in `ui/help.py` (`HELP`); show it with `C.help_icon(key)` or the
-    `help=` argument of `section`/`kv` (`C.Check` help key), tooltips via `C.tip()` (wraps). Game actions for the Library
-    right-click menu (one `ft.ContextMenu` around the grid, filled on right-click; short (GitHub #414): `menus.quick_menu`
-    = Play, Install/Update, Game settings | Open game page, Select, "More actions…" = the game page with its full "…"
-    menu opened from code, `app.open_game_menu`; on one of several selected games `menus.selection_menu` via
-    `library.menu_actions`) and the game page's "…" menu (`menus.menu_sections` quick=False, sectioned; leaves out
-    what the page has buttons for: Back up saves, uninstalls, the recipe card's `menus.recipe_actions` =
-    `game_actions(recipe=True)`) come from `app.game_actions()`. Flet's popup menus can't nest and are at most 280
-    logical px wide (ContextMenu: fixed; `C.menu_button` scales it): `C.menu_label` wraps long labels instead. Picking art (`sources.apply_choice`) downloads into a staging dir and keeps the old
+    `help=` argument of `section`/`kv` (`C.Check` help key), tooltips via `C.tip()` (wraps). Context menus
+    (Library, Files, Screenshots, Monitor) and the game page's "…" are FramePort's own (GitHub #414):
+    `ui/popmenu.PopMenu` = `app.popmenu.show(entries, at=(x, y) | below=box)`, drawn in page.overlay (outside-click
+    barrier + panels; hover submenus with open/close intent delays, ↑ ↓ → ← Enter Esc via `app._on_key` first, closes
+    on outside click/Esc/choice/`app.go`; panels size to the estimated label width between MIN_W and MAX_W, longer
+    labels wrap, flip/clamp into the window, submenus on the side with room; portal edge in dual themes; fade off with
+    Reduce motion; hovering only repaints rows). Flet's stock ContextMenu/PopupMenu can't nest and cap at 280 px, so
+    they're only used for button menus (`C.menu_button`, width scaled; `C.menu_label` wraps). Game menus come from
+    `app.game_actions()` = `menus.menu_sections`: right-click = Play, Install/Update, Game settings | Open game page,
+    Select | Update ▸ On the Frame ▸ Saves ▸ Name and artwork ▸ Recipe ▸ Troubleshoot ▸ | Uninstall…, Remove from
+    library… (`menus.group`: a one-item group stays inline); the page's "…" (quick=False) is the same without what
+    its hero has; on one of several selected games `menus.selection_menu` (`library.menu_actions`); the recipe card's
+    buttons = `game_actions(recipe=True)`. Picking art (`sources.apply_choice`) downloads into a staging dir and keeps the old
     art if nothing came back; "Update Steam art on Frame" re-sends the art set to the game's anchor (agent ≥ 12).
     Patch descriptions/reasons describe the general case, naming games only as "e.g. …".
   - Installs: queued/cancelled/failed ones are remembered (library setting `ui.installs`) → Library "Resume" bar;

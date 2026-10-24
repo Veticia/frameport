@@ -157,6 +157,9 @@ class FramePortApp:
         # one `_monitor` stream for everything that shows live Frame data (subscribers: "card" = the sidebar's live
         # Frame card, "monitor" = the Monitor tab); it runs only while someone subscribes
         self.monitor_hub = MonitorHub(lambda: self.target if self.frame_state == "connected" else None)
+        from .popmenu import PopMenu
+
+        self.popmenu = PopMenu(self)  # every context menu and the game page's "…" (FramePort's own, with submenus)
         self.live_card = bool(library.setting(FC.SETTING, True))  # Settings → Appearance (kept here: no I/O on ticks)
         self.reduce_motion = reduce_motion_setting()  # Settings → Appearance: no view fades / portal pulse
         self.settings_view = None  # the Settings page last built (views/settings.SettingsView: its index scrolls)
@@ -646,6 +649,7 @@ class FramePortApp:
         return s[0].label if s else None
 
     def go(self, route: str, *args) -> None:
+        self.popmenu.close(update=False)  # (render updates the page)
         # a redraw of the same game page (a switch in its patch list, Customize, ...) keeps the scroll position;
         # another page or game starts at the top
         if not (route == "game" and self.route[:1] == ("game",) and self.route[1:2] == args[:1]):
@@ -867,6 +871,8 @@ class FramePortApp:
             self.toast(tr("Couldn't copy — select the text instead"), error=True)
 
     def _on_key(self, e: ft.KeyboardEvent) -> None:
+        if self.popmenu.handle_key(e.key):
+            return  # an open menu takes every key (arrows, Enter, Esc; nothing reaches the search behind it)
         if self._typing_on_frame:
             return  # Type on Frame is open: Esc and shortcuts belong to the Frame
         lib = self.library_view if self.route[0] == "library" else None
@@ -1169,11 +1175,10 @@ class FramePortApp:
             opts[0][2](None)
 
     def game_actions(self, pkg: str, quick: bool = True, recipe: bool = False) -> list:
-        """A game's menu: [(label, icon, handler) | menus.Header | None (divider)], grouped by menus.menu_sections.
-        quick=True is the library's right-click menu; False is the game page's "…" menu, which leaves out what the
-        page has buttons for (play/install and Back up saves in the hero, launch tests and uninstalls on the "Where
-        it's installed" cards, the recipe's actions on its card, progress + Cancel while a job runs).
-        recipe=True: the recipe card's actions (menus.recipe_actions)."""
+        """A game's menu (menus.menu_sections: items, menus.Submenu groups, dividers), shown by app.popmenu.
+        quick=True is the library's right-click menu; False is the game page's "…" menu, the same structure without
+        what the page's hero has (play/install, Open game page, Select, progress + Cancel while a job runs).
+        recipe=True: the recipe's actions alone (menus.recipe_actions: the recipe card's buttons)."""
         from .menus import MenuState, menu_sections, recipe_actions
 
         g = library.game(pkg)
@@ -1187,7 +1192,6 @@ class FramePortApp:
             "progress": lambda e: self.show_activity(True),
             "cancel": lambda e: self.jobs.cancel(job),
             "open": lambda e: self.open_game(pkg),
-            "more": lambda e: self.open_game_menu(pkg),
             "select": lambda e: (lv.selected.add(pkg), lv.set_select_mode(True)),
             "settings": lambda e: self.settings_dialog(pkg),
             "screenshots": lambda e: self.go("screenshots", pkg),
@@ -1237,25 +1241,6 @@ class FramePortApp:
             movable=connected and C.frame_drive(g, self.frame_info) is not None, android=not rift and not linux,
             new_version=rift or linux, link=deeplink.can_check_link(g.get("link")))
         return menu_sections(g, st, handlers.__getitem__)
-
-    def open_game_menu(self, pkg: str) -> None:
-        """Library right-click → "More actions…": the game page with its full "…" menu open (opened once the page
-        is shown; the route switch fades for 150 ms)."""
-        self.open_game(pkg)
-        view = self.game_view
-
-        async def show():
-            import asyncio
-
-            await asyncio.sleep(0.35)
-            menu = getattr(view, "more_menu", None)
-            if menu is not None and self.game_view is view and self.route[:2] == ("game", pkg):
-                try:
-                    await menu.open()
-                except Exception:  # noqa: BLE001 - unmounted meanwhile: the page is shown, that's enough
-                    pass
-
-        self.page.run_task(show)
 
     @staticmethod
     def linux_programs(g: dict) -> list[str]:
