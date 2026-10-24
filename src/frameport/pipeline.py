@@ -1450,7 +1450,27 @@ def _find_more_data(entry: dict, reporter: Reporter | None = None) -> dict:
         return entry
     if reporter:
         reporter.log(f"found {len(set(src.data_files) - set(files))} more data file(s) next to the game")
-    return library.upsert_game(entry["package"], data_files=src.data_files, data_bytes=src.data_bytes())
+    from .core.models import data_manifest
+
+    manifest = data_manifest(src.data_dir, src.data_files)
+    return library.upsert_game(entry["package"], data_files=src.data_files, data_bytes=sum(manifest.values()),
+                               data_manifest=manifest)
+
+
+def refresh_data_files() -> int:
+    """At start (GUI, background): games whose older scan skipped data files this FramePort recognises get them in
+    the library now, so the game shows "Update on Frame" (GitHub #471: no badge, the user reinstalled). Only lists
+    the APK's folder. Returns how many games changed."""
+    done = 0
+    for g in library.games():
+        if g.get("data_files") is None or not g.get("data_dir") or not g.get("apk") or is_rift(g) or is_linux(g):
+            continue
+        try:
+            if _find_more_data(g) is not g:
+                done += 1
+        except OSError:  # a drive that isn't connected now: tried again at a later start
+            continue
+    return done
 
 
 def install_game(package: str, target: Target, reporter: Reporter, apk_only: bool = False,

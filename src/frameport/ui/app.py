@@ -2577,6 +2577,8 @@ class FramePortApp:
         """Games analysed by an older FramePort lack fields newer fixes depend on (GitHub #104): their APKs are read
         again once, in the background. Not a job: ~8 s per large APK, and the queue would hold the user's installs
         for minutes (a build of such a game analyses it first itself). Recipes the user didn't edit then follow."""
+        if pipeline.refresh_data_files():
+            self.refresh_view()
         if not pipeline.outdated_analyses():
             return
         n = pipeline.refresh_analyses()

@@ -850,3 +850,7 @@ def test_install_picks_up_chunk_obbs_an_older_scan_skipped(tmp_path, monkeypatch
     assert sorted(out["data_files"]) == ["main.7.com.x.game.obb", "patch.pakchunk0-Android_ASTC.com.x.game.obb"]
     assert pipeline._find_more_data({**entry, "data_files": out["data_files"]})["data_files"] == out["data_files"]
     assert pipeline._find_more_data({**entry, "data_files": None}) is not None  # whole-folder data: unchanged
+    assert out["data_manifest"] == {f: (game / f).stat().st_size for f in out["data_files"]}  # → "Update on Frame"
+    gone = {**entry, "package": "com.y", "apk": str(game / "gone.apk")}
+    monkeypatch.setattr(pipeline.library, "games", lambda: [entry, gone])
+    assert pipeline.refresh_data_files() == 1
