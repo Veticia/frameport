@@ -3634,6 +3634,7 @@ def upgrade_launchers():
             new = set_config_sync_line(new, pkg, wants_config_sync(os.path.dirname(path)))
             new = set_room_sync_line(new, pkg, wants_scene_room(os.path.dirname(path)))
             new = set_refresh_rate_line(new, pkg)
+            new = set_theater_line(new, pkg)
         if "export LEPTON_ENV_FRAMEBRIDGE_CONFIG=" in new and "_snapshot_close" not in new:
             # The end log follows podman kill in stop(), while the launcher still owns fd 9.
             end = plays_lines(os.path.dirname(path))[1]
@@ -4090,6 +4091,7 @@ def write_launcher(anchor, base, pkg, title, appid, lepton, env, hw_video=False,
     text = set_config_sync_line(text, pkg, config_sync)
     text = set_room_sync_line(text, pkg, scene_room)
     text = set_refresh_rate_line(text, pkg)
+    text = set_theater_line(text, pkg)
     path = os.path.join(anchor, "launch.sh")
     with open(path + ".tmp", "w") as f:
         f.write(text)
@@ -4387,6 +4389,23 @@ def sync_refresh_rate(pkg, dep, check_running=True):
     finally:
         if vr is not None:
             vr.close()
+
+
+THEATER_LINE = 'timeout 10s python3 {agent_q} _theater_hold {pkg_q} $$ >"$app_dir/theater.log" 2>&1 9>&- || true'
+
+
+def set_theater_line(text, pkg):
+    """Take the theater hold (vr_text_window games only; it checks) first thing, before the launcher's other steps."""
+    text = "".join(line for line in text.splitlines(True) if " _theater_hold " not in line)
+    if "\nexport SteamAppId=" not in text or "\nsetsid " not in text:
+        return text
+    line = THEATER_LINE.format(agent_q=shlex.quote(os.path.abspath(__file__)), pkg_q=shlex.quote(pkg))
+    return text.replace("\nexport SteamAppId=", f"\n{line}\nexport SteamAppId=", 1)
+
+
+def theater_hold_worker(pkg, launcher):
+    if vr_text_window(pkg):
+        print(f"{time.strftime('%H:%M:%S')} {theater_hold(launcher)}")
 
 
 def set_refresh_rate_line(text, pkg):
@@ -9179,7 +9198,9 @@ def logcat_keeper(log, appid, parent, poll=2.0, restarts=5, popen=None, run=None
 # #476/#477: "the game renders, the controllers do nothing"). With auto-theater off the window stays a page of the
 # game in the dashboard: nothing is shown on its own and the dashboard isn't opened on it, while Android keeps a
 # focused window (Steam's keyboard, Type on Frame). The setting is global, so FramePort turns it off only while such
-# a game runs (one hold per dashboard worker) and puts it back when the last one ends.
+# a game runs (one hold per launcher, taken at its start by THEATER_LINE: the dashboard reads the change a few
+# seconds late, a hold taken with Lepton's start came after the window was theatered) and puts it back when the last
+# one ends (the dashboard worker, which lives as long as the launcher).
 THEATER_HOLDS = os.path.join(HOME, ".local/share/frameport/theater-holds")
 THEATER_RESTORE = "restore"  # in THEATER_HOLDS: FramePort turned auto-theater off and has to turn it on again
 THEATER_SETTING = ("dashboard", "autoShowGameTheater")
@@ -9203,13 +9224,13 @@ def vr_text_window(pkg):
 def _theater_holder_alive(pid):
     try:
         with open(f"/proc/{int(pid)}/cmdline", "rb") as f:
-            return b"_dashboard_worker" in f.read()  # (not a reused pid)
+            return b"launch.sh" in f.read()  # (not a reused pid)
     except OSError:
         return False
 
 
 def _theater_holders():
-    """Live holds (worker pids); holds of workers that are gone are removed."""
+    """Live holds (launcher pids); holds of launchers that are gone are removed."""
     live = []
     for name in os.listdir(THEATER_HOLDS):
         if not name.isdigit():
@@ -9236,7 +9257,7 @@ def _theater_setting(value=None):
 
 
 def theater_hold(holder):
-    """Keep SteamVR from putting game windows into theater mode while `holder` (a dashboard worker) runs."""
+    """Keep SteamVR from putting game windows into theater mode while `holder` (a game's launch.sh) runs."""
     os.makedirs(THEATER_HOLDS, exist_ok=True)
     with open(os.path.join(THEATER_HOLDS, ".lock"), "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -9287,7 +9308,7 @@ def dashboard_worker(log, parent, wait_start=240, window=120, poll=0.5, ui_log=N
     try:
         if vr_text_window(os.path.basename(os.path.dirname(os.path.abspath(log)))):
             try:
-                print(f"{time.strftime('%H:%M:%S')} {theater_hold(os.getpid())}", flush=True)
+                print(f"{time.strftime('%H:%M:%S')} {theater_hold(parent)}", flush=True)
                 held = True
             except Exception as exc:  # noqa: BLE001 (SteamVR settings unavailable: behave as before)
                 print(f"theater mode: {exc}", flush=True)
@@ -9302,7 +9323,7 @@ def dashboard_worker(log, parent, wait_start=240, window=120, poll=0.5, ui_log=N
     finally:
         if held:
             try:
-                done = theater_settle(os.getpid())
+                done = theater_settle(parent)
                 if done:
                     print(f"{time.strftime('%H:%M:%S')} {done}", flush=True)
             except Exception as exc:  # noqa: BLE001
@@ -11021,6 +11042,9 @@ def main():
         return 0
     if len(sys.argv) >= 3 and sys.argv[1] == "_config_sync":
         config_sync_worker(sys.argv[2])
+        return 0
+    if len(sys.argv) >= 4 and sys.argv[1] == "_theater_hold":
+        theater_hold_worker(sys.argv[2], sys.argv[3])
         return 0
     if len(sys.argv) >= 3 and sys.argv[1] == "_refresh_rate":
         refresh_rate_worker(sys.argv[2])

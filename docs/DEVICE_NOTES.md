@@ -1202,12 +1202,12 @@ button. The timeline in `vrwebhelper_systemui.txt` was the same for every window
 window (17:48 onwards) none of it. So the race between the game's session/first frame and these dashboard steps
 decides per game and per start whether the player is left on the Android screen.
 
-Fix (agent 119): the dashboard worker (every launcher runs it) turns `dashboard.autoShowGameTheater` off through
+Fix (agent 119): the launcher (new line `_theater_hold <pkg> $$`, added to existing launchers by `upgrade_launchers`; log `<base>/theater.log`) and the dashboard worker turn `dashboard.autoShowGameTheater` off through
 IVRSettings (ctypes, `SteamVRSettings.bool_setting`) while a game with `device.text_input_window` runs (deployment
-recipe has the patch, the marker exists, display mode not "Flat window"), one hold file per worker in
+recipe has the patch, the marker exists, display mode not "Flat window"), one hold file per launcher pid in
 `~/.local/share/frameport/theater-holds/`, and turns it on again after the last such game (a worker killed with its game, e.g. Steam stopped: the next
 game's worker or `ensure_host_fixes` puts it back; purge too). Headless with UNDERDOGS: no auto-theatering, no SetDockLocation, the
-window overlay never visible, Android's focused window still UnityPlayerActivity; SteamVR drops the key from
+window overlay never visible, Android's focused window still UnityPlayerActivity. A hold taken only by the worker (with Lepton's start, ~3 s before the window came alive) was too late: the dashboard still auto-theatered (15:01:28), so the hold is taken first thing in the launcher. End-to-end with the agent installed (15:05): theater.log `theater mode off while the game runs` at the launch, no auto-theatering/SetDockLocation, dashboard.log `theater mode back on` at the end; launcher + container killed with -9: the hold stayed, the next `info` (ensure_host_fixes) answered `SteamVR theater mode back on`; SteamVR drops the key from
 steamvr.vrsettings again when it's back at the default. 2D apps keep theater mode (it is how they are shown).
 Also: SteamOS 0.5.6 logs the dashboard button as `open_dashboard_action`, not `toggle_dashboard_action`; the worker
 didn't recognise it and closed each of the owner's presses again (AC Nexus 23:33, ten presses in eight seconds).

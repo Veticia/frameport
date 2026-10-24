@@ -2626,3 +2626,23 @@ def test_off_play_refuses_while_launcher_unit_starts(monkeypatch, tmp_path):
     with pytest.raises(a.AgentError):
         a.cmd_launch({"package": "com.x.y"})
     assert not any(c[0] == "systemd-run" for c in calls)
+
+
+def test_theater_hold_is_taken_at_the_launcher_start(monkeypatch, tmp_path):
+    """The dashboard read the setting a few seconds late: a hold taken with Lepton's start (agent 119 draft) came
+    after UNDERDOGS' window was theatered. The launcher takes it first thing; the worker releases it at the end."""
+    a = load_agent(monkeypatch, tmp_path)
+    text = 'app_dir=/x\nexport SteamAppId=1\ntimeout 10s python3 a _refresh_rate p\nsetsid lepton start &\n'
+    once = a.set_theater_line(text, "com.x.typing")
+    assert a.set_theater_line(once, "com.x.typing") == once  # idempotent
+    lines = once.splitlines()
+    assert "_theater_hold com.x.typing $$" in lines[1] and lines[2].startswith("export SteamAppId=")
+    assert a.set_theater_line("#!/bin/sh\nexec proton\n", "com.x.y") == "#!/bin/sh\nexec proton\n"  # Proton
+    _text_window_game(a, tmp_path)
+    setting = _FakeTheater(on=True)
+    monkeypatch.setattr(a, "_theater_setting", setting)
+    monkeypatch.setattr(a, "_theater_holder_alive", lambda pid: True)
+    a.theater_hold_worker("com.x.typing", "4242")
+    assert setting.on is False
+    assert (tmp_path / ".local/share/frameport/theater-holds/4242").exists()
+    assert a.theater_settle("4242") == "theater mode back on"
