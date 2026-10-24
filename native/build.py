@@ -384,7 +384,7 @@ def build_foveation(tc: Path):
     run([exe(tc, "aarch64-linux-android29-clang"), "-shared", "-fPIC", "-O2", "-Wall", "-Wextra", "-Werror",
          "-fvisibility=hidden", f"-ffile-prefix-map={src}=native/foveation",
          "-Wl,-soname,libVkLayer_fdm_darken.so", "-Wl,-z,max-page-size=16384", "darken.c",
-         "-ldl", "-llog", "-lm", "-o", ART / "arm64-v8a/libVkLayer_fdm_darken.so"], cwd=src)
+         "-ldl", "-llog", "-o", ART / "arm64-v8a/libVkLayer_fdm_darken.so"], cwd=src)
 
 
 def build_ovrpshim(tc: Path):
