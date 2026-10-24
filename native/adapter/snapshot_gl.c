@@ -1,4 +1,5 @@
-// FramePort FrameBridge: eye-image snapshots for headless diagnostics (setting snapshot=<seconds>, GLES games only).
+// FramePort FrameBridge: eye-image snapshots for headless diagnostics (setting snapshot=<seconds>; Vulkan games:
+// snapshot_vk.c).
 // Every <seconds>, at xrEndFrame, the left-eye image the game just submitted (projection layer, view 0: its swapchain
 // image and array layer; without a projection layer the first quad/cylinder layer's) is read back on the game's own GL context and written at a quarter of its size as
 // /sdcard/Android/data/<package>/files/fb_snap_<n>.ppm (n = 0-7, the oldest is overwritten). Nobody wears the headset
@@ -132,6 +133,10 @@ static void snap_end_frame(const XrFrameEndInfo *info) {
             sub = &((const XrCompositionLayerQuad *)layer)->subImage, type = layer->type;
         else if (layer && layer->type == XR_TYPE_COMPOSITION_LAYER_CYLINDER_KHR)
             sub = &((const XrCompositionLayerCylinderKHR *)layer)->subImage, type = layer->type;
+    }
+    if (vk.device) {  // a Vulkan session: snapshot_vk.c reads both views back
+        snap_vk_end_frame(info, taken++ % 8);
+        return;
     }
     if (!sub || !snap_load_gl()) return;
     if (!s_eglGetCurrentContext()) {

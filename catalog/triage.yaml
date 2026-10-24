@@ -20,9 +20,10 @@ signatures:
     suggest: [adapter.scene_emul]
   - id: dynamic-resolution-foveation
     pattern: 'projection view [01](?: rect change)?:[^\r\n]*rect=(?:[1-9]\d*,\d+|0,[1-9]\d*) '
-    unless: 'fixed_resolution: recommended'
+    # a rebuilt APK's foveation centring layer re-centres Valve's density map on the submitted rect (#394)
+    unless: 'fixed_resolution: recommended|fdm_centre: pass'
     severity: info
-    diagnosis: The game submits an offset projection viewport. With Valve foveation, dynamic resolution can move the sharp centre or expose a white edge. Keeping full resolution may help; it increases GPU load and needs the updated adapter and OVRPlugin shim in a rebuilt APK.
+    diagnosis: The game submits an offset projection viewport. With Valve foveation, dynamic resolution can move the sharp centre or expose a white edge. A rebuilt APK (Update on Frame) puts the sharp area back on each eye; keeping full resolution may also help for the white edge, increases GPU load and needs the updated adapter and OVRPlugin shim in a rebuilt APK.
     question: With foveated rendering enabled, was the sharp centre misplaced or was there a white line at the picture edge?
     suggest: [adapter.fixed_resolution]
   - id: static-openxr-loader-bypass

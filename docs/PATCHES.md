@@ -2331,7 +2331,7 @@ Saves what the game draws every few seconds, for testing without the headset.
   - Game settings → Troubleshooting → "Eye-image snapshots (diagnostics)" (advanced).
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
 
-> Every N seconds, saves the left-eye image the game submits (a quarter of its size) as fb_snap_0-7.ppm in the game's files folder on the Frame. Launch tests run without anyone wearing the headset, so the headset view stays black; this shows what the game itself draws. OpenGL ES games only.
+> Every N seconds, saves the left-eye image the game submits (a quarter of its size) as fb_snap_0-7.ppm in the game's files folder on the Frame. Launch tests run without anyone wearing the headset, so the headset view stays black; this shows what the game itself draws. Vulkan games: both eyes at half size (fb_snap_vk_N_vV.ppm), the whole swapchain image with the submitted rect and FOV in the log.
 
 ### <a id="adapter-stable_local"></a>Keep menus in place
 

@@ -7,6 +7,7 @@ extern int __android_log_print(int,const char*,const char*,...);
 #define ANDROID_LOG_INFO 4
 #include <dlfcn.h>
 #include <errno.h>
+#include <math.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -142,20 +143,24 @@ static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL layer_GetInstanceProcAddr(VkInst
 
 // ---------------------------------------------------------------- layer enumeration (what the loader asks for)
 
-static const VkLayerProperties properties = {LAYER_NAME, VK_MAKE_VERSION(1, 1, 0), 1, "FramePort coarse-fragment darkening"};
+// Two layers in one library: the darkening diagnostic (above Valve's layer) and the density-map centring (below it,
+// centre.h); the loader finds each one's entry points by its name.
+static const VkLayerProperties properties[2] = {
+    {LAYER_NAME, VK_MAKE_VERSION(1, 1, 0), 1, "FramePort coarse-fragment darkening"},
+    {"VK_LAYER_FRAMEPORT_fdm_centre", VK_MAKE_VERSION(1, 1, 0), 1, "FramePort foveation centring"}};
 
 EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(uint32_t *count, VkLayerProperties *props) {
-    if (!props) { *count = 1; return VK_SUCCESS; }
-    if (*count < 1) return VK_INCOMPLETE;
-    props[0] = properties;
-    *count = 1;
-    return VK_SUCCESS;
+    if (!props) { *count = 2; return VK_SUCCESS; }
+    uint32_t n = *count < 2 ? *count : 2;
+    for (uint32_t i = 0; i < n; ++i) props[i] = properties[i];
+    *count = n;
+    return n < 2 ? VK_INCOMPLETE : VK_SUCCESS;
 }
 
 EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceExtensionProperties(const char *layer, uint32_t *count,
                                                                              VkExtensionProperties *props) {
     (void)props;
-    if (!layer || strcmp(layer, LAYER_NAME)) return VK_ERROR_LAYER_NOT_PRESENT;
+    if (!layer || (strcmp(layer, LAYER_NAME) && strcmp(layer, "VK_LAYER_FRAMEPORT_fdm_centre"))) return VK_ERROR_LAYER_NOT_PRESENT;
     *count = 0;
     return VK_SUCCESS;
 }
@@ -179,6 +184,8 @@ EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL VK_LAYER_FRAMEPORT_fdm_darkenGet
 EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL VK_LAYER_FRAMEPORT_fdm_darkenGetDeviceProcAddr(VkDevice d, const char *n) {
     return layer_GetDeviceProcAddr(d, n);
 }
+
+#include "centre.h"
 
 static PFN_vkVoidFunction own(const char *name) {
     if (!name) return NULL;
@@ -220,9 +227,16 @@ static const char *cxx_chars(const void *s, size_t *len) {
 __attribute__((constructor)) static void activate(void) {
     climb_stereo_fix();
     const char *enabled = getenv("FRAMEPORT_FOVEATION_TEST");
-    if (!enabled || strcmp(enabled, "1")) return;
-    /* This library is added only when device.foveation.test is selected. */
-    /* The launcher opt-in also keeps imported test builds dormant during normal play. */
+    int darken = enabled && (!strcmp(enabled, "1") || !strcmp(enabled, "2"));
+    fdm_paint = enabled && !strcmp(enabled, "2");  // 2 (developers): paint 1/fragment area instead of dimming
+    /* The darkening library is added only when device.foveation.test is selected (and dormant in every build):
+     * the launcher opt-in keeps imported test builds dormant during normal play. The centring layer follows
+     * FramePort's foveation modes: Valve's injection enabled (FDM_DEBUG=enable). */
+    c_read_config();
+    // The Climb 2 corrects Valve's offsets in its private bridge (climb_compat.h); leave it alone.
+    const char *climb = getenv("FRAMEPORT_CLIMB_STEREO_OFFSETS");
+    int centre = c_has_token(getenv("FDM_DEBUG"), "enable") && !c_disabled && !(climb && !strcmp(climb, "1"));
+    if (!darken && !centre) return;
     void *vk = dlopen("libvulkan.so", RTLD_NOW | RTLD_LOCAL);
     void *(*get_instance)(void) = vk ? (void *(*)(void))dlsym(vk, GET_INSTANCE) : NULL;
     const void *(*get_layers)(void *) = vk ? (const void *(*)(void *))dlsym(vk, GET_LAYERS) : NULL;
@@ -242,17 +256,33 @@ __attribute__((constructor)) static void activate(void) {
     char old[4097];
     memcpy(old, current ? current : "", len);
     old[len] = 0;
-    if (strstr(old, LAYER_NAME)) return;  // loaded twice (the loader's own dlopen): already in the list
-    size_t n = strlen(LAYER_NAME) + (len ? 1 + len : 0);
+    // loaded twice (the loader's own dlopen): already in the list
+    if ((!darken || strstr(old, LAYER_NAME)) && (!centre || strstr(old, CENTRE_NAME))) return;
+    char list[4097 + 128];
+    snprintf(list, sizeof(list), "%s%s%s", darken && !strstr(old, LAYER_NAME) ? LAYER_NAME : "",
+             darken && !strstr(old, LAYER_NAME) && len ? ":" : "", old);
+    const char *valve = strstr(list, "VK_LAYER_VALVE_fdm_injection");
+    if (centre && !strstr(list, CENTRE_NAME)) {
+        if (!valve) {
+            centre = 0;  // Valve's layer isn't loaded here: nothing to centre
+        } else {  // right below Valve's layer: it sees the density map and offsets Valve hands down
+            size_t at = (size_t)(valve - list) + strlen("VK_LAYER_VALVE_fdm_injection");
+            char tail[sizeof(list)];
+            snprintf(tail, sizeof(tail), "%s", list + at);
+            snprintf(list + at, sizeof(list) - at, ":%s%s", CENTRE_NAME, tail);
+        }
+    }
+    if (!strcmp(list, old)) return;
+    size_t n = strlen(list);
     size_t cap = (n + 16) & ~(size_t)15;
     char *data = malloc(cap);
     if (!data) return;
-    snprintf(data, cap, "%s%s%s", LAYER_NAME, len ? ":" : "", old);
+    memcpy(data, list, n + 1);
     // passed by value: the callee gets a pointer to our temporary and copies it; freed below unless it was moved
     struct cxx_string tmp = {cap | 1, n, data};
     set_layers(env, &tmp);
     if ((tmp.cap & 1) && tmp.data == data) free(data);
     const char *now = cxx_chars(get_layers(env), &len);
-    LOG("foveation diagnostic: debug layers now \"%.*s\" (%d fix(es)%s)", (int)len, now ? now : "", nfixes,
+    LOG("foveation: debug layers now \"%.*s\" (%d fix(es)%s)", (int)len, now ? now : "", nfixes,
         dump ? ", dumping modules" : "");
 }
