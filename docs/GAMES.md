@@ -63,6 +63,7 @@ Generated from [catalog/games](../catalog/games) by `scripts/compat_list.py`.
 | Epic Roller Coasters | Quest | ✅ Works |  |
 | Espire 2 | Quest | ✅ Works |  |
 | Eye of the Temple | Quest | ✅ Works |  |
+| First Contact | Quest | ✅ Works |  |
 | FrenzyVR | Quest | ✅ Works |  |
 | Fruit Ninja | Quest | ✅ Works |  |
 | Fruit Salon | Quest | ✅ Works |  |
@@ -74,12 +75,14 @@ Generated from [catalog/games](../catalog/games) by `scripts/compat_list.py`.
 | Gunjack | Quest | ✅ Works |  |
 | H.U.N.T | Quest | ✅ Works |  |
 | Hitstream | Quest | ✅ Works |  |
+| Hungry Shark Evolution | Quest | ✅ Works |  |
 | I Am Cat | Quest | ✅ Works |  |
 | I Am Monkey | Quest | ✅ Works |  |
 | I Expect You To Die 2 | Quest | ✅ Works |  |
 | IEYTD3 | Quest | ✅ Works |  |
 | In Death: Unchained | Quest | ✅ Works |  |
 | Into The Radius 2 | Quest | ✅ Works |  |
+| Invasion | Quest | ✅ Works |  |
 | Job Simulator | Quest | ✅ Works |  |
 | Journey of the Gods | Quest | ✅ Works |  |
 | Jurassic World Aftermath Collection | Quest | ✅ Works |  |
@@ -119,9 +122,13 @@ Generated from [catalog/games](../catalog/games) by `scripts/compat_list.py`.
 | Pistol Whip | Quest | ✅ Works |  |
 | Pistol Whip | PC VR | ✅ Works |  |
 | Please Don't Touch Anything | Quest | ✅ Works |  |
+| Port0r: Cop VR | Quest | ✅ Works |  |
+| Port0r: House of the Dead VR | Quest | ✅ Works |  |
+| Port0r: Rally VR | Quest | ✅ Works |  |
 | PowerWash Simulator VR | Quest | ✅ Works |  |
 | Punch Fit | Quest | ✅ Works |  |
 | QuestCraft | Quest | ✅ Works |  |
+| QuestZDoom | Quest | ✅ Works |  |
 | Racket: Nx | Quest | ✅ Works |  |
 | RacketPinball | Quest | ✅ Works |  |
 | RC Pilot Trainer | Quest | ✅ Works |  |
@@ -156,6 +163,7 @@ Generated from [catalog/games](../catalog/games) by `scripts/compat_list.py`.
 | SUPERHOT VR | Quest | ✅ Works |  |
 | Survival Nation | Quest | ✅ Works |  |
 | Surviving Mars: Pioneer | Quest | ✅ Works |  |
+| SynthRiders | Quest | ✅ Works |  |
 | SynthRiders | Quest | ✅ Works |  |
 | Table Troopers | Quest | ✅ Works |  |
 | Taskmaster | Quest | ✅ Works |  |
@@ -192,6 +200,7 @@ Generated from [catalog/games](../catalog/games) by `scripts/compat_list.py`.
 | Wallace & Gromit in The Grand Getaway | Quest | ✅ Works |  |
 | Waltz of the Wizard: Extended Edition | Quest | ✅ Works |  |
 | Wander | Quest | ✅ Works |  |
+| Zero Caliber 2 | Quest | ✅ Works |  |
 | ZombielandVR | Quest | ✅ Works |  |
 | AFFECTED: The Manor | Quest | ⚠️ Works with issues | Gear VR game (32-bit only), runs through FramePort's 32-bit bridge (experimental). |
 | Ancient_Dungeon | Quest | ⚠️ Works with issues | Multiplayer isn't available (offline). |
@@ -216,10 +225,11 @@ Generated from [catalog/games](../catalog/games) by `scripts/compat_list.py`.
 | Phantom: Covert Ops | Quest | ⚠️ Works with issues | DLC/store button crashes (no Meta store). |
 | Pinball FX VR | Quest | ⚠️ Works with issues | Plays; space warp off (fewer stutters). |
 | Plezy | Quest | ⚠️ Works with issues | Some videos play with strong artifacts and wrong colours; the cause is unknown, possibly hardware video decoding. |
+| Port0r: Time Crisis II VR | Quest | ⚠️ Works with issues | Gameplay runs well; cut scenes and the title and game-selection screens after inserting coins don't display properly. |
+| Port0r: Time Crisis VR | Quest | ⚠️ Works with issues | Immersive mode shows a black screen (only the arm and gun); the flat and 3D screen modes work (game menu, setup button). |
 | PrimedGun v2 | Quest | ⚠️ Works with issues | Vulkan via a statically linked Khronos OpenXR loader, which bypasses FrameBridge (the picture jumps). |
 | Puzzling Places | Quest | ⚠️ Works with issues | Works fine, but pointers dont show well on main menu, easy to work around. |
 | Quantum Void | Quest | ⚠️ Works with issues | no hands |
-| QuestZDoom | Quest | ⚠️ Works with issues | Needs a WAD: put it into QuestZDoom/wads in the game's storage (Files tab) and set QuestZDoom/commandline.txt to "qzdoom -iwad /sdcard/QuestZDoom/wads/<name>… |
 | Ragnarock | Quest | ⚠️ Works with issues |  |
 | Real VR Fishing | Quest | ⚠️ Works with issues | Seems to be almost 100% functional with meta permissions enabled. |
 | Silhouette | Quest | ⚠️ Works with issues | Hand-tracking game; the Frame synthesizes hands from controllers, so it is janky. |
