@@ -2711,12 +2711,13 @@ XRAPI_ATTR XrResult XRAPI_CALL xrGetInstanceProcAddr(XrInstance instance, const 
         HOOK_AS(xrDestroySession, hook_xrDestroySession)
     }
     if (layer_debug || refresh_rate > 0 || equirect_emul) HOOK_AS(xrBeginSession, hook_xrBeginSession)
-    if (layer_debug || refresh_rate > 0) {
+    // The Frame's runtime has no XR_FB_display_refresh_rate (newer SteamOS lists it), but OVRPort's dispatcher offers
+    // it to the game and answers 0 Hz without it: the measured rate instead (the runtime's own answer when it has one),
+    // and a request for a rate the runtime refuses keeps the current one (GitHub #336).
+    if (instance != XR_NULL_HANDLE) {
+        HOOK_AS(xrGetDisplayRefreshRateFB, hook_get_refresh_rate)
         HOOK_AS(xrRequestDisplayRefreshRateFB, hook_request_refresh_rate)
     }
-    // The Frame's runtime has no XR_FB_display_refresh_rate, but OVRPort's dispatcher offers it to the game and answers
-    // 0 Hz without it: the measured rate instead (the runtime's own answer when it has one).
-    if (instance != XR_NULL_HANDLE) HOOK_AS(xrGetDisplayRefreshRateFB, hook_get_refresh_rate)
     if (surface_emul) HOOK_AS(xrCreateSwapchainAndroidSurfaceKHR, hook_xrCreateSwapchainAndroidSurfaceKHR)
     if (eye_debug || release_wait) HOOK_AS(xrReleaseSwapchainImage, eye_hook_xrReleaseSwapchainImage)
     if (swapchain_pool || layer_debug || cube_standin) {  // pooled images, counters + cube stand-ins; every other wait/release hook above takes precedence

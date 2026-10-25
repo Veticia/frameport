@@ -2227,6 +2227,8 @@ How often the picture updates. Higher is smoother if the game can keep up.
   - Value: float, default `0.0`.
   - Game settings → Picture → "Refresh rate": Game's choice (`0`), 72 Hz (`72`), 80 Hz (`80`), 90 Hz (`90`), 96 Hz (`96`), 108 Hz (`108`), 120 Hz (`120`), 144 Hz (`144`).
 - **Catalog games (6):** Astro VR Host, Does it Stack?, Majora's Mask VR, Port0r: Time Crisis VR, Simpsons Hit and Run VR, Vacation Simulator.
+- **Suggested by launch-test signatures:**
+  - `refresh-rate-refused` (error): The game asked for a refresh rate the Frame's runtime refuses and may quit on that error.
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
 
 > Display refresh rate for this game (72, 80, 90, 96, 108, 120 or 144; 0 = the game's choice). Applied through SteamVR before the game starts. A video's frame rate that divides the refresh rate plays smoothest (for example 30 fps at 90 Hz, 24 fps at 72 Hz).

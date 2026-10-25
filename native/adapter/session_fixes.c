@@ -737,12 +737,16 @@ static void refresh_on_begin_session(XrSession session) {
 static XRAPI_ATTR XrResult XRAPI_CALL hook_request_refresh_rate(XrSession session, float rate) {
     PFN_xrRequestDisplayRefreshRateFB fn =
         (PFN_xrRequestDisplayRefreshRateFB)lookup(active_instance, "xrRequestDisplayRefreshRateFB");
-    if (!fn) return XR_ERROR_FUNCTION_UNSUPPORTED;
     float wanted = refresh_rate > 0 ? refresh_rate : rate;
-    XrResult result = fn(session, wanted);
+    XrResult result = fn ? fn(session, wanted) : XR_ERROR_FUNCTION_UNSUPPORTED;
     LOG("refresh rate: app asked for %.1f Hz, requested %.1f Hz: result %d", rate, wanted, result);
-    // A refused override keeps the current rate (as frame-control's compat layer does) instead of failing the app.
-    return XR_FAILED(result) && refresh_rate > 0 ? XR_SUCCESS : result;
+    // A refused request keeps the current rate (as frame-control's compat layer does) instead of failing the app: an
+    // override always, the app's own rate when the runtime doesn't offer it (OutRun quit on
+    // XR_ERROR_DISPLAY_REFRESH_RATE_UNSUPPORTED_FB right after its first frames, GitHub #336).
+    if (XR_FAILED(result) && (refresh_rate > 0 || result == XR_ERROR_DISPLAY_REFRESH_RATE_UNSUPPORTED_FB ||
+                              result == XR_ERROR_FUNCTION_UNSUPPORTED || result == XR_ERROR_FEATURE_UNSUPPORTED))
+        return XR_SUCCESS;
+    return result;
 }
 
 // Always on: the Frame's runtime has no XR_FB_display_refresh_rate; OVRPort's dispatcher still offers the extension and
