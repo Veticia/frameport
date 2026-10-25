@@ -42,6 +42,7 @@ Generated from [catalog/games](../catalog/games) by `scripts/compat_list.py`.
 | Cosmodread | Quest | ✅ Works |  |
 | CrazyTaxiVR | Quest | ✅ Works |  |
 | Creed | Quest | ✅ Works |  |
+| Crisis Brigade 2 reloaded | Quest | ✅ Works |  |
 | Crisis Zone VR | Quest | ✅ Works |  |
 | cubism | Quest | ✅ Works |  |
 | cubism | Quest | ✅ Works |  |
