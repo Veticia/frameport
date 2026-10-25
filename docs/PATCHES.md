@@ -60,7 +60,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [GL shim (Mesa GLSL compatibility)](#frame-gl_shim) | `frame.gl_shim` | Steam Frame patches | 2 |
 | [Play services: Android 11 version checks](#frame-gms_platform_version) | `frame.gms_platform_version` | Steam Frame patches | 2 |
 | [Godot apps: start without a clipboard service](#frame-godot_clipboard) | `frame.godot_clipboard` | Steam Frame patches | 1 |
-| [Hardware video decoding (H.264, HEVC, VP9)](#frame-hw_video_decode) | `frame.hw_video_decode` | Steam Frame patches | 41 |
+| [Hardware video decoding (H.264, HEVC, VP9)](#frame-hw_video_decode) | `frame.hw_video_decode` | Steam Frame patches | 42 |
 | [Just Dance VR: keep progress in the local save](#frame-justdance_local_save) | `frame.justdance_local_save` | Steam Frame patches |  |
 | [Language packs from the game's files](#frame-langpacks) | `frame.langpacks` | Steam Frame patches |  |
 | [Launcher category (INFO → LAUNCHER)](#frame-launcher) | `frame.launcher` | Steam Frame patches | default |
@@ -95,7 +95,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Unity: start VR without Meta's system apps](#frame-unity_oculus_check) | `frame.unity_oculus_check` | Steam Frame patches | 14 |
 | [Unity: keep MSAA off at runtime (OVRManager)](#frame-unity_runtime_msaa_off) | `frame.unity_runtime_msaa_off` | Steam Frame patches | 33 |
 | [Unity: skip Meta's player-in-room check](#frame-unity_scene_active_rooms) | `frame.unity_scene_active_rooms` | Steam Frame patches | 1 |
-| [Make Unity text fields work](#frame-unity_text_input) | `frame.unity_text_input` | Steam Frame patches | 134 |
+| [Make Unity text fields work](#frame-unity_text_input) | `frame.unity_text_input` | Steam Frame patches | 135 |
 | [Unity: share thread keys (games that run out of them)](#frame-unity_tls_key_pool) | `frame.unity_tls_key_pool` | Steam Frame patches | 1 |
 | [Unity: headset always counts as worn](#frame-unity_user_presence) | `frame.unity_user_presence` | Steam Frame patches | 1 |
 | [GL shim for Unreal (no multisampled render-to-texture)](#frame-unreal_gl_shim) | `frame.unreal_gl_shim` | Steam Frame patches | 1 |
@@ -734,7 +734,7 @@ Plays the game's videos on the Frame's video hardware, so 4K and 8K video runs s
 - `frame.hw_video_decode` · also for 2D apps
 - **Changes:** Install only: written on the Frame when the game is installed; the APK isn't changed.
 - **Suggested (on):** The game plays video through Android's decoders (MediaCodec, ExoPlayer or VLC): decode it on the Frame's hardware.
-- **Catalog games (41):** 4XVR Video Player, AugmentedEmpire, Batman: Arkham Shadow, Battlemarked, BattleTalent, Breathedge VR, Dance Central, Darksword and 33 more.
+- **Catalog games (42):** 4XVR Video Player, AugmentedEmpire, Batman: Arkham Shadow, Battlemarked, BattleTalent, Breathedge VR, Dance Central, Darksword and 34 more.
 - **Source:** [patches/frame/hw_video_decode.py](../src/frameport/patches/frame/hw_video_decode.py)
 
 > Decodes the game's videos on the Frame's hardware video decoder instead of Android's software decoders, which stutter or fall behind with 4K/8K video (for example video players, Batman: Arkham Shadow's cutscenes). Adds FramePort's codec plugin (OMX.frameport.avc/hevc/vp9.decoder) to this game's container only; the APK isn't changed. When the hardware is busy (for example Steam's own hardware video decoding is on) the video is decoded in software as before.
@@ -1198,7 +1198,7 @@ Lets you type into this app's text fields on the Frame (they'd close at once).
 - `frame.unity_text_input` · also for 2D apps
 - **Changes:** Changes the APK (a rebuild and reinstall apply it).
 - **Suggested (on):** Unity app with text fields (…): they close at once on the Frame because it has no system keyboard.
-- **Catalog games (134):** AgeOfJoy, AllInOneSports, Ancient_Dungeon, Arcsmith, Arkio, Assassin's Creed Nexus, Attack on Titan VR: Unbreakable, Audica and 126 more.
+- **Catalog games (135):** AgeOfJoy, AllInOneSports, Ancient_Dungeon, Arcsmith, Arkio, Assassin's Creed Nexus, Attack on Titan VR: Unbreakable, Audica and 127 more.
 - **Source:** [patches/frame/unity_text_input.py](../src/frameport/patches/frame/unity_text_input.py)
 
 > Unity's TMP_InputField / InputField wait for Android's on-screen keyboard and close themselves a frame later when there is none (Lepton has no on-screen keyboard; Meta's system keyboard does this on a Quest), so a selected text field only flashes a caret. Rewrites TouchScreenKeyboardShouldBeUsed -&gt; false and isKeyboardUsingEvents (TMP) / InPlaceEditing (uGUI) -&gt; true in libil2cpp.so, found per game with Cpp2IL (downloaded on first use), so fields stay selected and take key presses: Steam's keyboard (with "Show the app window") or Type on Frame from the PC.
