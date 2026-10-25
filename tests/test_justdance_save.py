@@ -177,17 +177,11 @@ def _analysis(**kw):
     return Analysis(**d)
 
 
-@pytest.mark.parametrize("version,suggested", [("0.5.4", True), ("0.5.10", True), ("0.6", True), ("1.2.0", True),
-                                               ("0.5.3", False), ("0.4.9", False), ("", False)])
-def test_detect_from_the_lower_bound(version, suggested):
+@pytest.mark.parametrize("version", ["0.5.4", "0.6", "1.2.0", ""])
+def test_detect_for_every_version(version):
     p = base.get("frame.justdance_local_save")
-    assert bool(p.detect(_analysis(version=version))) is suggested
+    assert p.detect(_analysis(version=version))
     assert not p.applies(_analysis(package="com.other.game"))
-
-
-def test_version_tuple():
-    assert jd.version_tuple("0.5.10") > jd.version_tuple("0.5.4") > jd.version_tuple("0.5")
-    assert jd.version_tuple("1.0") == (1, 0, 0) and jd.version_tuple("0.6.1-b2") == (0, 6, 1)
 
 
 def test_append_segment_keeps_everything_in_place():

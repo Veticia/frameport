@@ -27,7 +27,6 @@ found or decoded as expected is refused with the reason, never guessed. An alrea
 (RequestSave branches to exactly the code this patch writes)."""
 from __future__ import annotations
 
-import re
 import struct
 
 from ...analysis import elf
@@ -36,7 +35,6 @@ from .unity_text_input import ALL_TARGETS, METADATA, Il2cppReturnPatch, can_rewr
 
 PACKAGE = "com.ubisoft.justdancevr"
 LIB = "libil2cpp.so"
-MIN_VERSION = (0, 5, 4)  # the first build seen without a local save; later ones are checked the same way
 RET = 0xD65F03C0
 EVENTS = "Neon/Neon/Gameplay/LocalSave/LocalSaveEvents.cs"
 ARGS = "Neon/Neon/Gameplay/LocalSave/LocalSaveEventArgs.cs"
@@ -47,12 +45,6 @@ for _cls, _names in WANTED.items():  # one Cpp2IL run (and cache entry) serves e
     ALL_TARGETS[_cls] += [n for n in _names if n not in ALL_TARGETS[_cls]]
 BODY_WORDS = 24
 
-
-def version_tuple(text: str | None) -> tuple[int, ...]:
-    """"0.5.4" -> (0, 5, 4); "1.0" -> (1, 0, 0); leading digits only ("0.6.1-b2" -> (0, 6, 1))."""
-    m = re.match(r"\s*(\d+(?:\.\d+)*)", text or "")
-    parts = tuple(int(p) for p in m.group(1).split(".")) if m else ()
-    return (parts + (0, 0, 0))[:max(3, len(parts))]
 
 
 # ---- AArch64 encoders (only what the new body needs)
@@ -261,8 +253,8 @@ def patch_library(lib: bytes, found: dict) -> tuple[bytes | None, dict]:
 class JustDanceLocalSave(Il2cppReturnPatch):
     id = "frame.justdance_local_save"
     title = "Just Dance VR: keep progress in the local save"
-    description = ("Just Dance VR (GitHub #480) loads its progress from a local save at start, but from 0.5.4 the "
-                   "method that writes it (LocalSaveEvents.RequestSave) is empty: on a Quest the progress is kept by "
+    description = ("Just Dance VR (GitHub #480) loads its progress from a local save at start, but the method that "
+                   "writes it (LocalSaveEvents.RequestSave) is empty: on a Quest the progress is kept by "
                    "Ubisoft's online backend after a Meta sign-in, which the Frame doesn't have, so progress, unlocks "
                    "and the finished tutorial were lost at every restart. The method gets the body it is declared "
                    "with (raise the SaveValueRequested event the game's own save system listens to), built from its "
@@ -276,8 +268,7 @@ class JustDanceLocalSave(Il2cppReturnPatch):
               "progress is lost at every restart on the Frame.")
 
     def applies(self, a):
-        return (a.package == PACKAGE and "arm64-v8a" in a.abis and LIB in a.libs
-                and version_tuple(a.version) >= MIN_VERSION)
+        return a.package == PACKAGE and "arm64-v8a" in a.abis and LIB in a.libs
 
     def detect(self, a):
         if self.applies(a) and can_rewrite_il2cpp(a):
