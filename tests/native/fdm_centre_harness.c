@@ -15,7 +15,15 @@
             return 1;                                                                                                  \
         }                                                                                                              \
     } while (0)
-#define LOG(...) ((void)0)
+#include <stdarg.h>
+static char last_log[1024];
+static void harness_log(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(last_log, sizeof(last_log), fmt, ap);
+    va_end(ap);
+}
+#define LOG(...) harness_log(__VA_ARGS__)
 #define EXPORT
 #define MAX_HANDLES 16
 static void take_lock(int *p) { while (__atomic_exchange_n(p, 1, __ATOMIC_ACQUIRE)) {} }
@@ -58,6 +66,20 @@ static VKAPI_ATTR VkResult VKAPI_CALL n_CreateFramebuffer(VkDevice d, const VkFr
     *fb = (VkFramebuffer)(next_handle += 8);
     return VK_SUCCESS;
 }
+static VKAPI_ATTR VkResult VKAPI_CALL n_CreateGraphicsPipelines(VkDevice d, VkPipelineCache c, uint32_t n,
+                                                                const VkGraphicsPipelineCreateInfo *ci,
+                                                                const VkAllocationCallbacks *a, VkPipeline *p) {
+    (void)d, (void)c, (void)ci, (void)a;
+    for (uint32_t i = 0; i < n; ++i) p[i] = (VkPipeline)(next_handle += 8);
+    return VK_SUCCESS;
+}
+static int binds_seen;
+static VKAPI_ATTR void VKAPI_CALL n_CmdBindPipeline(VkCommandBuffer c, VkPipelineBindPoint b, VkPipeline p) {
+    (void)c, (void)b, (void)p;
+    ++binds_seen;
+}
+static VkPipeline bind_in_pass;  // FRAMEPORT_FDM_DIAG tests: bound between begin and end
+static VkRenderPass last_rp;
 static VKAPI_ATTR void VKAPI_CALL n_CmdBeginRenderPass2(VkCommandBuffer c, const VkRenderPassBeginInfo *b,
                                                         const VkSubpassBeginInfo *s) {
     (void)c, (void)b, (void)s;
@@ -117,6 +139,8 @@ static void pass_ex(uint32_t w, uint32_t h, const VkOffset2D *valve, uint32_t co
     VkRenderPassBeginInfo bi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
     bi.renderPass = rp, bi.framebuffer = fb, bi.renderArea.extent = (VkExtent2D){w, h};
     c_CmdBeginRenderPass2(cmd, &bi, NULL);
+    last_rp = rp;
+    if (bind_in_pass) c_CmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, bind_in_pass);
     if (valve) {
         c_offset_end o = {ST_FDM_OFFSET_END, NULL, count, valve};
         VkSubpassEndInfo e = {VK_STRUCTURE_TYPE_SUBPASS_END_INFO, &o};
@@ -139,6 +163,7 @@ int main(void) {
     d.CreateImage = n_CreateImage, d.CreateImageView = n_CreateImageView, d.CreateRenderPass2 = n_CreateRenderPass2;
     d.CreateFramebuffer = n_CreateFramebuffer, d.CmdBeginRenderPass2 = n_CmdBeginRenderPass2;
     d.CmdEndRenderPass2 = n_CmdEndRenderPass2, d.CmdEndRenderPass = n_CmdEndRenderPass;
+    d.CreateGraphicsPipelines = n_CreateGraphicsPipelines, d.CmdBindPipeline = n_CmdBindPipeline;
     c_devices[0] = d;
 
     // Valve's lo centre on a 2016x1728 swapchain (63x54 map, 32 px texels): texels 23-40 and 20-34
@@ -226,6 +251,53 @@ int main(void) {
     CHECK(!c_fixed && c_level == 3 && c_disabled);
     CHECK(c_has_token("enable,disable_offsets", "disable_offsets") && !c_has_token("enable", "disable_offsets"));
     CHECK(c_has_token("enable,hi", "hi") && !c_has_token("enable,high", "hi"));
+
+    // FRAMEPORT_FDM_DIAG: SPIR-V outputs. A vertex shader with a standalone Output ViewportIndex variable, one with
+    // Layer in an output block, and a fragment shader reading Layer as an input (not counted).
+    const uint32_t vs_vp[] = {0x07230203, 0x10000, 0, 20, 0,
+                              (4u << 16) | 15, 0, 1, 0,          // OpEntryPoint Vertex %1 "" (name truncated)
+                              (4u << 16) | 71, 5, 11, 10,        // OpDecorate %5 BuiltIn ViewportIndex
+                              (4u << 16) | 32, 4, 3, 2,          // %4 = OpTypePointer Output %2
+                              (4u << 16) | 59, 4, 5, 3};         // %5 = OpVariable %4 Output
+    CHECK(c_spirv_outputs(vs_vp, sizeof(vs_vp) / 4) == (1u | 1u << 8));
+    const uint32_t vs_block[] = {0x07230203, 0x10000, 0, 20, 0,
+                                 (5u << 16) | 72, 7, 1, 11, 9,   // OpMemberDecorate %7 1 BuiltIn Layer
+                                 (4u << 16) | 32, 8, 3, 7,       // %8 = OpTypePointer Output %7
+                                 (4u << 16) | 59, 8, 9, 3};      // %9 = OpVariable %8 Output
+    CHECK(c_spirv_outputs(vs_block, sizeof(vs_block) / 4) == 2u);
+    const uint32_t fs_in[] = {0x07230203, 0x10000, 0, 20, 0,
+                              (4u << 16) | 15, 4, 1, 0,          // OpEntryPoint Fragment
+                              (4u << 16) | 71, 5, 11, 9,         // OpDecorate %5 BuiltIn Layer
+                              (4u << 16) | 59, 4, 5, 1};         // %5 = OpVariable %4 Input
+    CHECK(c_spirv_outputs(fs_in, sizeof(fs_in) / 4) == 1u << 12);
+    CHECK(c_spirv_outputs(NULL, 0) == 0);
+
+    // FRAMEPORT_FDM_DIAG: a pipeline made for a render pass without a density map, bound inside a foveated pass,
+    // makes Turnip share one viewport scale; one made for the foveated pass doesn't
+    c_diag = 1, c_fixed = 0, c_level = 1, c_disabled = 0;
+    fp_fdm_set_views(views, 2);
+    pass(2016, 1728, zero, 2);  // creates a foveated render pass (last_rp)
+    VkPipelineShaderStageCreateInfo stages[2] = {{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO},
+                                                 {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO}};
+    stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT, stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    VkGraphicsPipelineCreateInfo gci = {VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+    gci.stageCount = 2, gci.pStages = stages, gci.renderPass = (VkRenderPass)0x7777;  // no density map
+    VkPipeline plain, foveated;
+    CHECK(c_CreateGraphicsPipelines((VkDevice)&device_obj, VK_NULL_HANDLE, 1, &gci, NULL, &plain) == VK_SUCCESS);
+    CHECK(strstr(last_log, "NO density map"));
+    gci.renderPass = last_rp;
+    snprintf(last_log, sizeof(last_log), "-");
+    CHECK(c_CreateGraphicsPipelines((VkDevice)&device_obj, VK_NULL_HANDLE, 1, &gci, NULL, &foveated) == VK_SUCCESS);
+    CHECK(!strcmp(last_log, "-"));  // not logged: nothing wrong with it
+    bind_in_pass = foveated;
+    pass(2016, 1728, zero, 2);
+    CHECK(strstr(last_log, "per-view scale") && strstr(last_log, "1 pipeline bind(s)") && binds_seen == 1);
+    bind_in_pass = plain;
+    pass(2016, 1728, zero, 2);
+    CHECK(strstr(last_log, "SHARED VIEWPORT") && binds_seen == 2);
+    CHECK(strstr(last_log, "handed down 2: v0 -24,-184"));
+    bind_in_pass = VK_NULL_HANDLE;
+    c_diag = 0;
     puts("ok");
     return 0;
 }

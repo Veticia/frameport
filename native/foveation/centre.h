@@ -17,6 +17,11 @@
 // (fp_fdm_set_views, every xrEndFrame): swapchain size, array layer, imageRect and the optical centre, all in the
 // Vulkan image's pixel rows. Passes are matched to views by framebuffer size and layer, like Valve matches maps.
 // Off with FRAMEPORT_FDM_CENTRE=0 (developers: compare against Valve's placement).
+// FRAMEPORT_FDM_DIAG=1 (as LEPTON_ENV_, off by default) logs, under the same tag, every view's offset as handed down
+// and which pipelines bound inside a foveated pass would make Turnip fall back to one shared viewport scale for all
+// views (pipeline without the density-map flag, or a pre-rasterization shader writing ViewportIndex): Turnip then
+// gives every view the finest fragment area of all views in each bin (tu_calc_frag_area, rp.shared_viewport), so
+// each eye gets the union of both eyes' sharp areas (GitHub #394, In Death / The 7th Guest).
 #define CENTRE_NAME "VK_LAYER_FRAMEPORT_fdm_centre"
 #define FP_FDM_MAX_VIEWS 4
 
@@ -32,6 +37,7 @@ static int c_lock;
 static int c_level = 1;      // Valve's preset: 1 lo, 2 med, 3 hi (FOVE_LEVEL / FDM_DEBUG, as Valve reads them)
 static int c_fixed;          // FramePort's Fixed mode (FDM_DEBUG had disable_offsets): ignore Valve's gaze
 static int c_disabled;       // FRAMEPORT_FDM_CENTRE=0
+static int c_diag;           // FRAMEPORT_FDM_DIAG=1: offsets and shared-viewport causes in the log
 
 EXPORT void fp_fdm_set_views(const fp_fdm_view *views, uint32_t count) {
     if (count > FP_FDM_MAX_VIEWS) count = FP_FDM_MAX_VIEWS;
@@ -71,12 +77,12 @@ static int c_obj_lock;
 // functions in vkCreateDevice.
 static int c_dev_lock;
 
-static c_slot *c_find(c_slot *t, uint64_t key, int create) {
+static c_slot *c_find_n(c_slot *t, uint32_t slots, uint64_t key, int create) {
     if (!key) return NULL;
-    uint32_t h = (uint32_t)((key * 0x9E3779B97F4A7C15ull) >> 53) & (C_SLOTS - 1);
+    uint32_t h = (uint32_t)((key * 0x9E3779B97F4A7C15ull) >> 40) & (slots - 1);
     c_slot *free_slot = NULL;
-    for (uint32_t i = 0; i < C_SLOTS; ++i) {
-        c_slot *s = &t[(h + i) & (C_SLOTS - 1)];
+    for (uint32_t i = 0; i < slots; ++i) {
+        c_slot *s = &t[(h + i) & (slots - 1)];
         if (s->key == key) return s;
         if (s->key == 0) { if (!free_slot) free_slot = s; break; }
         if (s->key == ~0ull && !free_slot) free_slot = s;
@@ -86,6 +92,7 @@ static c_slot *c_find(c_slot *t, uint64_t key, int create) {
     free_slot->key = key;
     return free_slot;
 }
+static c_slot *c_find(c_slot *t, uint64_t key, int create) { return c_find_n(t, C_SLOTS, key, create); }
 static void c_forget(c_slot *t, uint64_t key) {
     take_lock(&c_obj_lock);
     c_slot *s = c_find(t, key, 0);
@@ -116,6 +123,14 @@ typedef struct {
     PFN_vkCmdBeginRendering CmdBeginRendering, CmdBeginRenderingKHR;
     PFN_vkCmdEndRendering CmdEndRendering, CmdEndRenderingKHR;
     PFN_fp_EndRendering2 CmdEndRendering2EXT, CmdEndRendering2KHR;
+    // FRAMEPORT_FDM_DIAG only
+    PFN_vkCreateShaderModule CreateShaderModule;
+    PFN_vkDestroyShaderModule DestroyShaderModule;
+    PFN_vkCreateGraphicsPipelines CreateGraphicsPipelines;
+    PFN_vkDestroyPipeline DestroyPipeline;
+    PFN_vkCmdBindPipeline CmdBindPipeline;
+    PFN_vkBeginCommandBuffer BeginCommandBuffer;
+    PFN_vkCmdExecuteCommands CmdExecuteCommands;
 } c_device;
 static struct { void *key; VkInstance instance; PFN_vkGetInstanceProcAddr gipa; } c_instances[MAX_HANDLES];
 static c_device c_devices[MAX_HANDLES];
@@ -255,6 +270,272 @@ static VKAPI_ATTR void VKAPI_CALL c_DestroyFramebuffer(VkDevice device, VkFrameb
     c_dev(device)->DestroyFramebuffer(device, fb, a);
 }
 
+// ---------------------------------------------------------------- diagnostics (FRAMEPORT_FDM_DIAG=1)
+//
+// Turnip scales each view's viewport by that view's fragment area only when the bound pipeline has
+// program.per_view_viewport: the pre-rasterization stage doesn't write ViewportIndex, and the fragment shader was
+// compiled for a density map (render pass with a density-map attachment at pipeline creation, or dynamic rendering
+// with VK_PIPELINE_CREATE_RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_BIT_EXT), unless the app enabled
+// multiviewPerViewViewports. One draw with another pipeline sets rp.shared_viewport for the whole pass: the bins
+// aren't shifted by the offsets any more, each view's density is sampled at bin centre - its offset, and every view
+// gets the smallest fragment area of all views (tu_calc_frag_area). These counters say whether that happens.
+
+#define C_PIPE_SLOTS 16384
+#define CP_FDM 1u       // the driver sees a density map for this pipeline (fs.has_fdm)
+#define CP_VP 2u        // a pre-rasterization shader writes ViewportIndex
+#define CP_LAYER 4u     // ... writes Layer
+#define CP_DYN 8u       // dynamic rendering
+#define CP_LIB 16u      // pipeline library or linked from libraries
+#define CP_NOFS 32u     // no fragment shader in this (library) pipeline
+#define CP_SCANNED 64u  // the shader modules were seen
+#define CP_RISKY(b) (!((b) & CP_FDM) || ((b) & CP_VP))
+static c_slot c_mods[C_SLOTS], c_pdiag[C_SLOTS], c_pipes[C_PIPE_SLOTS];
+static int c_app_per_view_viewports;  // the app enabled multiviewPerViewViewports (QCOM)
+static uint64_t c_n_pipes, c_n_pipes_nofdm, c_n_pipes_vp, c_n_passes, c_n_shared, c_n_logged_pipes;
+
+// Output ViewportIndex (bit 0) / Layer (bit 1) of a SPIR-V module, plus 1 << (8 + execution model) per entry point.
+static uint32_t c_spirv_outputs(const uint32_t *code, size_t words) {
+    if (!code || words < 5 || code[0] != 0x07230203u) return 0;
+    enum { MAXID = 32 };
+    uint32_t ids[MAXID], idbits[MAXID], nids = 0;          // variables decorated BuiltIn ViewportIndex/Layer
+    uint32_t structs[MAXID], sbits[MAXID], nstructs = 0;   // block types with such a member
+    uint32_t ptrs[MAXID], pbits[MAXID], nptrs = 0;         // Output pointers to those blocks
+    uint32_t out = 0;
+    for (size_t i = 5; i < words;) {
+        uint32_t op = code[i] & 0xffff, wc = code[i] >> 16;
+        if (!wc || i + wc > words) break;
+        const uint32_t *w = code + i;
+        if (op == 15 && wc >= 2 && w[1] < 16) out |= 1u << (8 + w[1]);  // OpEntryPoint
+        uint32_t bit = 0;
+        if (op == 71 && wc >= 4 && w[2] == 11) bit = w[3] == 10 ? 1 : w[3] == 9 ? 2 : 0;  // OpDecorate BuiltIn
+        if (op == 72 && wc >= 5 && w[3] == 11) bit = w[4] == 10 ? 1 : w[4] == 9 ? 2 : 0;  // OpMemberDecorate
+        if (bit && op == 71 && nids < MAXID) ids[nids] = w[1], idbits[nids++] = bit;
+        if (bit && op == 72) {
+            uint32_t k = 0;
+            while (k < nstructs && structs[k] != w[1]) ++k;
+            if (k == nstructs && nstructs < MAXID) structs[nstructs] = w[1], sbits[nstructs++] = 0;
+            if (k < nstructs) sbits[k] |= bit;
+        }
+        if (op == 32 && wc >= 4 && w[2] == 3)  // OpTypePointer Output
+            for (uint32_t k = 0; k < nstructs; ++k)
+                if (structs[k] == w[3] && nptrs < MAXID) ptrs[nptrs] = w[1], pbits[nptrs++] = sbits[k];
+        if (op == 59 && wc >= 4 && w[3] == 3) {  // OpVariable Output
+            for (uint32_t k = 0; k < nids; ++k)
+                if (ids[k] == w[2]) out |= idbits[k];
+            for (uint32_t k = 0; k < nptrs; ++k)
+                if (ptrs[k] == w[1]) out |= pbits[k];
+        }
+        i += wc;
+    }
+    return out;
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL c_CreateShaderModule(VkDevice device, const VkShaderModuleCreateInfo *ci,
+                                                           const VkAllocationCallbacks *a, VkShaderModule *module) {
+    VkResult r = c_dev(device)->CreateShaderModule(device, ci, a, module);
+    if (r == VK_SUCCESS) {
+        uint32_t bits = c_spirv_outputs(ci->pCode, ci->codeSize / 4);
+        take_lock(&c_obj_lock);
+        c_slot *s = c_find(c_mods, H(*module), 1);
+        if (s) s->a = bits | 0x80000000u;  // high bit: seen
+        drop_lock(&c_obj_lock);
+    }
+    return r;
+}
+static VKAPI_ATTR void VKAPI_CALL c_DestroyShaderModule(VkDevice device, VkShaderModule m, const VkAllocationCallbacks *a) {
+    c_forget(c_mods, H(m));
+    c_dev(device)->DestroyShaderModule(device, m, a);
+}
+
+#define ST_PIPELINE_FLAGS2 ((VkStructureType)1000470005)     // VkPipelineCreateFlags2CreateInfo
+#define ST_PIPELINE_RENDERING ((VkStructureType)1000044002)  // VkPipelineRenderingCreateInfo
+#define ST_PIPELINE_LIBRARY ((VkStructureType)1000290000)    // VkPipelineLibraryCreateInfoKHR
+#define PIPE_FDM_FLAG 0x400000ull  // VK_PIPELINE_CREATE(_2)_RENDERING_FRAGMENT_DENSITY_MAP_ATTACHMENT_BIT_EXT
+#define PIPE_LIBRARY_FLAG 0x800ull
+typedef struct { VkStructureType sType; const void *pNext; uint64_t flags; } c_flags2;
+typedef struct { VkStructureType sType; const void *pNext; uint32_t count; const VkPipeline *libs; } c_libinfo;
+
+// What Turnip will decide for this pipeline: bits CP_*, view mask << 32
+static uint64_t c_pipeline_bits(const VkGraphicsPipelineCreateInfo *ci) {
+    uint64_t flags = ci->flags;
+    const c_flags2 *f2 = (const void *)c_chain(ci->pNext, ST_PIPELINE_FLAGS2);
+    if (f2) flags = f2->flags;
+    uint32_t bits = 0, mask = 0, fs = 0;
+    take_lock(&c_obj_lock);
+    if (ci->renderPass) {
+        c_slot *rp = c_find(c_rps, H(ci->renderPass), 0);  // only passes with a density-map attachment are noted
+        if (rp) bits |= CP_FDM, mask = (uint32_t)rp->b;
+    } else {
+        bits |= CP_DYN;
+        if (flags & PIPE_FDM_FLAG) bits |= CP_FDM;
+        const VkPipelineRenderingCreateInfo *pr = (const void *)c_chain(ci->pNext, ST_PIPELINE_RENDERING);
+        if (pr) mask = pr->viewMask;
+    }
+    for (uint32_t i = 0; ci->pStages && i < ci->stageCount; ++i) {
+        const VkPipelineShaderStageCreateInfo *st = &ci->pStages[i];
+        uint32_t out = 0;
+        if (st->module) {
+            c_slot *m = c_find(c_mods, H(st->module), 0);
+            if (m) out = (uint32_t)m->a, bits |= CP_SCANNED;
+        } else {
+            const VkShaderModuleCreateInfo *inl =
+                (const void *)c_chain(st->pNext, VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO);
+            if (inl) out = c_spirv_outputs(inl->pCode, inl->codeSize / 4), bits |= CP_SCANNED;
+        }
+        if (st->stage == VK_SHADER_STAGE_FRAGMENT_BIT) fs = 1;
+        else bits |= (out & 1 ? CP_VP : 0) | (out & 2 ? CP_LAYER : 0);
+    }
+    const c_libinfo *libs = (const void *)c_chain(ci->pNext, ST_PIPELINE_LIBRARY);
+    for (uint32_t i = 0; libs && libs->libs && i < libs->count; ++i) {
+        c_slot *l = c_find_n(c_pipes, C_PIPE_SLOTS, H(libs->libs[i]), 0);
+        if (l) {
+            bits |= (uint32_t)l->a & (CP_FDM | CP_VP | CP_LAYER | CP_SCANNED);
+            if (!((uint32_t)l->a & CP_NOFS)) fs = 1;
+            if (!mask) mask = (uint32_t)(l->a >> 32);
+        }
+    }
+    drop_lock(&c_obj_lock);
+    if (libs || (flags & PIPE_LIBRARY_FLAG)) bits |= CP_LIB;
+    if (!fs) bits |= CP_NOFS;
+    return bits | (uint64_t)mask << 32;
+}
+
+static VKAPI_ATTR VkResult VKAPI_CALL c_CreateGraphicsPipelines(VkDevice device, VkPipelineCache cache, uint32_t count,
+                                                                const VkGraphicsPipelineCreateInfo *ci,
+                                                                const VkAllocationCallbacks *a, VkPipeline *pipes) {
+    VkResult r = c_dev(device)->CreateGraphicsPipelines(device, cache, count, ci, a, pipes);
+    for (uint32_t i = 0; r >= 0 && i < count; ++i) {
+        if (!pipes[i]) continue;
+        uint64_t b = c_pipeline_bits(&ci[i]);
+        uint32_t bits = (uint32_t)b;
+        take_lock(&c_obj_lock);
+        c_slot *s = c_find_n(c_pipes, C_PIPE_SLOTS, H(pipes[i]), 1);
+        if (s) s->a = b, s->b = H(ci[i].renderPass);
+        ++c_n_pipes;
+        if (!(bits & CP_FDM)) ++c_n_pipes_nofdm;
+        if (bits & CP_VP) ++c_n_pipes_vp;
+        int log_it = CP_RISKY(bits) && !(bits & CP_NOFS) && c_n_logged_pipes < 24;
+        if (log_it) ++c_n_logged_pipes;
+        unsigned long long n = c_n_pipes, nofdm = c_n_pipes_nofdm, vp = c_n_pipes_vp;
+        drop_lock(&c_obj_lock);
+        if (log_it || !s)
+            LOG("fdm_diag: pipeline %p (%s, render pass %p subpass %u, view mask 0x%x, flags 0x%x): %s%s%s%s%s%s "
+                "[pipelines so far %llu, without density map %llu, writing ViewportIndex %llu]", (void *)pipes[i],
+                bits & CP_DYN ? "dynamic rendering" : "render pass", (void *)ci[i].renderPass, ci[i].subpass,
+                (uint32_t)(b >> 32), (uint32_t)ci[i].flags, bits & CP_FDM ? "density map" : "NO density map",
+                bits & CP_VP ? ", writes ViewportIndex" : "", bits & CP_LAYER ? ", writes Layer" : "",
+                bits & CP_LIB ? ", library" : "", bits & CP_SCANNED ? "" : ", shaders not seen",
+                s ? "" : ", NOT TRACKED (table full)", n, nofdm, vp);
+    }
+    return r;
+}
+static VKAPI_ATTR void VKAPI_CALL c_DestroyPipeline(VkDevice device, VkPipeline p, const VkAllocationCallbacks *a) {
+    take_lock(&c_obj_lock);
+    c_slot *s = c_find_n(c_pipes, C_PIPE_SLOTS, H(p), 0);
+    if (s) s->key = ~0ull;
+    drop_lock(&c_obj_lock);
+    c_dev(device)->DestroyPipeline(device, p, a);
+}
+
+// pass diagnostics per command buffer: a = graphics binds, b = binds Turnip shares one viewport scale for, c = binds
+// writing ViewportIndex, d = bits of the first such pipeline | 1 << 31 (low half); 1 << 63: a secondary begun inside
+// a foveated render pass, 1 << 62: the pass executed secondaries
+static void c_pdiag_start(VkCommandBuffer cmd, int secondary) {
+    if (!c_diag) return;
+    take_lock(&c_obj_lock);
+    c_slot *s = c_find(c_pdiag, H(cmd), 1);
+    if (s) s->a = s->b = s->c = 0, s->d = secondary ? 1ull << 63 : 0;
+    drop_lock(&c_obj_lock);
+}
+static VKAPI_ATTR void VKAPI_CALL c_CmdBindPipeline(VkCommandBuffer cmd, VkPipelineBindPoint point, VkPipeline p) {
+    if (point == VK_PIPELINE_BIND_POINT_GRAPHICS) {
+        take_lock(&c_obj_lock);
+        c_slot *s = c_find(c_pdiag, H(cmd), 0);
+        if (s) {
+            c_slot *pp = c_find_n(c_pipes, C_PIPE_SLOTS, H(p), 0);
+            uint32_t bits = pp ? (uint32_t)pp->a : 0;
+            ++s->a;
+            if (pp && CP_RISKY(bits) && !c_app_per_view_viewports) {
+                ++s->b;
+                if (!(s->d & 0xffffffffull)) s->d |= bits | 0x80000000u;
+            }
+            if (bits & CP_VP) ++s->c;
+        }
+        drop_lock(&c_obj_lock);
+    }
+    c_dev(cmd)->CmdBindPipeline(cmd, point, p);
+}
+static VKAPI_ATTR VkResult VKAPI_CALL c_BeginCommandBuffer(VkCommandBuffer cmd, const VkCommandBufferBeginInfo *info) {
+    c_forget(c_pdiag, H(cmd));
+    const VkCommandBufferInheritanceInfo *inh = info ? info->pInheritanceInfo : NULL;
+    if (inh && inh->renderPass && (info->flags & VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT)) {
+        take_lock(&c_obj_lock);
+        int fdm = c_find(c_rps, H(inh->renderPass), 0) != NULL;
+        drop_lock(&c_obj_lock);
+        if (fdm) c_pdiag_start(cmd, 1);
+    }
+    return c_dev(cmd)->BeginCommandBuffer(cmd, info);
+}
+static VKAPI_ATTR void VKAPI_CALL c_CmdExecuteCommands(VkCommandBuffer cmd, uint32_t n, const VkCommandBuffer *subs) {
+    take_lock(&c_obj_lock);
+    c_slot *s = c_find(c_pdiag, H(cmd), 0);
+    for (uint32_t i = 0; s && subs && i < n; ++i) {
+        c_slot *sub = c_find(c_pdiag, H(subs[i]), 0);
+        if (!sub) continue;
+        s->a += sub->a, s->b += sub->b, s->c += sub->c;
+        if (!(s->d & 0xffffffffull)) s->d |= sub->d & 0xffffffffull;
+        s->d |= 1ull << 62;
+    }
+    drop_lock(&c_obj_lock);
+    c_dev(cmd)->CmdExecuteCommands(cmd, n, subs);
+}
+
+// The pass's summary at its end: the offsets as handed down and whether Turnip shares one viewport scale
+typedef struct {
+    uint32_t fbw, fbh, mw, mh, first, map_layers, n, flagged;
+    int32_t eye[FP_FDM_MAX_VIEWS];  // index into views[] per offset, -1: no single matching view
+    fp_fdm_view views[FP_FDM_MAX_VIEWS];
+    float vx, vy;
+} c_pass_info;
+static void c_diag_pass(VkCommandBuffer cmd, const c_pass_info *pi, uint32_t in_count, const VkOffset2D *in,
+                        const VkOffset2D *out, uint32_t handed) {
+    take_lock(&c_obj_lock);
+    c_slot *s = c_find(c_pdiag, H(cmd), 0);
+    uint64_t binds = s ? s->a : 0, shared = s ? s->b : 0, vp = s ? s->c : 0, d = s ? s->d : 0;
+    if (s) s->key = ~0ull;
+    uint64_t pass_no = ++c_n_passes;
+    if (shared) ++c_n_shared;
+    uint64_t total_shared = c_n_shared;
+    drop_lock(&c_obj_lock);
+    if (!(pass_no <= 40 || pass_no % 1000 == 0 || (shared && total_shared <= 20))) return;
+    char text[640];
+    int len = snprintf(text, sizeof(text), "fdm_diag: pass #%llu %ux%u map %ux%u layer %u+%u%s, Valve centre %.0f,%.0f: "
+                       "%llu pipeline bind(s)%s, %llu Turnip shares one viewport for%s (first: 0x%x), %llu writing "
+                       "ViewportIndex -> %s [%llu of %llu passes shared]; offsets in %u:",
+                       (unsigned long long)pass_no, pi->fbw, pi->fbh, pi->mw, pi->mh, pi->first, pi->map_layers,
+                       pi->flagged ? "" : " (map without offset flag)", pi->vx, pi->vy, (unsigned long long)binds,
+                       d >> 62 ? " incl. secondaries" : "", (unsigned long long)shared,
+                       c_app_per_view_viewports ? " (app enabled per-view viewports)" : "", (uint32_t)d & 0x7fffffffu,
+                       (unsigned long long)vp, shared ? "SHARED VIEWPORT (each view gets all views' sharp bins)"
+                                                      : "per-view scale", (unsigned long long)total_shared,
+                       (unsigned long long)pass_no, in_count);
+    for (uint32_t v = 0; in && v < pi->n && v < FP_FDM_MAX_VIEWS && len > 0 && len < (int)sizeof(text); ++v)
+        len += snprintf(text + len, sizeof(text) - (size_t)len, " %d,%d", in[v].x, in[v].y);
+    if (len > 0 && len < (int)sizeof(text))
+        len += snprintf(text + len, sizeof(text) - (size_t)len, "; handed down %u:", handed);
+    for (uint32_t v = 0; v < handed && v < FP_FDM_MAX_VIEWS && len > 0 && len < (int)sizeof(text); ++v) {
+        const fp_fdm_view *e = pi->eye[v] >= 0 ? &pi->views[pi->eye[v]] : NULL;
+        if (e)
+            len += snprintf(text + len, sizeof(text) - (size_t)len,
+                            " v%u %d,%d (layer %u rect %d,%d %dx%d centre %.0f,%.0f -> sharp at %.0f,%.0f)", v,
+                            out[v].x, out[v].y, e->layer, e->x, e->y, e->w, e->h, e->cx, e->cy, pi->vx + out[v].x,
+                            pi->vy + out[v].y);
+        else
+            len += snprintf(text + len, sizeof(text) - (size_t)len, " v%u %d,%d (no view)", v, out[v].x, out[v].y);
+    }
+    LOG("%s", text);
+}
+
 // The number of density-map offsets Turnip reads at the end of a pass, whatever count it is given
 // (tu_fdm_num_layers): the multiview view count, else the framebuffer's layers (per-layer maps) or 1.
 static uint32_t c_pass_views(uint32_t view_mask, uint32_t layers) {
@@ -279,6 +560,7 @@ static void c_begin(VkCommandBuffer cmd, uint32_t fbw, uint32_t fbh, VkImageView
         s->d = iv ? ((views & 0xffff) | (iv->d & 0xffff) << 16 | (iv->d >> 32) << 32) : 0;
     }
     drop_lock(&c_obj_lock);
+    if (iv) c_pdiag_start(cmd, 0);
 }
 static void c_begin_rp(VkCommandBuffer cmd, const VkRenderPassBeginInfo *info) {
     if (c_disabled || !info) return;
@@ -335,24 +617,27 @@ static int c_round(float v, uint32_t gran) {
 // fragmentDensityOffsetCount says. Valve's layer computes one per view into its array but declares count 1 for a
 // two-view pass, so with Valve alone Turnip reads the right eye's offset beyond the count: in[v] is read for every
 // view here too (the same memory the driver reads), and every entry handed down is written.
-static uint32_t c_offsets(VkCommandBuffer cmd, c_device *d, uint32_t in_count, const VkOffset2D *in, VkOffset2D *out) {
+static uint32_t c_offsets_for(VkCommandBuffer cmd, c_device *d, uint32_t in_count, const VkOffset2D *in,
+                              VkOffset2D *out, c_pass_info *pi) {
     take_lock(&c_obj_lock);
     c_slot *s = c_find(c_cmds, H(cmd), 0);
     uint64_t size = s ? s->a : 0, map = s ? s->b : 0, flags = s ? s->c : 0, shape = s ? s->d : 0;
     if (s) s->key = ~0ull;  // one pass at a time per command buffer
     drop_lock(&c_obj_lock);
-    // A map Valve made without the offset flag (its offsets off): Turnip ignores offsets, change nothing.
-    if (!map || !(flags & FDM_OFFSET_FLAG)) return 0;
     uint32_t n = (uint32_t)(shape & 0xffff), first = (uint32_t)((shape >> 16) & 0xffff);
     uint32_t map_layers = (uint32_t)(shape >> 32);
-    if (!n || n > FP_FDM_MAX_VIEWS) return 0;
     uint32_t fbw = (uint32_t)size, fbh = (uint32_t)(size >> 32), mw = (uint32_t)map, mh = (uint32_t)(map >> 32);
-    fp_fdm_view views[FP_FDM_MAX_VIEWS];
+    float vx = c_valve_centre(fbw, mw, 0), vy = c_valve_centre(fbh, mh, 1);
+    *pi = (c_pass_info){fbw, fbh, mw, mh, first, map_layers, map ? n : 0, (flags & FDM_OFFSET_FLAG) != 0,
+                        {-1, -1, -1, -1}, {{0}}, vx, vy};
+    fp_fdm_view *views = pi->views;
     take_lock(&c_lock);
     uint32_t nviews = c_view_count;
-    memcpy(views, c_views, sizeof(views));
+    memcpy(views, c_views, sizeof(c_views));
     drop_lock(&c_lock);
-    float vx = c_valve_centre(fbw, mw, 0), vy = c_valve_centre(fbh, mh, 1);
+    // A map Valve made without the offset flag (its offsets off): Turnip ignores offsets, change nothing.
+    if (!map || !(flags & FDM_OFFSET_FLAG)) return 0;
+    if (!n || n > FP_FDM_MAX_VIEWS) return 0;
     if (!in_count) in = NULL;  // no offsets from Valve at all
     // Valve's gaze (Eye-tracked); all zero when it has none (no eye tracking): straight ahead then
     int gaze = 0;
@@ -368,6 +653,7 @@ static uint32_t c_offsets(VkCommandBuffer cmd, c_device *d, uint32_t in_count, c
         for (uint32_t i = 0; i < nviews; ++i)
             if (views[i].width == fbw && views[i].height == fbh && views[i].layer == layer) e = &views[i], ++candidates;
         if (candidates != 1) continue;  // e.g. both eyes side by side in one layer: one map can't serve both
+        pi->eye[v] = (int32_t)(e - views);
         float dx = e->cx, dy = e->cy;
         if (gaze) {
             // Valve: gaze NDC * render-area half size from the swapchain centre; the gaze is in the eye's view
@@ -385,6 +671,13 @@ static uint32_t c_offsets(VkCommandBuffer cmd, c_device *d, uint32_t in_count, c
             c_fixed ? "Fixed" : gaze ? "gaze" : "no gaze", n, in_count, in_count ? in[0].x : 0, in_count ? in[0].y : 0,
             out[0].x, out[0].y, n > 1 ? " (+ more views)" : "");
     return matched ? n : 0;
+}
+static uint32_t c_offsets(VkCommandBuffer cmd, c_device *d, uint32_t in_count, const VkOffset2D *in, VkOffset2D *out) {
+    c_pass_info pi;
+    memset(&pi, 0, sizeof(pi));
+    uint32_t n = c_offsets_for(cmd, d, in_count, in, out, &pi);
+    if (c_diag && pi.n) c_diag_pass(cmd, &pi, in_count, in_count ? in : NULL, n ? out : in, n ? n : in_count);
+    return n;
 }
 
 static VKAPI_ATTR void VKAPI_CALL c_end_rp2(VkCommandBuffer cmd, const VkSubpassEndInfo *info, int khr) {
@@ -528,7 +821,33 @@ static VKAPI_ATTR VkResult VKAPI_CALL c_CreateDevice(VkPhysicalDevice pd, const 
     C_GET(CmdBeginRendering, "vkCmdBeginRendering") C_GET(CmdBeginRenderingKHR, "vkCmdBeginRenderingKHR")
     C_GET(CmdEndRendering, "vkCmdEndRendering") C_GET(CmdEndRenderingKHR, "vkCmdEndRenderingKHR")
     C_GET(CmdEndRendering2EXT, "vkCmdEndRendering2EXT") C_GET(CmdEndRendering2KHR, "vkCmdEndRendering2KHR")
+    C_GET(CreateShaderModule, "vkCreateShaderModule") C_GET(DestroyShaderModule, "vkDestroyShaderModule")
+    C_GET(CreateGraphicsPipelines, "vkCreateGraphicsPipelines") C_GET(DestroyPipeline, "vkDestroyPipeline")
+    C_GET(CmdBindPipeline, "vkCmdBindPipeline") C_GET(BeginCommandBuffer, "vkBeginCommandBuffer")
+    C_GET(CmdExecuteCommands, "vkCmdExecuteCommands")
 #undef C_GET
+    if (c_diag) {
+        // VkPhysicalDeviceMultiviewPerViewViewportsFeaturesQCOM: with it Turnip keeps per-view viewports for every
+        // pipeline that doesn't write ViewportIndex
+        const VkBaseInStructure *pv = c_chain(ci->pNext, (VkStructureType)1000488000);
+        c_app_per_view_viewports = pv && ((const struct { VkStructureType t; const void *n; VkBool32 on; } *)pv)->on;
+        uint32_t fdm_feature = 0;
+        const VkBaseInStructure *fd = c_chain(ci->pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_FEATURES_EXT);
+        if (fd) fdm_feature = ((const VkPhysicalDeviceFragmentDensityMapFeaturesEXT *)fd)->fragmentDensityMap;
+        int multiview = 0;
+        const VkBaseInStructure *mv = c_chain(ci->pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES);
+        if (mv) multiview = ((const VkPhysicalDeviceMultiviewFeatures *)mv)->multiview;
+        const VkBaseInStructure *v11 = c_chain(ci->pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES);
+        if (v11) multiview |= ((const VkPhysicalDeviceVulkan11Features *)v11)->multiview;
+        char exts[512] = "";
+        for (uint32_t i = 0; i < ci->enabledExtensionCount; ++i)
+            if (strstr(ci->ppEnabledExtensionNames[i], "density") || strstr(ci->ppEnabledExtensionNames[i], "multiview") ||
+                strstr(ci->ppEnabledExtensionNames[i], "dynamic_rendering") || strstr(ci->ppEnabledExtensionNames[i], "library"))
+                snprintf(exts + strlen(exts), sizeof(exts) - strlen(exts), " %s", ci->ppEnabledExtensionNames[i]);
+        LOG("fdm_diag: device %p: multiviewPerViewViewports %s, fragmentDensityMap feature %u, multiview %d, "
+            "extensions:%s", (void *)*device, c_app_per_view_viewports ? "ENABLED by the app" : "off", fdm_feature,
+            multiview, exts);
+    }
     PFN_vkGetPhysicalDeviceProperties2 props2 =
         (PFN_vkGetPhysicalDeviceProperties2)next_gipa(instance, "vkGetPhysicalDeviceProperties2");
     struct { VkStructureType sType; void *pNext; VkExtent2D gran; } offset_props = {ST_FDM_OFFSET_PROPS, NULL, {0, 0}};
@@ -599,6 +918,15 @@ static PFN_vkVoidFunction c_own(const char *name, const c_device *d) {
     C_OWN("vkCmdEndRenderingKHR", c_CmdEndRenderingKHR, CmdEndRenderingKHR)
     C_OWN("vkCmdEndRendering2EXT", c_CmdEndRendering2EXT, CmdEndRendering2EXT)
     C_OWN("vkCmdEndRendering2KHR", c_CmdEndRendering2KHR, CmdEndRendering2KHR)
+    if (c_diag) {
+        C_OWN("vkCreateShaderModule", c_CreateShaderModule, CreateShaderModule)
+        C_OWN("vkDestroyShaderModule", c_DestroyShaderModule, DestroyShaderModule)
+        C_OWN("vkCreateGraphicsPipelines", c_CreateGraphicsPipelines, CreateGraphicsPipelines)
+        C_OWN("vkDestroyPipeline", c_DestroyPipeline, DestroyPipeline)
+        C_OWN("vkCmdBindPipeline", c_CmdBindPipeline, CmdBindPipeline)
+        C_OWN("vkBeginCommandBuffer", c_BeginCommandBuffer, BeginCommandBuffer)
+        C_OWN("vkCmdExecuteCommands", c_CmdExecuteCommands, CmdExecuteCommands)
+    }
 #undef C_OWN
     return NULL;
 }
@@ -628,6 +956,8 @@ static void c_read_config(void) {
     int explicit = c_has_token(level, "hi") ? 3 : c_has_token(level, "med") ? 2 : c_has_token(level, "lo") ? 1 : 0;
     if (explicit) c_level = explicit;
     c_disabled = off && !strcmp(off, "0");
+    const char *diag = getenv("FRAMEPORT_FDM_DIAG");
+    c_diag = diag && !strcmp(diag, "1");
 }
 
 // Fixed mode: let Valve run with its offsets on (it then flags the images it should, and passes per-view offsets
