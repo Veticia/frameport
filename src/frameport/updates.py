@@ -646,7 +646,11 @@ if (Get-Process -Id {pid} -ErrorAction SilentlyContinue) {{
   exit 1
 }}
 Start-Sleep -Milliseconds 500
-$src = {_ps_quote(app)}.TrimEnd('\\'); $dst = {_ps_quote(target)}.TrimEnd('\\')
+$src = {_ps_quote(app)}; $dst = {_ps_quote(target)}
+# the folders' long names: Get-ChildItem lists 8.3 paths (C:\\Users\\RUNNER~1\\...) under their long names, and the
+# relative paths below are cut from those
+$src = (Get-Item -LiteralPath $src -Force).FullName.TrimEnd('\\')
+$dst = (Get-Item -LiteralPath $dst -Force).FullName.TrimEnd('\\')
 $backup = Join-Path (Split-Path -Parent $src) 'previous'
 # every file of the new version, relative to its folder
 $new = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
