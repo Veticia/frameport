@@ -505,20 +505,21 @@ static void c_diag_pass(VkCommandBuffer cmd, const c_pass_info *pi, uint32_t in_
     if (s) s->key = ~0ull;
     uint64_t pass_no = ++c_n_passes;
     if (shared) ++c_n_shared;
-    uint64_t total_shared = c_n_shared;
+    unsigned long long total_shared = c_n_shared, pipes = c_n_pipes, nofdm = c_n_pipes_nofdm, vpw = c_n_pipes_vp;
     drop_lock(&c_obj_lock);
     if (!(pass_no <= 40 || pass_no % 1000 == 0 || (shared && total_shared <= 20))) return;
     char text[640];
     int len = snprintf(text, sizeof(text), "fdm_diag: pass #%llu %ux%u map %ux%u layer %u+%u%s, Valve centre %.0f,%.0f: "
                        "%llu pipeline bind(s)%s, %llu Turnip shares one viewport for%s (first: 0x%x), %llu writing "
-                       "ViewportIndex -> %s [%llu of %llu passes shared]; offsets in %u:",
+                       "ViewportIndex -> %s [%llu of %llu passes shared; pipelines created %llu, without density map "
+                       "%llu, writing ViewportIndex %llu]; offsets in %u:",
                        (unsigned long long)pass_no, pi->fbw, pi->fbh, pi->mw, pi->mh, pi->first, pi->map_layers,
                        pi->flagged ? "" : " (map without offset flag)", pi->vx, pi->vy, (unsigned long long)binds,
                        d >> 62 ? " incl. secondaries" : "", (unsigned long long)shared,
                        c_app_per_view_viewports ? " (app enabled per-view viewports)" : "", (uint32_t)d & 0x7fffffffu,
                        (unsigned long long)vp, shared ? "SHARED VIEWPORT (each view gets all views' sharp bins)"
-                                                      : "per-view scale", (unsigned long long)total_shared,
-                       (unsigned long long)pass_no, in_count);
+                                                      : "per-view scale", total_shared,
+                       (unsigned long long)pass_no, pipes, nofdm, vpw, in_count);
     for (uint32_t v = 0; in && v < pi->n && v < FP_FDM_MAX_VIEWS && len > 0 && len < (int)sizeof(text); ++v)
         len += snprintf(text + len, sizeof(text) - (size_t)len, " %d,%d", in[v].x, in[v].y);
     if (len > 0 && len < (int)sizeof(text))

@@ -295,6 +295,7 @@ int main(void) {
     bind_in_pass = plain;
     pass(2016, 1728, zero, 2);
     CHECK(strstr(last_log, "SHARED VIEWPORT") && binds_seen == 2);
+    CHECK(strstr(last_log, "pipelines created 2, without density map 1, writing ViewportIndex 0"));
     CHECK(strstr(last_log, "handed down 2: v0 -24,-184"));
     bind_in_pass = VK_NULL_HANDLE;
     c_diag = 0;

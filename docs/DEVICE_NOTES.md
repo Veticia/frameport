@@ -1176,6 +1176,23 @@ black, so headset checks of the picture should be done with the test off. Headle
 straight-ahead gaze lands on the optical centre, which confirms the NDC re-basing). Not done: Khronos validation, a
 GLES game, a real gaze.
 
+**Residual offset: the bin grid in map space (2026-10-25, In Death).** Report: with the centring layer the sharp
+area sits slightly towards the temple in In Death and The 7th Guest (mirrored optical centres), while Asgard's Wrath 2
+is fine. Suspected Turnip's shared-viewport fallback (a pipeline without the density-map flag, or one writing
+ViewportIndex, sets `rp.shared_viewport` for the pass: the bins stop sliding with the offsets and every view gets the
+finest area of all views, i.e. the union of both eyes' sharp bins). `FRAMEPORT_FDM_DIAG=1` (as `LEPTON_ENV_`) makes the
+centring layer log each pass's offsets as handed down and every pipeline/bind that would trigger it. Headless, In
+Death 1x Fixed Large, darkening test, `snapshot=15`: swapchain 2768x2768, rect 0,0 1730x1730, optical centres
+1004,697 / 715,709, map 87x87; 6000+ passes, **0 shared** (no pipeline without the map or writing ViewportIndex), and
+each eye's sharp area is its own 768x672 block, not a union. So that fallback isn't it. What is: Turnip samples the map
+at bin centres on a grid **anchored at 0 in map space** (bins slide with the offset: screen bin centre s samples
+s - offset), so the sharp area is the bins (here 192x224 px) whose map-space centre falls in Valve's sharp texels
+1024-1824: map 960-1728 x 1120-1792, centre 1344,1456 instead of the texel centre 1424,1424 the layer assumes. Shifted
+by the offsets that gives exactly the measured areas (left eye x 544-1312 y 392-1064, right eye x 248-1016 y 408-1080):
+both eyes -80,+32 px (-4.6%, +1.9% of the rect) off their optical centres, the same direction in both eyes. The error
+depends on the bin size (Turnip's tile0: GMEM, attachments, views) and is up to half a bin in each axis; AC Nexus's
+1-2% residual above is the same effect. Vulkan doesn't report Turnip's bin size (no VK_QCOM_tile_properties).
+
 
 ## Typing window takes the controllers: SteamVR theater mode (#476, #477, AC Nexus)
 
