@@ -420,3 +420,57 @@ def add_needed(data: bytes, library: str, first: bool = True) -> bytes:
     if not got or (got[0] if first else got[-1]) != library:
         raise RuntimeError(f"add_needed({library}) produced NEEDED={got}")
     return result
+
+
+def offset_to_vaddr(segments: list[tuple[int, int, int]], off: int) -> int | None:
+    """The virtual address of a file offset inside a PT_LOAD segment (load_segments' tuples)."""
+    return next((off - o + v for v, o, sz in segments if o <= off < o + sz), None)
+
+
+def append_segment(data: bytes, blob: bytes, flags: int = 5) -> tuple[bytes, int]:
+    """Add `blob` as a new PT_LOAD segment (default PF_R|PF_X: new code for a byte patch to branch to) and return
+    (new library, the blob's virtual address). Nothing already in the file moves, as in add_needed: the segment is
+    appended at the end of the file and above every existing segment (both 16 KiB aligned) and takes the PT_NOTE
+    program header (bionic ignores notes in shared libraries); without a spare header the program header table moves
+    into the new segment (with a PT_PHDR entry). 64-bit little-endian only."""
+    if not is_elf(data) or data[5] != 1 or data[4] != 2:
+        raise ValueError("not a 64-bit little-endian ELF")
+    PT_LOAD, PT_NOTE, PT_PHDR, PAGE = 1, 4, 6, 16384
+    ph_fmt = "<IIQQQQQQ"  # p_type, p_flags, p_offset, p_vaddr, p_paddr, p_filesz, p_memsz, p_align
+    buf = bytearray(data)
+    phoff = struct.unpack_from("<Q", buf, 32)[0]
+    phentsize, phnum = struct.unpack_from("<HH", buf, 54)
+    table = [list(struct.unpack_from(ph_fmt, buf, phoff + i * phentsize)) for i in range(phnum)]
+    loads = [p for p in table if p[0] == PT_LOAD]
+    if not loads:
+        raise ValueError("no PT_LOAD")
+    file_end = (len(buf) + PAGE - 1) // PAGE * PAGE
+    va_start = (max(p[3] + p[6] for p in loads) + PAGE - 1) // PAGE * PAGE  # vaddr ≡ offset (mod PAGE)
+    note_i = next((i for i, p in enumerate(table) if p[0] == PT_NOTE), None)
+    relocate = note_i is None
+    new_phnum = phnum + (0 if not relocate else 1 if any(p[0] == PT_PHDR for p in table) else 2)
+    head = (new_phnum * phentsize + 15) // 16 * 16 if relocate else 0
+    size = head + len(blob)
+    new_load = [PT_LOAD, flags, file_end, va_start, va_start, size, size, PAGE]
+    if relocate:
+        phdr = [PT_PHDR, 4, file_end, va_start, va_start, new_phnum * phentsize, new_phnum * phentsize, 8]
+        existing = next((i for i, p in enumerate(table) if p[0] == PT_PHDR), None)
+        if existing is not None:
+            table[existing] = phdr
+        else:
+            table.insert(0, phdr)  # PT_PHDR must precede the loadable segments
+        table.append(new_load)
+    else:
+        table[note_i] = new_load
+    slots = [i for i, p in enumerate(table) if p[0] == PT_LOAD]  # PT_LOAD entries stay sorted by vaddr (bionic)
+    for i, p in zip(slots, sorted((table[i] for i in slots), key=lambda p: p[3]), strict=True):
+        table[i] = p
+    buf += b"\0" * (file_end - len(buf) + size)
+    buf[file_end + head:file_end + size] = blob
+    if relocate:
+        phoff = file_end
+        struct.pack_into("<Q", buf, 32, phoff)
+        struct.pack_into("<H", buf, 56, new_phnum)
+    for i, p in enumerate(table):
+        struct.pack_into(ph_fmt, buf, phoff + i * phentsize, *p)
+    return bytes(buf), va_start + head

@@ -132,6 +132,8 @@ SUMMARIES = {
     "frame.vrapi_bridge": "Lets games built on Meta's oldest VR interface run on the Frame.",
     "frame.blazerush": "Makes BlazeRush's menus and controllers work without Meta's avatars, and lets its shader "
                        "fixes take effect.",
+    "frame.justdance_local_save": "Makes Just Dance VR keep your progress between sessions (it only kept it online, "
+                                  "after a Meta sign-in).",
     "frame.a32_bridge": "Runs a 32-bit game (Gear VR, Oculus Go, early Quest) on the Frame, which only runs "
                         "64-bit code. Experimental.",
     "frame.gl_shim": "Corrects graphics code the Frame's drivers reject (black screen with sound).",

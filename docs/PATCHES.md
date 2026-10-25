@@ -2,7 +2,7 @@
 
 # Patches
 
-Every patch and game setting FramePort knows: 200 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
+Every patch and game setting FramePort knows: 201 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
 
 Each entry says what the patch does, whether it changes the APK or only the install, when FramePort suggests it, its options, the catalog games whose recipe names it and the launch-test signatures that suggest it. Patches that are on by default are on for every game, so the catalog rarely names them.
 
@@ -11,7 +11,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 ## Groups
 
 - [Patches from OVRPort](#group-overport) (25)
-- [Steam Frame patches](#group-frame) (69)
+- [Steam Frame patches](#group-frame) (70)
 - [Game settings](#group-adapter) (82)
 - [Files and settings on the Frame](#group-device) (11)
 - [PC VR (Proton and Revive)](#group-pcvr) (13)
@@ -61,6 +61,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Play services: Android 11 version checks](#frame-gms_platform_version) | `frame.gms_platform_version` | Steam Frame patches | 2 |
 | [Godot apps: start without a clipboard service](#frame-godot_clipboard) | `frame.godot_clipboard` | Steam Frame patches | 1 |
 | [Hardware video decoding (H.264, HEVC, VP9)](#frame-hw_video_decode) | `frame.hw_video_decode` | Steam Frame patches | 41 |
+| [Just Dance VR: keep progress in the local save](#frame-justdance_local_save) | `frame.justdance_local_save` | Steam Frame patches |  |
 | [Language packs from the game's files](#frame-langpacks) | `frame.langpacks` | Steam Frame patches |  |
 | [Launcher category (INFO → LAUNCHER)](#frame-launcher) | `frame.launcher` | Steam Frame patches | default |
 | [GL wrapper: OpenGL ES depth formats (Minecraft)](#frame-ltw_depth) | `frame.ltw_depth` | Steam Frame patches | default |
@@ -737,6 +738,19 @@ Plays the game's videos on the Frame's video hardware, so 4K and 8K video runs s
 - **Source:** [patches/frame/hw_video_decode.py](../src/frameport/patches/frame/hw_video_decode.py)
 
 > Decodes the game's videos on the Frame's hardware video decoder instead of Android's software decoders, which stutter or fall behind with 4K/8K video (for example video players, Batman: Arkham Shadow's cutscenes). Adds FramePort's codec plugin (OMX.frameport.avc/hevc/vp9.decoder) to this game's container only; the APK isn't changed. When the hardware is busy (for example Steam's own hardware video decoding is on) the video is decoded in software as before.
+
+### <a id="frame-justdance_local_save"></a>Just Dance VR: keep progress in the local save
+
+Makes Just Dance VR keep your progress between sessions (it only kept it online, after a Meta sign-in).
+
+- `frame.justdance_local_save`
+- **Changes:** Changes the APK (a rebuild and reinstall apply it).
+- **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
+- **Suggested by launch-test signatures:**
+  - `justdance-local-save-off` (info): Just Dance VR (0.5.4 and later) opens its local save at every start but never writes it (the save request method is empty in this build; on a Quest the progress is kept by Ubisoft's online backend after a Meta sign-in, which the Frame doesn't have), so progress, unlocks and the finished tutorial are lost at every restart.
+- **Source:** [patches/frame/justdance_save.py](../src/frameport/patches/frame/justdance_save.py)
+
+> Just Dance VR (GitHub #480) loads its progress from a local save at start, but from 0.5.4 the method that writes it (LocalSaveEvents.RequestSave) is empty: on a Quest the progress is kept by Ubisoft's online backend after a Meta sign-in, which the Frame doesn't have, so progress, unlocks and the finished tutorial were lost at every restart. The method gets the body it is declared with (raise the SaveValueRequested event the game's own save system listens to), built from its neighbour SaveSystemReady and placed in a new code segment of libil2cpp.so; everything is found per build with Cpp2IL (downloaded on first use). A build that already writes its save is left unchanged. No sign-in or online data is touched.
 
 ### <a id="frame-langpacks"></a>Language packs from the game's files
 

@@ -1323,6 +1323,41 @@ server"), so a save hooked to that handler would never run; a Quest's own quit a
 XR_SESSION_STATE_EXITING → OVRManager `Application.Quit()` → `OnApplicationQuit`, which FramePort doesn't emulate yet.
 
 
+### Just Dance VR never writes its local save (`frame.justdance_local_save`)
+
+With the pause in place, Just Dance VR (0.5.4: Unity 2022.3.15f1, IL2CPP) still lost everything. Found statically with
+Cpp2IL (diffable-cs + ISIL) and capstone on libil2cpp.so (0.5.4 SHA-256 ff91e080…; file offsets, VA = offset + 0x1000):
+- Every system saves through `Neon.Gameplay.LocalSave.LocalSaveEvents.RequestSave(string key, object value)` (14
+  callers: PlayerProgression.SavePlayerProgression, InventorySaveManager/AvatarSaveManager/GoalsSaveManager.Save,
+  AchievementSystem, FTUEManager, EmotesAndToysCustomisationManager, SongOfTheWeekManager, PlayerDataTracker,
+  SocialLocalSavesStore) and loads through `RequestHasSaveData`/`RequestLoad` (PlayerProgression.OnSaveDataReady ->
+  OnLocalDataLoaded -> RemapProgression, then SyncData with PlayFab). **RequestSave (0x57f99e8) is a single `ret`.**
+  The only path to `JdOfflineSave.OfflineSave_SetValue` is `LocalSaveManager.OnSaveValueRequested` (subscribed to
+  `SaveValueRequested`) -> `LocalSaveController.SaveData<T>`, so the OfflineSave dico never gets `NeedSave` and its
+  write thread (every 1000 ms) and the forced write on focus loss have nothing to write.
+- Loading works as written: `RequestLoad` raises `LoadValueRequested` -> `LocalSaveManager.OnLoadValueRequested` ->
+  `LocalSaveController.LoadData<string>` -> `OfflineSave_GetValue` (refused with error 40/41 only when the file was
+  marked corrupted) -> the value goes back to the requesting system's callback.
+- `OfflineSaveDico_FromString - NeedLoad: False` (a Debug.LogWarning) is printed after every parse that didn't throw,
+  with a boxed constant `false` after `strh wzr, [dico, #0x48]` (NeedSave = NeedLoad = false): normal, not a
+  rejection. The version check and `CheckWholeMapHmac` report problems through io_Iret (41 = HMAC mismatch ->
+  `m_OfflineSaveFileCheckDoneAndFileIsCorrupted`). The HMAC input comes from `GetNativeAccountFields`: two constant
+  string pairs, no user id. A file is only rewritten when a value changes (NeedSave).
+- On a Quest the progress lives in PlayFab: `BackendRequestManager.GetUserPlatformData` (Meta `Users.GetLoggedInUser`)
+  -> `PlayfabAuthenticate` (`LoginWithCustomID`); `SetPlayerData` -> `PlayFabClientAPI.UpdateUserData`. Without Meta's
+  platform the game never signs in. FramePort doesn't touch that.
+- `PlayerDataTracker.<WaitForAuth>d__41.MoveNext` returns false in its first step (a `yield break`): per-song records
+  never load either (not changed).
+- The patch (per build, nothing hardcoded): Cpp2IL gives RequestSave, SaveSystemReady, the static field offsets of
+  SaveValueRequested (0x28) / SaveSystemReadyEvent (0) and LocalSaveEventArgs' Key/Value (0/8: a 16-byte struct, so
+  key and value go in x1/x2). capstone decodes SaveSystemReady: GOT slot of the TypeInfo variable (0.5.4: VA
+  0x7347c48), the metadata init on it (0x3192e20), static_fields at +0xb8, delegate invoke_impl +0x18 / target +0x40 /
+  method +0x28. The 24-instruction body goes into a new R+X PT_LOAD (`elf.append_segment`, takes the PT_NOTE header;
+  0.5.4: VA 0x7a8c000), RequestSave's `ret` becomes `b` there. RequestSave with a body of its own = left alone.
+- Device (headless, 2026-10-24, first build of the patch): RUNNING at 72 fps twice; the first launch created
+  `files/JdNext.OfflineSave/JdOfflineSave_JdLog.OfflineSave.txt` (keys Achievements, OffSaveFormatVersion, UbiHmac),
+  the second read it. Still to check in the headset: level, unlocks and the finished tutorial after a restart.
+
 ## Expansion file names (#450, #481)
 The game opens `Android/obb/<package>/main.<versionCode>.<package>.obb` by exact name (Unreal's `OBBData`, Unity's
 split binary, CryEngine's versionless `main.<package>.obb`); the Frame's filesystem is case-sensitive. Downloads

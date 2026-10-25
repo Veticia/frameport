@@ -96,7 +96,7 @@ def _remote_text() -> str | None:
 SEVERITIES = ("fatal", "error", "warning", "info")
 SIG_FIELDS = {"id": str, "pattern": str, "severity": str, "diagnosis": str, "suggest": list, "supersedes": list,
               "kind": str, "unless": str, "report": bool, "question": str, "use_alt": bool, "min_app": str,
-              "updated": str}
+              "updated": str, "unless_patch": str}
 MARKER_FIELDS = {"id", "label", "pattern", "kind"}
 
 
@@ -252,12 +252,28 @@ def split_suggestion(s: str) -> tuple[str, str | None]:
     return pid.strip(), (value.strip() if eq else None)
 
 
+def applied_patches(package: str | None) -> set[str]:
+    """The patches in the game's current build (library entry build.applied); empty when unknown."""
+    if not package:
+        return set()
+    try:
+        from ..core import library
+
+        return set(((library.game(package) or {}).get("build") or {}).get("applied") or [])
+    except Exception:  # noqa: BLE001 - no library (e.g. a diagnostics zip read elsewhere): nothing known
+        return set()
+
+
 def triage(log: str, state: str = "UNKNOWN", package: str | None = None, crash: str = "",
-           kernel: str = "", headless: bool = False) -> TriageResult:
+           kernel: str = "", headless: bool = False, applied: set[str] | None = None) -> TriageResult:
     """`crash` = the container's crash logcat (tombstones come from crash_dump's pid, so it isn't pid-filtered);
     `kernel` = kernel log lines of a play session ("kernel: …", GPU hangs; agent session_log); `headless` = a launch
-    test (no headset worn): what happens after a `headless_end` line doesn't count against the game."""
+    test (no headset worn): what happens after a `headless_end` line doesn't count against the game. `applied` = the
+    patches in the build that ran (default: the library's record for `package`): a signature with `unless_patch`
+    doesn't fire when that patch is in it (its log line stays the same with the fix in place)."""
     db = database()
+    if applied is None and any(sig.get("unless_patch") for sig in db["signatures"]):
+        applied = applied_patches(package)
     kind = "pcvr" if package and package.startswith("rift.") else "quest"  # Proton/Revive logs vs Lepton logcat
     lines = game_lines(log, package) if kind == "quest" else [ANSI.sub("", ln) for ln in log.splitlines()]
     lines += [ANSI.sub("", ln) for ln in crash.splitlines()]
@@ -276,6 +292,9 @@ def triage(log: str, state: str = "UNKNOWN", package: str | None = None, crash: 
         hit = re.search(sig["pattern"], text)
         if hit and sig.get("unless") and re.search(sig["unless"], text):
             hit = None  # e.g. a rejected swapchain the adapter retried successfully
+        gate = sig.get("unless_patch")
+        if hit and gate and set([gate] if isinstance(gate, str) else gate) & (applied or set()):
+            hit = None  # the fix is already in the build
         if hit:
             line = next((ln for ln in lines if re.search(sig["pattern"], ln)), hit.group(0))
             res.findings.append(Finding(sig["id"], sig["severity"], sig["diagnosis"], list(sig.get("suggest") or []),

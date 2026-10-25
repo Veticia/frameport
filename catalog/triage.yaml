@@ -3,7 +3,8 @@
 # "apply and rebuild"; an entry `adapter.<key>=<value>` sets that value (else 1). `severity`: fatal (the game can't
 # run) | error | warning | info. `question`: a symptom only the player sees (play sessions, GUI "Last session"): its
 # fix is offered as that question, never applied on its own. `report: true` = the useful next step is a problem report
-# with diagnostics. Launch tests and real play sessions (agent session_log, `frameport session`) are both matched.
+# with diagnostics. `unless_patch: <patch id>` = not when that patch is in the game's build (a log line that stays
+# the same with the fix in place). Launch tests and real play sessions (agent session_log, `frameport session`) are both matched.
 # Sources: every failure we hit porting 34 games to the Steam Frame (see docs/PLAYBOOK.md).
 # Installed apps fetch this file from GitHub main (every 6 h, like catalog/games) and use each remote signature in
 # place of their bundled one with the same id, unless it names a patch/adapter setting or a field the app doesn't know,
@@ -607,6 +608,13 @@ signatures:
     severity: error
     diagnosis: Epic Online Services can't save its login keychain and retries without end (a start that never finishes, 100 % CPU). The usual cause is missing internal storage (see lepton-data-link-failed); the patch stops the loop, and EOS then reports the failure to the game once.
     suggest: [frame.eos_keychain_loop]
+  - id: justdance-local-save-off
+    # Just Dance VR's own log line at start (Ubisoft's JdLog): its offline save opens, but this build never writes it
+    pattern: '\|LocalSave +\|OfflineSave_Init succeeded'
+    unless_patch: frame.justdance_local_save  # the line is the same with the fix in the build
+    severity: info
+    diagnosis: Just Dance VR (0.5.4 and later) opens its local save at every start but never writes it (the save request method is empty in this build; on a Quest the progress is kept by Ubisoft's online backend after a Meta sign-in, which the Frame doesn't have), so progress, unlocks and the finished tutorial are lost at every restart. The patch makes the game write its local save; nothing online is touched.
+    suggest: [frame.justdance_local_save]
   - id: pthread-keys-exhausted
     pattern: 'cannot create thread specific key'
     severity: fatal
