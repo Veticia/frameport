@@ -30,10 +30,13 @@ def test_fallback_rate_is_never_zero(tmp_path):
 def test_the_hook_is_always_installed():
     src = (ROOT / "native/adapter/frame_adapter.c").read_text()
     # not behind a per-game setting: every game that asks gets a rate, also where the runtime lacks the function
-    assert re.search(r"\n    if \(instance != XR_NULL_HANDLE\) "
-                     r"HOOK_AS\(xrGetDisplayRefreshRateFB, hook_get_refresh_rate\)",
+    # and a refused request keeps the current rate (GitHub #336: OutRun quit on DISPLAY_REFRESH_RATE_UNSUPPORTED_FB)
+    assert re.search(r"\n    if \(instance != XR_NULL_HANDLE\) \{\n"
+                     r"        HOOK_AS\(xrGetDisplayRefreshRateFB, hook_get_refresh_rate\)\n"
+                     r"        HOOK_AS\(xrRequestDisplayRefreshRateFB, hook_request_refresh_rate\)",
                      src)
-    assert "fb_refresh_rate(" in (ROOT / "native/adapter/session_fixes.c").read_text()
+    fixes = (ROOT / "native/adapter/session_fixes.c").read_text()
+    assert "fb_refresh_rate(" in fixes and "result == XR_ERROR_DISPLAY_REFRESH_RATE_UNSUPPORTED_FB" in fixes
 
 
 def test_a_single_rejected_frame_is_not_an_error():
