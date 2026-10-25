@@ -202,8 +202,8 @@ def _find_data_dir(apk_dir: Path, pkg: str | None) -> Path | None:
 # Android's expansion file names, also CryEngine's main.<package>.obb without a versionCode (GitHub #238).
 OBB_NAME = re.compile(r"^(main|patch)\.(?:(\d+)\.)?(.+)\.obb$", re.IGNORECASE)
 # Found by name next to an APK, only with that APK's package: other kinds too, e.g. Crisis Brigade 2's
-# office.<versionCode>.<package>.obb (GitHub #415)
-NAMED_OBB = re.compile(r"^([a-z]+)\.(?:(\d+)\.)?(.+)\.obb$", re.IGNORECASE)
+# office.<versionCode>.<package>.obb and ta1.<versionCode>.<package>.obb (GitHub #415)
+NAMED_OBB = re.compile(r"^([a-z][a-z0-9]*)\.(?:(\d+)\.)?(.+)\.obb$", re.IGNORECASE)
 
 
 # What downloads and copies add after the package (GitHub #450/#481): main.203.com.Armature.VR4-003.obb,
@@ -226,8 +226,10 @@ class ObbName:
 
 
 def obb_names(package: str, rels) -> list[ObbName]:
-    """Expansion files (top level of the game's data, main/patch kinds) not named <kind>.<versionCode>.<package>.obb
-    exactly, with what to do about each. Renamed (the name says which file it is, only its spelling is off): a
+    """Expansion files (top level of the game's data) not named <kind>.<versionCode>.<package>.obb exactly, with what
+    to do about each. Other kinds than main/patch (Crisis Brigade 2's office/alleys/ta1…, GitHub #415) only count
+    when their package part is the game's in another case or with a copy suffix (never "another app's": they may be
+    any data). Renamed (the name says which file it is, only its spelling is off): a
     different case (Main.203.com.armature.vr4.obb) and a copy suffix after the package (-003, " (1)", " - Copy").
     Warned, sent as they are: another app's name (a renamed build's main.1716.com.beatgames.beatsaber.lj369vr.obb,
     GitHub #129), a copy of a file that is there under its right name too, two files for one name, a copy suffix
@@ -243,6 +245,13 @@ def obb_names(package: str, rels) -> list[ObbName]:
     for name in names:
         m = OBB_NAME.match(name)
         if not m:
+            m = NAMED_OBB.match(name)
+            if m:
+                # other kinds (Crisis Brigade 2's office.222.<package>.obb, GitHub #415): only the game's own files
+                # with the package's case or a copy suffix off; anything else is some other data, never warned about
+                own = _own_named(name, m, pkg, low)
+                if own:
+                    found.append(own)
             continue
         kind, vc, rest = m.group(1).lower(), m.group(2), m.group(3)
         version = f"{vc}." if vc else ""
@@ -276,6 +285,21 @@ def obb_names(package: str, rels) -> list[ObbName]:
                 reason = "ambiguous"
         out.append(ObbName(name, wanted, reason in ("case", "copy"), reason))
     return out
+
+
+def _own_named(name: str, m: re.Match, pkg: str, low: str) -> tuple[str, str, str] | None:
+    """(name, wanted, reason) for a <kind>.<versionCode>.<package>.obb of another kind than main/patch whose package
+    part is the game's in another case or with a copy suffix; the kind keeps its own spelling."""
+    kind, vc, rest = m.group(1), m.group(2), m.group(3)
+    rl = rest.lower()
+    if rl == low:
+        reason = "case"
+    elif rl.startswith(low) and COPY_SUFFIX.fullmatch(rest[len(pkg):]):
+        reason = "copy" if vc else "unclear-version"
+    else:
+        return None
+    wanted = f"{kind}.{vc + '.' if vc else ''}{pkg}.obb"
+    return (name, wanted, reason) if wanted != name else None
 
 
 def frame_names(package: str, manifest: dict[str, int]) -> dict[str, str]:
@@ -316,8 +340,8 @@ def _named_obbs(d: Path, pkg: str) -> list[tuple[str, int | None, Path]]:
         if not m or is_dir:
             continue
         rest = m.group(3).lower()
-        if rest == pkg.lower() or (m.group(1).lower() in ("main", "patch") and rest.startswith(pkg.lower())
-                                   and COPY_SUFFIX.fullmatch(rest[len(pkg):])):
+        # a download's copy suffix too (any kind), installed renamed (obb_names)
+        if rest == pkg.lower() or (rest.startswith(pkg.lower()) and COPY_SUFFIX.fullmatch(rest[len(pkg):])):
             # a download's copy suffix too (main.203.com.Armature.VR4-003.obb, GitHub #481): installed renamed
             out.append((m.group(1).lower(), int(m.group(2)) if m.group(2) else None, f))
         elif not m.group(2) and rest.endswith(suffix) and "." not in rest[:-len(suffix)]:

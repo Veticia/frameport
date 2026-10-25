@@ -59,6 +59,52 @@ def test_unclear_cases_stay_warnings():
         False, "unclear-version")
 
 
+CB2 = "com.sumalab.CrisisBrigade2reloaded"
+CB2_KINDS = ("office", "alleys", "challenges", "mansion", "ta1", "ta2", "ta3")
+
+
+def test_other_kinds_with_the_package_in_another_case_are_renamed():
+    """#415: Crisis Brigade 2's seven <kind>.222.<package>.obb files, the package part all lower case."""
+    lower = [f"{k}.222.{CB2.lower()}.obb" for k in CB2_KINDS]
+    assert names(CB2, lower) == {n: (f"{k}.222.{CB2}.obb", True, "case")
+                                 for n, k in zip(lower, CB2_KINDS, strict=True)}
+    assert names(CB2, [f"{k}.222.{CB2}.obb" for k in CB2_KINDS]) == {}  # the right names
+    # the kind keeps its own spelling; a copy suffix goes as for main/patch
+    assert names(CB2, ["Office.222.com.sumalab.crisisbrigade2reloaded-002.obb",
+                       "ta1.222.com.sumalab.CrisisBrigade2reloaded (1).obb"]) == {
+        "Office.222.com.sumalab.crisisbrigade2reloaded-002.obb": (f"Office.222.{CB2}.obb", True, "copy"),
+        "ta1.222.com.sumalab.CrisisBrigade2reloaded (1).obb": (f"ta1.222.{CB2}.obb", True, "copy")}
+    # the right name next to a copy: the copy stays as it is
+    assert names(CB2, [f"office.222.{CB2}.obb", f"office.222.{CB2} - Copy.obb"])[f"office.222.{CB2} - Copy.obb"][1:] \
+        == (False, "duplicate")
+
+
+def test_other_kinds_of_another_package_are_not_warned_about():
+    """Unlike main/patch, any other <word>.<n>.<x>.obb may be unrelated data: no "another app" warning."""
+    assert names(CB2, ["office.222.com.sumalab.other.obb", "office.222.com.sumalab.CrisisBrigade2reloaded.extra.obb",
+                       "data.1.something.obb"]) == {}
+    entry = {"package": CB2, "data_manifest": {"office.222.com.y.other.obb": 1}}
+    assert pipeline.misnamed_obbs(entry) == [] and pipeline.renamed_obbs(entry) == []
+
+
+def test_other_kinds_go_to_the_frame_under_the_games_names():
+    manifest = {f"{k}.222.{CB2.lower()}.obb": i for i, k in enumerate(CB2_KINDS, 1)}
+    manifest[f"main.222.{CB2}.obb"] = 99
+    assert quest_dump.frame_manifest(CB2, manifest) == {
+        **{f"{k}.222.{CB2}.obb": i for i, k in enumerate(CB2_KINDS, 1)}, f"main.222.{CB2}.obb": 99}
+    assert set(quest_dump.frame_names(CB2, manifest)) == {f"{k}.222.{CB2.lower()}.obb" for k in CB2_KINDS}
+
+
+def test_lower_case_other_kinds_next_to_the_apk_are_found(tmp_path):
+    (tmp_path / "game.apk").write_bytes(b"")
+    files = [f"{k}.222.{CB2.lower()}.obb" for k in CB2_KINDS] + [f"office.222.{CB2.lower()}-001.obb"]
+    for n in files:
+        (tmp_path / n).write_bytes(b"x")
+    data, got = quest_dump.find_data(tmp_path, CB2, 222)
+    # the copy loses the tie against the plain lower-case name of its kind; everything else is sent
+    assert data == tmp_path and sorted(got) == sorted(files[:-1])
+
+
 def test_game_page_lists_renamed_files_as_info_and_the_rest_as_warnings():
     entry = {"package": VR4, "data_manifest": {"main.203.com.Armature.VR4-003.obb": 1,
                                                "patch.203.com.Armature.VR4-001.obb": 1}}
@@ -134,6 +180,25 @@ def test_install_sends_renamed_files_under_the_games_names(tmp_path, monkeypatch
                                                        "patch.203.com.Armature.VR4.obb": 3}
     assert sorted(p.name for p in data.iterdir()) == ["main.203.com.Armature.VR4-003.obb",
                                                        "patch.203.com.Armature.VR4-001.obb"]  # PC files untouched
+
+
+def test_install_sends_other_kinds_under_the_games_names(tmp_path, monkeypatch):
+    """#415: lower-case Crisis Brigade 2 files go to the Frame under the game's spelling; the PC copies keep theirs."""
+    data = tmp_path / "CB2"
+    data.mkdir()
+    for k in CB2_KINDS:
+        (data / f"{k}.222.{CB2.lower()}.obb").write_bytes(b"o" * 2)
+    apk = tmp_path / "game.apk"
+    apk.write_bytes(b"apk")
+    sent = []
+    monkeypatch.setattr(installer, "upload_files", lambda xfer, items, *a, **k: sent.extend(items))
+    monkeypatch.setattr(installer, "transfer_link", lambda frame, reporter, need: contextlib.nullcontext(frame))
+    monkeypatch.setattr(installer, "_tags", lambda pkg: [])
+    frame = FakeFrame({})
+    installer.install(frame, installer.InstallPlan(CB2, "CB2", apk, data, Recipe(CB2)), Reporter())
+    assert sorted(rel for _, rel, _ in sent) == sorted(f"obb/{k}.222.{CB2}.obb" for k in CB2_KINDS)
+    assert frame.calls["finalize"]["obb_manifest"] == {f"{k}.222.{CB2}.obb": 2 for k in CB2_KINDS}
+    assert sorted(p.name for p in data.iterdir()) == sorted(f"{k}.222.{CB2.lower()}.obb" for k in CB2_KINDS)
 
 
 def test_install_renames_an_earlier_copy_on_the_frame_instead_of_sending_it(tmp_path, monkeypatch):

@@ -1382,6 +1382,14 @@ all the game's own (162 Asgard's Wrath 2 chunks, Phantom's `.partN`, Metro's `ch
 DLC, Espire 2's `overflowN`). The old #129 check flagged Asgard's Wrath 2's chunks and Phantom's parts as "named for
 another app"; they're left alone now.
 
+**Other kinds (#415, 2026-10-24):** Crisis Brigade 2 reloaded ships seven `<kind>.222.com.sumalab.CrisisBrigade2reloaded.obb`
+files (office, alleys, challenges, mansion, ta1, ta2, ta3); a user's copies were lower case in the package part, so they
+reached the Frame (`NAMED_OBB` scan) under names the game can't open. `obb_names` now also renames any other
+`<kind>.<vc>.<package>.obb` whose package part is the game's in another case or with a copy suffix, keeping the kind's
+own spelling (an unclear versionless copy only warns, as for main/patch). These kinds never get the "another app"
+warning: any `<word>.<n>.<x>.obb` may be unrelated data. `NAMED_OBB` kinds may contain digits now (`ta1`: the scan
+skipped them before), and `_named_obbs` takes copy-suffixed files of every kind.
+
 ## App bundles (.xapk / .apks / .apkm / .apkx, discussion #482)
 
 **Formats (2026-10-24):** `.xapk` (APKPure: `manifest.json` with `split_apks` [{file, id}] and `expansions`
