@@ -189,6 +189,51 @@ def test_dispatcher_rejects_unknown_and_partial_matches():
     assert patch_dispatcher(b'unknown runtime', 'quest2') == b'unknown runtime'
 
 
+def _elf_dispatcher(name_refs=1, uuid_refs=1, extra_name=False):
+    """A small AArch64 ELF laid out like another OVRPort runtime: one R+X PT_LOAD (vaddr == offset) with the code and
+    the name, one RW PT_LOAD 0x8000 above its file offset with the UUID; the code loads the name with adrp + add and
+    the UUID with adr, like the verified dispatcher."""
+    import struct
+
+    from frameport.patches.frame.headset_model import QUEST2_NAME, UUIDS
+    data = bytearray(0x3000)
+    data[:16] = b"\x7fELF\x02\x01\x01" + bytes(9)
+    struct.pack_into("<HHIQQQIHHHHHH", data, 16, 3, 183, 1, 0, 64, 0, 0, 64, 56, 2, 64, 0, 0)
+    struct.pack_into("<IIQQQQQQ", data, 64, 1, 5, 0, 0, 0, 0x2000, 0x2000, 0x1000)
+    struct.pack_into("<IIQQQQQQ", data, 120, 1, 6, 0x2000, 0xA000, 0xA000, 0x1000, 0x1000, 0x1000)
+    name_off, uuid_off, uuid_va = 0x1834, 0x2340, 0xA340
+    data[name_off:name_off + 14] = QUEST2_NAME
+    data[uuid_off:uuid_off + 16] = UUIDS["quest2"]
+    if extra_name:
+        data[0x1900:0x1900 + 14] = QUEST2_NAME
+    code = 0x400
+    for _ in range(name_refs):  # adrp x1, page(0x1834) = +1 page ; add x1, x1, #0x834 (code in page 0)
+        struct.pack_into("<II", data, code, 0x90000001 | 1 << 29, 0x91000021 | 0x834 << 10)
+        code += 8
+    for _ in range(uuid_refs):  # adr x4, uuid
+        delta = uuid_va - code
+        struct.pack_into("<I", data, code, 0x10000004 | (delta & 3) << 29 | ((delta >> 2) & 0x7FFFF) << 5)
+        code += 4
+    return bytes(data), name_off, uuid_off
+
+
+def test_other_runtime_found_by_structure():
+    """OVRPort runtimes other than the verified one (the older 3.4.3-23204ea; later ones) keep the Quest 3 default:
+    the name and UUID are found by content and by the code that loads them, not by fixed offsets."""
+    from frameport.patches.frame.headset_model import SYSTEM_NAMES, UUIDS, find_identity, patch_dispatcher
+    blob, name_off, uuid_off = _elf_dispatcher()
+    assert find_identity(blob) == (name_off, uuid_off)
+    fixed = patch_dispatcher(blob, "")
+    assert fixed[name_off:name_off + 14] == SYSTEM_NAMES[""].ljust(14, b"\0")
+    assert fixed[uuid_off:uuid_off + 16] == UUIDS[""]
+    assert sum(a != b for a, b in zip(blob, fixed, strict=True)) <= 30
+    for kw in (dict(name_refs=0), dict(uuid_refs=0), dict(name_refs=2), dict(extra_name=True)):
+        other = _elf_dispatcher(**kw)[0]
+        assert find_identity(other) is None  # not loaded once by the code / not unique: refused, unchanged
+        with pytest.raises(ValueError, match="Unsupported OVRPort"):
+            patch_dispatcher(other, "")
+
+
 def test_unknown_dispatcher_keeps_quest2_instead_of_failing_the_build():
     """Quest 3 is the default for every Quest game: an APK converted with another OVRPort runtime (found with an
     already converted Batman copy) must still build, keeping OVRPort's Quest 2 answers."""
@@ -218,6 +263,9 @@ def test_real_dispatcher_when_available():
     for key in MODELS:
         fixed = patch_dispatcher(original, key)
         assert len(fixed) == len(original)
+    older = path.parents[3] / '3.4.3-23204ea/lib/arm64-v8a/libopenxr_loader.so'
+    if older.is_file():  # the older runtime: found by structure (offsets differ)
+        assert patch_dispatcher(older.read_bytes(), '') != older.read_bytes()
 
 
 @pytest.mark.parametrize('key', MODELS)
