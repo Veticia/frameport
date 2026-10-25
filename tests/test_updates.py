@@ -435,3 +435,19 @@ def test_source_restart_keeps_a_hidden_console_on_windows(monkeypatch):
     u._restart_process()
     flags = calls[0]["creationflags"]
     assert flags & 0x08000000 and not flags & 0x00000008  # CREATE_NO_WINDOW, not DETACHED_PROCESS
+
+
+def test_windows_script_never_mixes_two_versions():
+    """GitHub #476: a failed copy was rolled back without deleting the files the new version had added, and the old
+    version's own leftovers stayed after a good one; Python imported both. scripts/update_smoke.py runs it for real."""
+    text = updates.swap_script(Path("C:/data/updates/9.9.9/staged"), Path("D:/frameport"), 1234, "win32", True,
+                               Path("C:/data/logs/update.log"))
+    # nothing changes while FramePort or a program file is still in use
+    assert "is still running; nothing was changed" in text and "Test-InUse" in text
+    assert text.index("Test-InUse $_") < text.index("New-Item -ItemType Directory -Path $backup")
+    # the old version's files the new one doesn't have go into `previous`, only inside the bundle's own folders
+    assert "Get-ChildItem -LiteralPath $src -Directory" in text and "Move-Item -LiteralPath $f.FullName" in text
+    # a rollback deletes what the update added before restoring the old files
+    rollback = text[text.index("} catch {"):]
+    assert rollback.index("foreach ($rel in $added) { Remove-Item") < rollback.index("Join-Path $backup '*'")
+    assert text.count("Start-FramePort") == 3  # defined; after "files in use"; at the end

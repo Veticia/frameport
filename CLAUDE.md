@@ -336,7 +336,11 @@ Rick and Morty runs on the Frame via its catalog recipe (OpenVR, no Revive),
     reinstall of the release's `.whl`); `prepare()` → `<data>/updates/<ver>/` (SHA256SUMS.txt required + checked,
     layout checked, Windows: the new FramePort.exe must have the running exe's Authenticode signer when that one is
     signed, `ready.json`); `apply()` writes + starts detached `apply.ps1`/`apply.sh` (wait for pid → Windows: copy over,
-    replaced files kept in `updates/<ver>/previous` because the zip has no top folder; macOS/Linux: mv to `.old` + swap,
+    replaced files kept in `updates/<ver>/previous` because the zip has no top folder; nothing touched while a program file
+    is in use, old-only files of app/Lib/DLLs/site-packages/data moved to `previous`, a failed copy deletes what it
+    added (#476: the old rollback kept new modules → old version crashed at start); bundles carry
+    `frameport/_bundle_files.txt` (package.py) → `core/bundle_files.check` at GUI start removes/ignores leftovers and
+    reports a mixed install; macOS/Linux: mv to `.old` + swap,
     rollback, `xattr -dr` quarantine → relaunch; `<data>/logs/update.log`). `ui/updater.py`: background check (10 s,
     then 6 h), sidebar card (hidden control, toggled), Library bar (`library_bar`), changelog dialog, job
     `app-update` that restarts only when no other job is active, `apply_pending_at_start()` in `main()` for

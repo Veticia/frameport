@@ -185,10 +185,15 @@ def load_all() -> None:
 def _import_modules() -> None:
     import importlib
     import pkgutil
+    from pathlib import Path
 
+    from ..core import bundle_files
     from . import frame, overport, pcvr, settings  # noqa: F401  (registration side effects)
 
+    folder = Path(frame.__path__[0])
     for mod in pkgutil.iter_modules(frame.__path__):
+        if any(bundle_files.is_stale(folder / f"{mod.name}{ext}") for ext in (".pyc", ".py")):
+            continue  # left from another version by an update (GitHub #476)
         importlib.import_module(f"{frame.__name__}.{mod.name}")
 
 

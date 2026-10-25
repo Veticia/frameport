@@ -206,6 +206,10 @@ FramePort checks for a new version at start and every 6 hours. **Update now** in
 version, checks it and restarts FramePort; your games and settings stay. **Later** skips that version.
 
 - Settings → **Updates** turns the check off or on, or turns on **Install updates automatically**.
+- **FramePort doesn't start after an update** (Windows; an error such as `cannot import name …`): the update didn't
+  finish, and the program folder holds files of two versions. Close FramePort (check Task Manager), delete the
+  program folder, download `FramePort-windows-x64.zip` again and unpack the zip into an empty folder. Games,
+  settings and signing keys are stored in `%LOCALAPPDATA%\FramePort` and stay.
 - **Recipes** update by themselves. A game whose recipe changed shows **Update on Frame**.
 - **Moved your games?** Scan the new folder or click **Rescan folders**. Moved games keep their name, artwork, tags
   and settings. [FAQ](FAQ.md#i-moved-my-games-to-another-folder-or-drive-how-do-i-update-the-library).

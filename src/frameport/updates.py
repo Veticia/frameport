@@ -617,40 +617,99 @@ def _sh_quote(path: Path | str) -> str:
     return "'" + str(path).replace("'", "'\\''") + "'"
 
 
+WAIT_FOR_FILES = 60  # seconds the Windows swap script waits for the installed program files to be free
+
+
 def swap_script(app: Path, target: Path, pid: int, platform: str, relaunch: bool, log: Path) -> str:
-    """The script that installs `app` over `target` once process `pid` has exited (text; see apply())."""
+    """The script that installs `app` over `target` once process `pid` has exited (text; see apply()).
+
+    Windows copies the new files over the installed ones (the zip has no folder of its own, so the install folder may
+    hold the user's other files too). The installed copy must end up as exactly one version (GitHub #476: a failed
+    copy was rolled back without removing the files the new version had *added*, so the old version started with a
+    new module next to its own and crashed at start):
+    - nothing is touched while FramePort or a program file (.exe/.dll/.pyd) is still in use;
+    - files of the old version the new one no longer has are moved into `previous` (only inside the bundle's own
+      folders: app, Lib, DLLs, site-packages, data; never top-level files);
+    - on failure the files the update added are deleted again and every replaced/moved file comes back."""
     if platform == "win32":
         start = f"Start-Process -FilePath {_ps_quote(target / 'FramePort.exe')} -WorkingDirectory {_ps_quote(target)}" \
             if relaunch else "Write-Log 'not relaunching'"
         return (f"""$ErrorActionPreference = 'Stop'
 $log = {_ps_quote(log)}
 function Write-Log($m) {{ Add-Content -LiteralPath $log -Value ("$(Get-Date -Format s) $m") }}
+function Start-FramePort {{ {start} }}
 Write-Log 'update: waiting for FramePort (pid {pid}) to exit'
 for ($i = 0; $i -lt 240 -and (Get-Process -Id {pid} -ErrorAction SilentlyContinue); $i++) {{ Start-Sleep"""
 f""" -Milliseconds 500 }}
+if (Get-Process -Id {pid} -ErrorAction SilentlyContinue) {{
+  Write-Log 'update FAILED: FramePort (pid {pid}) is still running; nothing was changed'
+  exit 1
+}}
 Start-Sleep -Milliseconds 500
-$src = {_ps_quote(app)}; $dst = {_ps_quote(target)}
+$src = {_ps_quote(app)}.TrimEnd('\\'); $dst = {_ps_quote(target)}.TrimEnd('\\')
 $backup = Join-Path (Split-Path -Parent $src) 'previous'
+# every file of the new version, relative to its folder
+$new = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+Get-ChildItem -LiteralPath $src -Recurse -File -Force | ForEach-Object {{
+  [void]$new.Add($_.FullName.Substring($src.Length).TrimStart('\\'))
+}}
+# the bundle's own folders (app, Lib, DLLs, site-packages, data): old files in them that the new version doesn't have
+# would mix two versions (Python imports whatever .pyc it finds)
+$owned = @(Get-ChildItem -LiteralPath $src -Directory -Force | ForEach-Object {{ $_.Name }})
+# wait until no program (another FramePort, a helper, a virus scan) holds the program files
+function Test-InUse($p) {{
+  try {{ $s = [IO.File]::Open($p, 'Open', 'ReadWrite', 'None'); $s.Close(); return $false }}
+  catch [System.IO.IOException] {{ return $true }}
+  catch {{ return $false }}
+}}
+$binaries = @($new | Where-Object {{ $_ -match '\\.(exe|dll|pyd)$' }} | ForEach-Object {{ Join-Path $dst $_ }} |
+  Where-Object {{ Test-Path -LiteralPath $_ }})
+$busy = @()
+for ($i = 0; $i -lt {WAIT_FOR_FILES}; $i++) {{
+  $busy = @($binaries | Where-Object {{ Test-InUse $_ }})
+  if ($busy.Count -eq 0) {{ break }}
+  Start-Sleep -Seconds 1
+}}
+if ($busy.Count -gt 0) {{
+  Write-Log "update FAILED: files still in use, nothing was changed: $(($busy | Select-Object -First 5) -join ', ')"
+  Start-FramePort
+  exit 1
+}}
+$added = New-Object 'System.Collections.Generic.List[string]'
+$moved = 0
 try {{
   if (Test-Path -LiteralPath $backup) {{ Remove-Item -LiteralPath $backup -Recurse -Force }}
   New-Item -ItemType Directory -Path $backup | Out-Null
-  # keep the files that will be replaced, so a failed copy can be undone
-  Get-ChildItem -LiteralPath $src -Recurse -File | ForEach-Object {{
-    $rel = $_.FullName.Substring($src.Length).TrimStart('\\')
+  # keep the files that will be replaced, so a failed copy can be undone; note the ones that are new
+  foreach ($rel in $new) {{
     $old = Join-Path $dst $rel
-    if (Test-Path -LiteralPath $old) {{
+    if (Test-Path -LiteralPath $old -PathType Leaf) {{
       $keep = Join-Path $backup $rel
       New-Item -ItemType Directory -Force -Path (Split-Path -Parent $keep) | Out-Null
       Copy-Item -LiteralPath $old -Destination $keep -Force
+    }} else {{ $added.Add($rel) }}
+  }}
+  # move the old version's files that the new one doesn't have into the backup
+  foreach ($dir in $owned) {{
+    $d = Join-Path $dst $dir
+    if (-not (Test-Path -LiteralPath $d -PathType Container)) {{ continue }}
+    foreach ($f in @(Get-ChildItem -LiteralPath $d -Recurse -File -Force)) {{
+      $rel = $f.FullName.Substring($dst.Length).TrimStart('\\')
+      if ($new.Contains($rel)) {{ continue }}
+      $keep = Join-Path $backup $rel
+      New-Item -ItemType Directory -Force -Path (Split-Path -Parent $keep) | Out-Null
+      Move-Item -LiteralPath $f.FullName -Destination $keep -Force
+      $moved++
     }}
   }}
   Copy-Item -Path (Join-Path $src '*') -Destination $dst -Recurse -Force
-  Write-Log 'update: installed'
+  Write-Log "update: installed ($($added.Count) new file(s), $moved old file(s) removed)"
 }} catch {{
   Write-Log "update FAILED: $_ (restoring the previous files)"
+  foreach ($rel in $added) {{ Remove-Item -LiteralPath (Join-Path $dst $rel) -Force -ErrorAction SilentlyContinue }}
   Copy-Item -Path (Join-Path $backup '*') -Destination $dst -Recurse -Force -ErrorAction SilentlyContinue
 }}
-{start}
+Start-FramePort
 """)
     if platform == "darwin":
         start = f"open {_sh_quote(target)}" if relaunch else "echo 'not relaunching' >>\"$log\""

@@ -217,6 +217,7 @@ class FramePortApp:
         threading.Thread(target=self._backfill_covers, daemon=True).start()
         self.updater.start()
         self.announcer.start()
+        self._bundle_warning()
         self.run_bg(self._refresh_catalog)  # confirmed game configs from GitHub main (no release needed)
         self.run_bg(self._check_link_updates)  # newer versions of games installed from install links
         _link_state["owner"] = self
@@ -3169,6 +3170,27 @@ class FramePortApp:
             actions=[C.ghost(tr("Cancel"), on_click=lambda e: self.page.pop_dialog()),
                      C.danger(tr("Uninstall"), ft.Icons.DELETE_FOREVER_OUTLINED, go)]))
 
+    def _bundle_warning(self) -> None:
+        """The program files mix two FramePort versions (an update that didn't finish, GitHub #476): say how to
+        reinstall instead of failing somewhere later."""
+        if not _bundle_check or not _bundle_check[0].broken:
+            return
+        from .. import REPO_URL, updates
+
+        folder = updates.bundle_root() or tr("FramePort's program folder")
+        self.page.show_dialog(C.dialog(
+            tr("FramePort's program files are incomplete"),
+            ft.Column([
+                C.body(tr("An update didn't finish: this folder holds files of two FramePort versions, so parts of "
+                          "FramePort may fail.")),
+                C.body(tr("Close FramePort, delete the folder {folder} and unpack the FramePort download into it "
+                          "again. Your games, settings and keys are stored elsewhere and stay.")
+                       .format(folder=folder)),
+            ], spacing=T.S2, tight=True),
+            actions=[C.ghost(tr("Later"), on_click=lambda e: self.page.pop_dialog()),
+                     C.primary(tr("Download page"), ft.Icons.OPEN_IN_NEW_ROUNDED,
+                               lambda e: self.open_url(f"{REPO_URL}/releases"))]))
+
     def _uninstalled(self, out: dict) -> None:
         async def close(e=None):
             try:
@@ -3292,6 +3314,31 @@ def pop_dialog_skips_toasts() -> None:
         applog.log.warning("pop_dialog() couldn't be kept off toasts (another Flet version?): %s", exc)
 
 
+_bundle_check: list = []  # the start's bundle_files.Check (packaged app only)
+
+
+def check_bundle_files() -> None:
+    """Packaged app: remove files an update left from another FramePort version (GitHub #476); a mixed install is
+    reported in the window (`FramePortApp._bundle_warning`)."""
+    from ..core import bundle_files
+
+    try:
+        result = bundle_files.check()
+    except Exception:  # noqa: BLE001
+        applog.log.exception("checking the program files failed")
+        return
+    if result is None:
+        return
+    _bundle_check[:] = [result]
+    if result.removed:
+        applog.log.warning("removed %d file(s) left from another FramePort version: %s", len(result.removed),
+                           ", ".join(result.removed[:20]))
+    if result.broken:
+        applog.log.error("FramePort's program files mix versions: changed/missing %s; left over %s",
+                         ", ".join(result.mismatched[:20]),
+                         ", ".join(sorted(set(result.stale) - set(result.removed))[:20]))
+
+
 def main(argv=None):
     import sys
 
@@ -3311,6 +3358,7 @@ def main(argv=None):
         print("FramePort is already running.", file=sys.stderr)
         return
     serialize_flet_updates()
+    check_bundle_files()  # before anything imports the patch modules
     from ..core import library
     from .updater import apply_pending_at_start
 

@@ -53,6 +53,21 @@ def check_bundle(out: Path) -> None:
     print("agent source in bundle:", ", ".join(str(p.relative_to(out)) for p in found))
 
 
+def write_file_list(out: Path) -> None:
+    """The bundle's own file list (frameport/core/bundle_files.py): the app removes, or never imports, modules an
+    update left from another version, and says so when the install mixes versions (GitHub #476)."""
+    sys.path.insert(0, str(ROOT / "src"))
+    from frameport.core import bundle_files
+
+    pkgs = sorted({p.parent for name in ("_version.pyc", "_version.py") for p in out.rglob(name)
+                   if p.parent.name == "frameport" and (p.parent / "patches").is_dir()})
+    if not pkgs:  # e.g. the package sits in an archive (PyInstaller): nothing an update can leave behind
+        print(f"{out}: no frameport package folder, no file list")
+        return
+    for pkg in pkgs:
+        print(f"file list: {bundle_files.write(pkg)} files in {pkg.relative_to(out)}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--pyinstaller", action="store_true")
@@ -84,7 +99,9 @@ def main() -> int:
         print(" ".join(cmd))
         rc = subprocess.call(cmd, cwd=ROOT)
         if rc == 0:
-            check_bundle(ROOT / "dist" if args.pyinstaller else ROOT / "dist" / TARGET)
+            out = ROOT / "dist" if args.pyinstaller else ROOT / "dist" / TARGET
+            check_bundle(out)
+            write_file_list(out)
         return rc
     finally:
         if not args.keep_data:
