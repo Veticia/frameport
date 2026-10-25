@@ -126,8 +126,8 @@ def test_shader_fix_layer_findings():
 
 def test_shader_fix_unmatched():
     for prefix in ("vk shim", "shader fix layer"):
-        log = LOG_OK + (f"09-28 17:39:06.000  1147  1174 I FrameBridge: {prefix}: 2 shader fix(es) configured, none matched"
-                        " after 812 modules in 300 s (game updated?)\n")
+        log = LOG_OK + (f"09-28 17:39:06.000  1147  1174 I FrameBridge: {prefix}: 2 shader fix(es) configured, "
+                        "none matched after 812 modules in 300 s (game updated?)\n")
         r = triage(log, "RUNNING", "com.example.game")
         f = next(f for f in r.findings if f.id == "shader-fix-unmatched")
         assert f.severity == "info" and r.verdict != "fail"
