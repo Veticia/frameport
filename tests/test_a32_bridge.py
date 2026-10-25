@@ -552,3 +552,28 @@ def test_jit_ends_blocks_before_the_stub_table_is_full():
     root = Path(__file__).resolve().parents[1] / "native" / "a32translator"
     assert "x->nstubs > MAX_STUBS - STUB_RESERVE" in (root / "src" / "jit.c").read_text()
     assert '"sha1ce": ("sha1ce.c"' in (root / "tests" / "run_programs.py").read_text()
+
+
+def test_audio_pacing(tmp_path):
+    """GitHub #439: the OpenSL ES player reads the guest's buffers on the clock (host/audio_pacing.h), one per buffer
+    duration, instead of in pairs at AudioFlinger's 20 ms bursts (Ghost Giant's FMOD then mixed discontinuous
+    blocks: distorted sound). The fixture simulates the Frame's device: steady state, clock drift both ways, a guest
+    stall, an underrun, a late device start and buffers larger than the stream."""
+    import os
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    import pytest
+
+    cc = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
+    if not cc or os.name == "nt":
+        pytest.skip("needs a POSIX host C compiler")
+    root = Path(__file__).resolve().parents[1]
+    binary = tmp_path / "a32-audio-pacing-test"
+    subprocess.run([cc, "-std=c11", "-Wall", "-Wextra", "-Werror",
+                    "-I", str(root / "native/a32translator/bridge/host"),
+                    str(root / "tests/fixtures/src/a32_audio_pacing_test.c"), "-o", str(binary)], check=True)
+    subprocess.run([str(binary)], check=True, timeout=60)
+    host = (root / "native/a32translator/bridge/host/android.c").read_text()
+    assert "a32_pace_before(" in host and 'getenv("A32_AUDIO_PACING")' in host

@@ -196,8 +196,8 @@ class A32Bridge(Patch):
     # the translator ended blocks before its exit-stub table ran out only from this release on (GitHub #342: OpenSSL's
     # ARMv8 SHA-1 rounds in Pinball FX2 VR killed the game): "Update on Frame" for the game that hit it
     # Ghost Giant (GitHub #439): Unity's video player needs libmediandk (AMediaFormat/AMediaCodec/AMediaExtractor
-    # functions, then its AMEDIAFORMAT_KEY_* data symbols)
-    package_revisions = {"com.zenstudios.PinballFX2VRQuest": 2, "com.zoink.ghostgiant": 3}
+    # functions, then its AMEDIAFORMAT_KEY_* data symbols); 4: OpenSL ES buffers read on the clock (distorted sound)
+    package_revisions = {"com.zenstudios.PinballFX2VRQuest": 2, "com.zoink.ghostgiant": 4}
     title = "32-bit ARM bridge (Gear VR / Go games)"
     description = (
         "Runs a 32-bit-only game (armeabi-v7a: Gear VR, Oculus Go and early Quest games) on the Frame, which has no "

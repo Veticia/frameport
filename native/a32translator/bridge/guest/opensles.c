@@ -1,15 +1,17 @@
 /* OpenSL ES for guest code: the part audio engines use for output (an engine, an output mix and PCM audio players
  * fed by an Android simple buffer queue), implemented here in the guest and played through the host's AAudio
  * (a32_audio_*, host/android.c). OpenSL's objects are tables of function pointers, so keeping them on the guest side
- * needs no thunks; each playing player has a guest thread that writes its queued buffers (blocking, which paces the
- * queue like a real device) and calls the buffer-queue callback. Recording and everything else report "not
- * supported". */
+ * needs no thunks; each playing player has a guest thread that writes its queued buffers and calls the buffer-queue
+ * callback. The write blocks until the buffer is due (host/audio_pacing.h: real-time pacing, so a two-buffer engine
+ * like FMOD gets its callbacks evenly and has time to refill a buffer before it is read). Recording and everything
+ * else report "not supported". */
 #include <SLES/OpenSLES.h>
 #include <SLES/OpenSLES_Android.h>
 #include <pthread.h>
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "grt.h"
 
 /* host/android.c (imports.txt) */
@@ -55,7 +57,7 @@ typedef struct obj {
     slPlayCallback pcb;
     void *pctx;
     SLuint32 pmask;
-    struct { const void *data; SLuint32 size; } q[QMAX];
+    struct { const void *data; SLuint32 size; int64_t t; } q[QMAX];
     SLuint32 qhead, qcount, qindex;
     SLmillibel level;
     SLboolean mute;
@@ -65,11 +67,38 @@ typedef struct obj {
     int quit, has_thread;
     pthread_mutex_t lock;
     pthread_cond_t cond;
+    /* A32_AUDIO_TRACE: enqueue → read times (ns) */
+    int64_t tr_min, tr_max, tr_sum, tr_report;
+    int tr_n;
 } obj;
 
 #define OBJ(self, field) ((obj *)((char *)(self) - offsetof(obj, field)))
 
 /* ---------------------------------------------------------------- the player thread */
+
+static int trace = -1; /* A32_AUDIO_TRACE (host/android.c traces the pacing) */
+
+static int64_t now_ns(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
+}
+
+/* how long after its enqueue a buffer was read (the write returned), every 2 s */
+static void trace_read(obj *o, int64_t enqueued)
+{
+    int64_t now = now_ns(), d = now - enqueued;
+    if (!o->tr_n || d < o->tr_min) o->tr_min = d;
+    if (d > o->tr_max) o->tr_max = d;
+    o->tr_sum += d;
+    o->tr_n++;
+    if (!o->tr_report) o->tr_report = now;
+    if (now - o->tr_report < 2000000000) return;
+    grt_log(4, "a32sles", "enqueue to read 2s: n=%d min/avg/max=%.2f/%.2f/%.2f ms", o->tr_n, o->tr_min / 1e6,
+            o->tr_sum / 1e6 / o->tr_n, o->tr_max / 1e6);
+    o->tr_report = now, o->tr_n = 0, o->tr_sum = 0, o->tr_max = 0;
+}
 
 static void *player_thread(void *arg)
 {
@@ -80,9 +109,11 @@ static void *player_thread(void *arg)
         if (o->quit) break;
         const void *data = o->q[o->qhead].data;
         SLuint32 size = o->q[o->qhead].size;
+        int64_t enqueued = o->q[o->qhead].t;
         pthread_mutex_unlock(&o->lock);
         int frame = o->channels * o->bits / 8;
         if (o->stream && frame) a32_audio_write(o->stream, data, (int)(size / (SLuint32)frame));
+        if (trace > 0) trace_read(o, enqueued);
         pthread_mutex_lock(&o->lock);
         if (o->qcount && o->q[o->qhead].data == data) { /* not cleared meanwhile */
             o->qhead = (o->qhead + 1) % QMAX;
@@ -258,6 +289,7 @@ static SLresult queue_enqueue(SLAndroidSimpleBufferQueueItf self, const void *bu
     logged++;
     SLuint32 at = (o->qhead + o->qcount) % QMAX;
     o->q[at].data = buf, o->q[at].size = size;
+    o->q[at].t = trace > 0 ? now_ns() : 0;
     o->qcount++;
     pthread_cond_broadcast(&o->cond);
     pthread_mutex_unlock(&o->lock);
@@ -380,6 +412,7 @@ static SLresult engine_create_player(SLEngineItf self, SLObjectItf *player, SLDa
         grt_log(5, "a32sles", "float PCM isn't supported");
         return SL_RESULT_CONTENT_UNSUPPORTED;
     }
+    if (trace < 0) trace = getenv("A32_AUDIO_TRACE") != NULL;
     obj *o = new_obj(K_PLAYER);
     o->play = &play_itf;
     o->queue = &queue_itf;

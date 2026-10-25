@@ -33,6 +33,10 @@ void imp_ASensorManager_createEventQueue(a32_cpu *c, argreader *R)
 /* ---------------------------------------------------------------- audio output (guest/opensles.c) */
 
 #include <aaudio/AAudio.h>
+#include <errno.h>
+#include <stdio.h>
+#include <time.h>
+#include "audio_pacing.h"
 
 #define W(f) extern __typeof__(f) f __attribute__((weak))
 W(AAudio_createStreamBuilder); W(AAudioStreamBuilder_setSampleRate); W(AAudioStreamBuilder_setChannelCount);
@@ -40,16 +44,53 @@ W(AAudioStreamBuilder_setFormat); W(AAudioStreamBuilder_setPerformanceMode); W(A
 W(AAudioStreamBuilder_delete); W(AAudioStream_requestStart); W(AAudioStream_requestPause);
 W(AAudioStream_requestFlush); W(AAudioStream_write); W(AAudioStream_close); W(AAudio_convertResultToText);
 W(AAudioStream_setBufferSizeInFrames); W(AAudioStream_getBufferCapacityInFrames); W(AAudioStream_getXRunCount);
+W(AAudioStream_getFramesWritten); W(AAudioStream_getFramesRead);
 #undef W
+
+/* A32_AUDIO_PACING=0: the old blocking writes only (see audio_pacing.h); A32_AUDIO_TRACE=1: pacing statistics every
+ * 2 s (and the guest's enqueue → read times, guest/opensles.c); A32_AUDIO_DUMP=<file>: append everything written to
+ * the stream (raw PCM) to that file, e.g. /data/data/<package>/files/a32audio.pcm */
+static int audio_pacing = -1, audio_trace;
+static FILE *audio_dump;
 
 typedef struct {
     AAudioStream *stream;
-    int frame_bytes;
+    int frame_bytes, rate;
+    a32_pace pace;
+    int running, primed; /* paced: the device has read since the start; the start's pre-roll was written */
+    int64_t read_mark;
+    /* trace */
+    int64_t t_last, t_report, gap_min, gap_max, gap_sum, slept, level_min, level_max;
+    int writes;
 } audio_out;
+
+static int64_t audio_now(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * A32_PACE_NS + ts.tv_nsec;
+}
+
+static int64_t audio_level(audio_out *o)
+{
+    if (!AAudioStream_getFramesWritten || !AAudioStream_getFramesRead) return -1;
+    int64_t w = AAudioStream_getFramesWritten(o->stream), r = AAudioStream_getFramesRead(o->stream);
+    return w >= 0 && r >= 0 ? w - r : -1;
+}
 
 void imp_a32_audio_open(a32_cpu *c, argreader *R)
 {
     int rate = (int)rd32(R), channels = (int)rd32(R), bits = (int)rd32(R);
+    if (audio_pacing < 0) {
+        const char *e = getenv("A32_AUDIO_PACING");
+        audio_pacing = !(e && *e == '0');
+        audio_trace = getenv("A32_AUDIO_TRACE") != NULL;
+        const char *d = getenv("A32_AUDIO_DUMP");
+        if (d && *d) {
+            audio_dump = fopen(d, "ab");
+            if (!audio_dump) bridge_log(ANDROID_LOG_WARN, "audio: can't write %s", d);
+        }
+    }
     AAudioStreamBuilder *b = NULL;
     if (!AAudio_createStreamBuilder || bits != 16 || AAudio_createStreamBuilder(&b) != AAUDIO_OK) {
         bridge_log(ANDROID_LOG_ERROR, "audio: can't open a %d Hz, %d channel, %d bit stream", rate, channels, bits);
@@ -70,25 +111,100 @@ void imp_a32_audio_open(a32_cpu *c, argreader *R)
         return;
     }
     /* ~40 ms: writes block at the device's pace. A larger buffer let the player thread drain the guest's queue
-     * faster than real time, and the guest's mixer (FMOD) fell behind: crackling */
+     * faster than real time, and the guest's mixer (FMOD) fell behind: crackling. AudioFlinger also starts a legacy
+     * track only once its buffer is full, so paced streams keep 40 ms until the device reads (the pre-roll fills
+     * it) and only then take more room for the drift correction (audio_running) */
     if (AAudioStream_setBufferSizeInFrames) AAudioStream_setBufferSizeInFrames(s, rate / 25);
     audio_out *o = calloc(1, sizeof *o);
     o->stream = s;
     o->frame_bytes = channels * 2;
-    bridge_log(ANDROID_LOG_INFO, "audio: %d Hz, %d channels through AAudio", rate, channels);
+    o->rate = rate;
+    a32_pace_init(&o->pace, rate);
+    o->gap_min = INT64_MAX;
+    o->level_min = INT64_MAX;
+    bridge_log(ANDROID_LOG_INFO, "audio: %d Hz, %d channels through AAudio%s", rate, channels,
+               audio_pacing ? ", paced" : "");
     ret32(c, ptr2h(o));
 }
 
-/* blocking, like a full OpenSL buffer queue: this paces the guest's audio thread */
+static aaudio_result_t audio_put(audio_out *o, const void *data, int frames)
+{
+    if (audio_dump) fwrite(data, (size_t)o->frame_bytes, (size_t)frames, audio_dump);
+    return AAudioStream_write(o->stream, data, frames, 1000000000LL);
+}
+
+static void audio_silence(audio_out *o, int64_t frames)
+{
+    static const int16_t zeros[4096];
+    int chunk = (int)sizeof zeros / o->frame_bytes;
+    for (int64_t left = frames; left > 0; left -= chunk) audio_put(o, zeros, left < chunk ? (int)left : chunk);
+}
+
+static void audio_trace_write(audio_out *o, int64_t now, int64_t level)
+{
+    if (o->t_last) {
+        int64_t gap = now - o->t_last;
+        if (gap < o->gap_min) o->gap_min = gap;
+        if (gap > o->gap_max) o->gap_max = gap;
+        o->gap_sum += gap;
+    }
+    if (level >= 0 && level < o->level_min) o->level_min = level;
+    if (level > o->level_max) o->level_max = level;
+    o->t_last = now;
+    o->writes++;
+    if (!o->t_report) o->t_report = now;
+    if (now - o->t_report < 2 * A32_PACE_NS) return;
+    int n = o->writes > 1 ? o->writes - 1 : 1;
+    bridge_log(ANDROID_LOG_INFO,
+               "audio pacing 2s: writes=%d interval min/avg/max=%.1f/%.1f/%.1f ms level min/max=%lld/%lld "
+               "slept=%lld ms anchors=%d shifts=%d silence=%lld frames",
+               o->writes, o->gap_min / 1e6, o->gap_sum / 1e6 / n, o->gap_max / 1e6,
+               (long long)(o->level_min == INT64_MAX ? -1 : o->level_min), (long long)o->level_max,
+               (long long)(o->slept / 1000000), o->pace.anchors, o->pace.shifts, (long long)o->pace.silence_frames);
+    if (audio_dump) fflush(audio_dump);
+    o->t_report = now, o->writes = 0, o->gap_sum = 0, o->gap_min = INT64_MAX, o->gap_max = 0, o->slept = 0;
+    o->level_min = INT64_MAX, o->level_max = 0;
+}
+
+/* blocking, like a full OpenSL buffer queue; paced (audio_pacing.h): each buffer is read when the device needs it */
 void imp_a32_audio_write(a32_cpu *c, argreader *R)
 {
     audio_out *o = h2ptr(rd32(R));
     const void *data = g2p(rd32(R));
     int frames = (int)rd32(R);
-    aaudio_result_t r = o ? AAudioStream_write(o->stream, data, frames, 1000000000LL) : 0;
+    if (!o) {
+        ret32(c, 0);
+        return;
+    }
+    int x = AAudioStream_getXRunCount ? AAudioStream_getXRunCount(o->stream) : 0;
+    if (audio_pacing && !o->running && AAudioStream_getFramesRead &&
+        AAudioStream_getFramesRead(o->stream) > o->read_mark) { /* the device plays: pace from here */
+        o->running = 1;
+        a32_pace_restart(&o->pace);
+        if (AAudioStream_setBufferSizeInFrames) AAudioStream_setBufferSizeInFrames(o->stream, o->rate * 3 / 20);
+    }
+    if (audio_pacing && !o->running && !o->primed) { /* fill the 40 ms with silence: that starts the device */
+        int64_t level = audio_level(o);
+        audio_silence(o, level > 0 ? o->pace.preroll - level : o->pace.preroll);
+        o->primed = 1;
+    }
+    if (audio_pacing && o->running) {
+        for (;;) {
+            int64_t now = audio_now();
+            a32_pace_step s = a32_pace_before(&o->pace, now, audio_level(o), x);
+            audio_silence(o, s.silence);
+            if (s.wait_ns <= 0) break;
+            struct timespec ts = {(time_t)(s.wait_ns / A32_PACE_NS), (long)(s.wait_ns % A32_PACE_NS)};
+            while (nanosleep(&ts, &ts) && errno == EINTR) {}
+            o->slept += s.wait_ns;
+        }
+    }
+    if (audio_trace) audio_trace_write(o, audio_now(), audio_level(o));
+    aaudio_result_t r = audio_put(o, data, frames);
+    if (audio_pacing && r > 0) a32_pace_after(&o->pace, r);
     static int xruns;
-    if (o && AAudioStream_getXRunCount) {
-        int x = AAudioStream_getXRunCount(o->stream);
+    if (AAudioStream_getXRunCount) {
+        x = AAudioStream_getXRunCount(o->stream);
         if (x > xruns && (xruns < 20 || x % 100 == 0)) bridge_log(ANDROID_LOG_WARN, "audio: %d underruns", x);
         xruns = x;
     }
@@ -98,7 +214,13 @@ void imp_a32_audio_write(a32_cpu *c, argreader *R)
 void imp_a32_audio_start(a32_cpu *c, argreader *R)
 {
     audio_out *o = h2ptr(rd32(R));
-    if (o) AAudioStream_requestStart(o->stream);
+    if (!o) return;
+    /* paced: a new pre-roll, then a new timeline once the device reads again */
+    o->running = 0, o->primed = 0;
+    o->read_mark = AAudioStream_getFramesRead ? AAudioStream_getFramesRead(o->stream) : 0;
+    if (audio_pacing && AAudioStream_setBufferSizeInFrames) AAudioStream_setBufferSizeInFrames(o->stream, o->rate / 25);
+    a32_pace_restart(&o->pace);
+    AAudioStream_requestStart(o->stream);
 }
 
 void imp_a32_audio_pause(a32_cpu *c, argreader *R)
