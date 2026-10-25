@@ -55,13 +55,148 @@ class TriageResult:
 
 
 _db = None
+_skipped: dict[str, str] = {}  # remote signature id -> why this app can't use it
 
 
 def database() -> dict:
+    """The bundled catalog/triage.yaml, updated by the copy on GitHub main (recommend/catalog.refresh_remote, every
+    6 h) where this app can use it: a remote signature replaces the bundled one with its id, unless it is malformed,
+    names a patch or adapter setting this app doesn't have, or needs a newer FramePort (min_app, also top-level); then
+    the bundled one (if any) stays. Bundled-only signatures stay too (a source checkout or dev build may be ahead of
+    main), and a bundled signature dated (`updated`) later than the remote one wins."""
     global _db
     if _db is None:
-        _db = yaml.safe_load((catalog_dir() / "triage.yaml").read_text(encoding="utf-8"))
+        bundled = yaml.safe_load((catalog_dir() / "triage.yaml").read_text(encoding="utf-8"))
+        _skipped.clear()
+        try:
+            _db = merge_remote(bundled, _remote_text())
+        except Exception:  # noqa: BLE001 - never let a remote copy break triage
+            _db = bundled
     return _db
+
+
+def reset() -> None:
+    """Read the signatures again (a refresh downloaded a new remote copy)."""
+    global _db
+    _db = None
+
+
+def skipped() -> dict[str, str]:
+    """Remote signatures (or "*" = the whole remote copy, or a marker list) this app can't use, with the reason."""
+    database()
+    return dict(_skipped)
+
+
+def _remote_text() -> str | None:
+    from ..recommend import catalog
+
+    return catalog.remote_triage_text()
+
+
+SEVERITIES = ("fatal", "error", "warning", "info")
+SIG_FIELDS = {"id": str, "pattern": str, "severity": str, "diagnosis": str, "suggest": list, "supersedes": list,
+              "kind": str, "unless": str, "report": bool, "question": str, "use_alt": bool, "min_app": str,
+              "updated": str}
+MARKER_FIELDS = {"id", "label", "pattern", "kind"}
+
+
+def _too_new(min_app) -> str | None:
+    from .. import __version__
+    from ..updates import parse_version
+
+    if min_app and parse_version(str(min_app)) > parse_version(__version__):
+        return f"needs FramePort {min_app}"
+    return None
+
+
+def _regex_ok(p) -> bool:
+    try:
+        re.compile(p)
+        return True
+    except (re.error, TypeError):
+        return False
+
+
+def signature_problem(sig, known: set[str]) -> str | None:
+    """Why this app can't use a (remote) signature, or None. Normalises YAML dates/numbers in updated/min_app."""
+    if not isinstance(sig, dict):
+        return "not a mapping"
+    unknown = [k for k in sig if k not in SIG_FIELDS]
+    if unknown:  # a field a newer FramePort reads: matching without it could give a wrong finding
+        return f"unknown field(s) {', '.join(sorted(map(str, unknown)))}"
+    for k in ("id", "pattern", "severity", "diagnosis"):
+        if not sig.get(k):
+            return f"missing {k}"
+    for k in ("updated", "min_app"):
+        if sig.get(k) is not None and not isinstance(sig[k], str):
+            sig[k] = str(sig[k])
+    for k, t in SIG_FIELDS.items():
+        if sig.get(k) is not None and not isinstance(sig[k], t):
+            return f"{k} is not a {t.__name__}"
+    if sig["severity"] not in SEVERITIES:
+        return f"unknown severity {sig['severity']}"
+    if sig.get("kind", "quest") not in ("quest", "pcvr"):
+        return f"unknown kind {sig['kind']}"
+    if not _regex_ok(sig["pattern"]) or (sig.get("unless") and not _regex_ok(sig["unless"])):
+        return "invalid pattern"
+    if not all(isinstance(x, str) for x in (sig.get("suggest") or []) + (sig.get("supersedes") or [])):
+        return "suggest/supersedes entries must be text"
+    if reason := _too_new(sig.get("min_app")):
+        return reason
+    missing = [pid for pid, _v in map(split_suggestion, sig.get("suggest") or []) if pid not in known]
+    return f"unknown patch(es) {', '.join(missing)}" if missing else None
+
+
+def _markers_ok(items) -> bool:
+    return isinstance(items, list) and all(
+        isinstance(m, dict) and set(m) <= MARKER_FIELDS and isinstance(m.get("label"), str)
+        and _regex_ok(m.get("pattern")) and m.get("kind", "quest") in ("quest", "pcvr") for m in items)
+
+
+def merge_remote(bundled: dict, text: str | None) -> dict:
+    """The bundled database with a remote copy's usable parts (see database())."""
+    if not text:
+        return bundled
+    try:
+        remote = yaml.safe_load(text)
+    except yaml.YAMLError:
+        _skipped["*"] = "not valid YAML"
+        return bundled
+    if not isinstance(remote, dict) or not isinstance(remote.get("signatures"), list):
+        _skipped["*"] = "no signatures list"
+        return bundled
+    if reason := _too_new(remote.get("min_app")):
+        _skipped["*"] = reason
+        return bundled
+    from ..patches import base
+
+    base.load_all()  # every patch registered (overport ids come from this app's OVRPort list)
+    known = set(base.REGISTRY)
+    own = {s["id"]: s for s in bundled.get("signatures") or []}
+    sigs, seen = [], set()
+    for sig in remote["signatures"]:
+        sid = sig.get("id") if isinstance(sig, dict) else None
+        if not isinstance(sid, str) or not sid or sid in seen:
+            _skipped[str(sid)] = "missing or repeated id"
+            continue
+        seen.add(sid)
+        if reason := signature_problem(sig, known):
+            _skipped[sid] = reason
+            if sid in own:
+                sigs.append(own[sid])  # this app's own version stays
+            continue
+        mine = own.get(sid)
+        newer_here = mine is not None and str(mine.get("updated") or "") > str(sig.get("updated") or "")
+        sigs.append(mine if newer_here else sig)
+    sigs += [s for s in bundled.get("signatures") or [] if s["id"] not in seen]  # bundled-only ones stay
+    out = dict(bundled, signatures=sigs)
+    for key in ("milestones", "headless_end"):  # ordered lists without ids: the remote list as a whole, if valid
+        if key in remote:
+            if _markers_ok(remote[key]):
+                out[key] = remote[key]
+            else:
+                _skipped[key] = "malformed list"
+    return out
 
 
 LOGCAT_LINE = re.compile(r"\d\d-\d\d \d\d:\d\d:\d\d\.\d+ ")

@@ -5,6 +5,10 @@
 # fix is offered as that question, never applied on its own. `report: true` = the useful next step is a problem report
 # with diagnostics. Launch tests and real play sessions (agent session_log, `frameport session`) are both matched.
 # Sources: every failure we hit porting 34 games to the Steam Frame (see docs/PLAYBOOK.md).
+# Installed apps fetch this file from GitHub main (every 6 h, like catalog/games) and use each remote signature in
+# place of their bundled one with the same id, unless it names a patch/adapter setting or a field the app doesn't know,
+# or `min_app` (per signature, or top-level for the whole file) is above its version. Optional `updated: 'YYYY-MM-DD'`
+# lets a bundled copy that was changed later win over an older remote one.
 signatures:
   - id: mr-no-room
     pattern: 'FrameBridge[^\r\n]*scene: (?:capture requested -> (?:guardian box|using guardian room)|room from guardian|room [^\r\n]*(?:from guardian|configured/default size|box))'

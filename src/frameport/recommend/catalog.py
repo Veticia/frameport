@@ -7,6 +7,7 @@ Sources, highest priority first:
                     in the background (refresh_remote, at most every 6 h); loading only reads the cache. An entry that
                     needs a newer FramePort (a patch, adapter setting or recipe field this version doesn't know, or
                     min_app above this version) is skipped: the bundled entry stays.
+                    catalog/triage.yaml comes the same way (validate/triage.py checks each signature).
   3. bundled        catalog/games/*.yaml in this repo
 """
 from __future__ import annotations
@@ -164,6 +165,30 @@ def _remote_index_path() -> Path:
     return cache.cache_dir() / "catalog-github.json"
 
 
+GITHUB_TRIAGE = "catalog/triage.yaml"
+
+
+def triage_cache_path(sha: str) -> Path:
+    return cache.cache_dir() / f"triage-gh-{sha}.yaml"
+
+
+def remote_triage_text() -> str | None:
+    """The remote catalog/triage.yaml this app may use (no network for GitHub: the copy refresh_remote cached; with
+    FRAMEPORT_CATALOG_URL, that folder's optional triage.yaml, cached 6 h), or None: bundled signatures only."""
+    import json
+
+    base = os.environ.get("FRAMEPORT_CATALOG_URL")
+    if base:
+        return cache.cached_text("catalog-triage.yaml", base.rstrip("/") + "/triage.yaml", max_age=REMOTE_EVERY)
+    if not remote_enabled():
+        return None
+    try:
+        sha = json.loads(_remote_index_path().read_text(encoding="utf-8")).get("triage")
+        return triage_cache_path(sha).read_text(encoding="utf-8") if isinstance(sha, str) and sha.isalnum() else None
+    except (OSError, ValueError):
+        return None
+
+
 def refresh_remote(force: bool = False) -> int:
     """Fetch new/changed entries from GitHub main into the cache (one API call for the file list + one raw download
     per changed file). Returns the number of files downloaded. Never raises (offline: the cache stays)."""
@@ -192,14 +217,27 @@ def refresh_remote(force: bool = False) -> int:
             text = cache.http_get(GITHUB_RAW.format(repo=repo, ref="main", path=GITHUB_DIR + name), timeout=20).text
             cache.write_atomic(dest, text)
             fetched += 1
+        # the triage signatures (validate/triage.py reads them, checked against this app, over the bundled ones)
+        triage_sha = next((t["sha"] for t in tree.get("tree") or []
+                           if t.get("type") == "blob" and t.get("path") == GITHUB_TRIAGE), None)
+        if triage_sha and not (dest := triage_cache_path(triage_sha)).exists():
+            cache.write_atomic(dest, cache.http_get(GITHUB_RAW.format(repo=repo, ref="main", path=GITHUB_TRIAGE),
+                                                    timeout=20).text)
         for f in cache.cache_dir().glob("catalog-gh-*.yaml"):  # files gone from main (or old versions)
             if f.name.removeprefix("catalog-gh-").removesuffix(".yaml") not in files.values():
                 f.unlink(missing_ok=True)
-        cache.write_atomic(idx_path, json.dumps({"checked": time.time(), "files": files}))
+        for f in cache.cache_dir().glob("triage-gh-*.yaml"):
+            if f.name != (triage_sha and triage_cache_path(triage_sha).name):
+                f.unlink(missing_ok=True)
+        cache.write_atomic(idx_path, json.dumps({"checked": time.time(), "files": files, "triage": triage_sha}))
     except Exception:  # noqa: BLE001 - offline / rate limited: keep what we have, try again next time
         return 0
     if fetched or files != old.get("files"):
         load(refresh=True)
+    if triage_sha != old.get("triage"):
+        from ..validate import triage
+
+        triage.reset()
     if not old.get("files"):  # the first download (a new install): nothing was "updated"
         return 0
     return fetched

@@ -316,6 +316,10 @@ def catalog_update():
     typer.echo(f"{n} recipe(s) downloaded; {st['entries']} on GitHub main")
     for pkg, why in sorted(st["skipped"].items()):
         typer.echo(f"  skipped {pkg}: {why}")
+    from .validate import triage
+
+    for sid, why in sorted(triage.skipped().items()):
+        typer.echo(f"  skipped triage signature {sid}: {why}")
 
 
 @app.command("link-updates")
