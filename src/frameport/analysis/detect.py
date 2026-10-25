@@ -60,7 +60,9 @@ IL2CPP_METADATA = "assets/bin/Data/Managed/Metadata/global-metadata.dat"
 # 25: meta_depth_occlusion (Unity games with Meta's depth-occlusion keywords: frame.meta_depth_occlusion, PR #246)
 #     (2026-10)
 # 26: browser_query (the manifest's <queries> look for a web browser: frame.browser_handoff, GitHub #466) (2026-10)
-ANALYSIS_VERSION = 26  # (cortopia_org_id's TMNT layout, GitHub #422, needed no re-analysis: see the patch)
+# 27: uses_libraries (the original manifest's <uses-library> names, which OVRPort removes:
+#     frame.keep_system_libraries, GitHub #484) (2026-10)
+ANALYSIS_VERSION = 27  # (cortopia_org_id's TMNT layout, GitHub #422, needed no re-analysis: see the patch)
 
 
 # Android versions by API level (for messages); the Frame's Lepton container runs Android 11 (API 30)
@@ -491,6 +493,8 @@ def analyze(path: Path, deep: bool = True, data_bytes: int | None = None) -> Ana
             "gamepad": "android.hardware.gamepad" in features or axml.LEANBACK_LAUNCHER in cats,
             # the manifest's <queries> look for a web browser (sign-ins; Lepton has none): frame.browser_handoff
             "browser_query": axml.queries_browser(manifest),
+            # shared Java libraries the original manifest asks for (OVRPort drops them): frame.keep_system_libraries
+            "uses_libraries": axml.uses_libraries(manifest),
             "oculus_xr_plugin": bool(il2cpp_meta) and b"\0m_StereoRenderingModeAndroid\0" in il2cpp_meta,
             "meta_depth_occlusion": (
                 bool(il2cpp_meta) and (b"HARD_OCCLUSION" in il2cpp_meta or b"SOFT_OCCLUSION" in il2cpp_meta)

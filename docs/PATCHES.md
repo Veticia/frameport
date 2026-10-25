@@ -2,7 +2,7 @@
 
 # Patches
 
-Every patch and game setting FramePort knows: 201 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
+Every patch and game setting FramePort knows: 202 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
 
 Each entry says what the patch does, whether it changes the APK or only the install, when FramePort suggests it, its options, the catalog games whose recipe names it and the launch-test signatures that suggest it. Patches that are on by default are on for every game, so the catalog rarely names them.
 
@@ -11,7 +11,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 ## Groups
 
 - [Patches from OVRPort](#group-overport) (25)
-- [Steam Frame patches](#group-frame) (70)
+- [Steam Frame patches](#group-frame) (71)
 - [Game settings](#group-adapter) (82)
 - [Files and settings on the Frame](#group-device) (11)
 - [PC VR (Proton and Revive)](#group-pcvr) (13)
@@ -62,6 +62,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Godot apps: start without a clipboard service](#frame-godot_clipboard) | `frame.godot_clipboard` | Steam Frame patches | 1 |
 | [Hardware video decoding (H.264, HEVC, VP9)](#frame-hw_video_decode) | `frame.hw_video_decode` | Steam Frame patches | 42 |
 | [Just Dance VR: keep progress in the local save](#frame-justdance_local_save) | `frame.justdance_local_save` | Steam Frame patches |  |
+| [Keep Android's shared libraries the app uses](#frame-keep_system_libraries) | `frame.keep_system_libraries` | Steam Frame patches | default |
 | [Language packs from the game's files](#frame-langpacks) | `frame.langpacks` | Steam Frame patches |  |
 | [Launcher category (INFO → LAUNCHER)](#frame-launcher) | `frame.launcher` | Steam Frame patches | default |
 | [GL wrapper: OpenGL ES depth formats (Minecraft)](#frame-ltw_depth) | `frame.ltw_depth` | Steam Frame patches | default |
@@ -751,6 +752,19 @@ Makes Just Dance VR keep your progress between sessions (it only kept it online,
 - **Source:** [patches/frame/justdance_save.py](../src/frameport/patches/frame/justdance_save.py)
 
 > Just Dance VR (GitHub #480) loads its progress from a local save at start, but the method that writes it (LocalSaveEvents.RequestSave) is empty: on a Quest the progress is kept by Ubisoft's online backend after a Meta sign-in, which the Frame doesn't have, so progress, unlocks and the finished tutorial were lost at every restart. The method gets the body it is declared with (raise the SaveValueRequested event the game's own save system listens to), built from its neighbour SaveSystemReady and placed in a new code segment of libil2cpp.so; everything is found per build with Cpp2IL (downloaded on first use). A build that already writes its save is left unchanged. No sign-in or online data is touched.
+
+### <a id="frame-keep_system_libraries"></a>Keep Android's shared libraries the app uses
+
+Lets apps start that need one of Android's optional libraries (for example YouTube VR).
+
+- `frame.keep_system_libraries` · on by default
+- **Changes:** Changes the APK (a rebuild and reinstall apply it).
+- **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
+- **Suggested by launch-test signatures:**
+  - `system-library-missing` (fatal): The app closed at start because it can't find classes from one of Android's optional libraries (for example org.apache.http.legacy in YouTube VR).
+- **Source:** [patches/frame/system_libraries.py](../src/frameport/patches/frame/system_libraries.py)
+
+> OVRPort removes every &lt;uses-library&gt; entry from the manifest (Quest-only libraries would stop the install), including ones the Frame's Android has. An app that needs one of those then can't find its classes and closes at start (for example YouTube VR: ClassNotFoundException org.apache.http.protocol.HttpRequestHandler, from org.apache.http.legacy). This puts back the entries for libraries the Frame provides, marked optional.
 
 ### <a id="frame-langpacks"></a>Language packs from the game's files
 

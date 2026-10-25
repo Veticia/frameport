@@ -123,6 +123,8 @@ SUMMARIES = {
                          "seasons).",
     "frame.ovr_microphone": "Stops a crash a few seconds after the logo in games with voice chat.",
     "frame.ovr_stable_user": "Keeps your progress in games that file their saves under your Meta user.",
+    "frame.keep_system_libraries": "Lets apps start that need one of Android's optional libraries (for example "
+                                   "YouTube VR).",
     "frame.cortopia_org_id": "Gets Cortopia games (for example Escaping Wonderland) past their loading screen.",
     "frame.ovr_org_scoped_id": "Answers Meta's request for your org-scoped user id, which games such as Eleven Table "
                                "Tennis wait for on their loading screen.",

@@ -549,6 +549,11 @@
   "title": "Just Dance VR: keep progress in the local save",
   "group": "Steam Frame patches"
  },
+ "frame.keep_system_libraries": {
+  "anchor": "frame-keep_system_libraries",
+  "title": "Keep Android's shared libraries the app uses",
+  "group": "Steam Frame patches"
+ },
  "frame.langpacks": {
   "anchor": "frame-langpacks",
   "title": "Language packs from the game's files",

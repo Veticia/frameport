@@ -794,6 +794,60 @@ def add_browser_activity(manifest: bytes, activity: str) -> bytes | None:
     return bytes(data)
 
 
+# ---------------------------------------------------------------------- shared libraries (frame.keep_system_libraries)
+USES_LIBRARY_ATTR_IDS = {"name": 0x01010003, "required": 0x0101028E}
+
+
+def uses_libraries(manifest: bytes) -> list[str]:
+    """The shared Java libraries the manifest's <uses-library> entries name (not <uses-native-library>), in file
+    order, each once."""
+    x = Axml(manifest)
+    out: list[str] = []
+    for el in x.elements():
+        if el.name == "uses-library":
+            name = x.attr_str(el, "name")
+            if name and name not in out:
+                out.append(name)
+    return out
+
+
+def add_uses_libraries(manifest: bytes, libraries: list[str]) -> bytes | None:
+    """Declare each of `libraries` the manifest doesn't name yet as `<uses-library android:name=… android:required=
+    "false"/>` at the start of <application> (never required: a library the device lacks must not block the
+    install). None when there's nothing to add or no <application>."""
+    have = set(uses_libraries(manifest))
+    wanted = [lib for i, lib in enumerate(libraries) if lib not in have and lib not in libraries[:i]]
+    x = Axml(manifest)
+    if not wanted or not any(el.name == "application" for el in x.elements()):
+        return None
+    for name, resource in USES_LIBRARY_ATTR_IDS.items():
+        x = _attr_name(x, name, resource)
+
+    def index(s: str) -> int:
+        i = x.index(s)
+        return i if i is not None else x.append_string(s)
+
+    ns, element = index(ANDROID_NS), index("uses-library")
+    values = [index(lib) for lib in wanted]
+    names, ids = x.strings(), _resource_map(x)[1]
+    attr = {a: next(i for i, rid in enumerate(ids) if rid == resource and names[i] == a)
+            for a, resource in USES_LIBRARY_ATTR_IDS.items()}
+    chunk = b""
+    for value in values:
+        # name before required: sorted by resource id, as aapt writes them
+        records = (struct.pack("<IIIHBBI", ns, attr["name"], value, 8, 0, TYPE_STRING, value)
+                   + struct.pack("<IIIHBBI", ns, attr["required"], 0xFFFFFFFF, 8, 0, TYPE_INT_BOOLEAN, 0))
+        chunk += (struct.pack("<HHIII", RES_XML_START_ELEMENT, 16, 36 + len(records), 0, 0xFFFFFFFF)
+                  + struct.pack("<IIHHHHHH", 0xFFFFFFFF, element, 20, 20, 2, 0, 0, 0) + records
+                  + struct.pack("<HHIII", RES_XML_END_ELEMENT, 16, 24, 0, 0xFFFFFFFF)
+                  + struct.pack("<II", 0xFFFFFFFF, element))
+    app = next(el for el in x.elements() if el.name == "application")
+    at = app.offset + app.size
+    data = x.data[:at] + chunk + x.data[at:]
+    struct.pack_into("<I", data, 4, len(data))
+    return bytes(data)
+
+
 def manifest_attrs(manifest: bytes) -> dict[str, str | int | bool]:
     """The <manifest> element's attributes by name (package, split, versionCode, configForSplit, isFeatureSplit…):
     strings, ints or bools. App bundles (sources/bundles.py) tell the base APK from its splits with them."""
