@@ -311,9 +311,23 @@ def java_cmd(*args: str) -> list[str]:
     return [str(java), "-Djava.awt.headless=true", *args]
 
 
+def java_env(environ=None) -> dict | None:
+    """Linux: an environment with a UTF-8 locale when the inherited one isn't (None: inherit it). Java decodes its
+    arguments with the locale's charset, so under C/POSIX (FramePort on the Frame) `LEGO® Bricktales/x.apk` reached
+    OVRPort as `LEGO?? Bricktales/x.apk` and the build failed (GitHub #487). glibc has C.UTF-8 built in."""
+    if not sys.platform.startswith("linux"):
+        return None
+    environ = dict(os.environ if environ is None else environ)
+    locale = environ.get("LC_ALL") or environ.get("LC_CTYPE") or environ.get("LANG") or ""
+    if "utf-8" in locale.lower() or "utf8" in locale.lower():
+        return None
+    environ["LC_ALL"] = "C.UTF-8"
+    return environ
+
+
 def run_java(args: list[str], cwd: Path | None = None, timeout: float | None = None) -> subprocess.CompletedProcess:
     kwargs = {}
     if sys.platform == "win32":
         kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
     return subprocess.run(java_cmd(*args), cwd=cwd, capture_output=True, text=True, errors="replace",
-                          timeout=timeout, **kwargs)
+                          timeout=timeout, env=java_env(), **kwargs)
