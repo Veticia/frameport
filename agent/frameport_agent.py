@@ -24,6 +24,7 @@ PC VR (Oculus Rift) games packed for the Frame (id "rift.<slug>"), run by Proton
     <dest>/<id>/compatdata/                      Proton prefix = saves (kept across reinstalls), launch.log
 """
 import base64
+import contextlib
 import glob
 import hashlib
 import json
@@ -48,7 +49,7 @@ try:
 except ImportError:  # Windows: pc_revive loads this file for its VDF code only (GitHub #131)
     fcntl = None
 
-AGENT_VERSION = 123
+AGENT_VERSION = 124
 HOME = os.path.expanduser("~")
 STEAM = os.path.join(HOME, ".local/share/Steam")
 ANCHORS = os.path.join(HOME, "Applications/quest-frame")
@@ -1189,18 +1190,91 @@ def library_mode(args=None):
     return mode
 
 
-def cmd_library_mode(args):
-    mode = library_mode(args)
-    _write_json(LIBRARY_MODE_FILE, {"mode": mode})
+@contextlib.contextmanager
+def shortcut_lock(wait=None):
+    """The shortcut lock: one library writer at a time (the worker, Steam's start hooks, a live `later` update).
+    A `now` worker holds it while it waits for FramePort/Desktop Mode/a game to close (up to 12 h), so only the
+    detached worker and Steam's hooks may block on it (wait=None). What an SSH command reaches passes `wait`
+    (seconds, 0 = one try) and gets False while it stays busy: an install waited for it until the PC's 600 s agent
+    timeout (discussion #305)."""
     os.makedirs(os.path.dirname(STATUS_FILE), exist_ok=True)
     with open(STATUS_FILE + ".lock", "w") as lock:
+        got = True
+        if wait is None:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        else:
+            end = time.monotonic() + wait
+            while True:
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= end:
+                        got = False
+                        break
+                    time.sleep(0.5)
+        yield got
+
+
+def shortcut_lock_busy():
+    """Some library writer (most of the time a waiting `now` worker) holds the shortcut lock right now."""
+    with shortcut_lock(wait=0) as got:
+        return not got
+
+
+@contextlib.contextmanager
+def pending_lock():
+    """Guards read-modify-write of the pending journal only: never held across a wait or a Steam restart, so it is
+    always short. Lock order: the shortcut lock first, then this one."""
+    os.makedirs(os.path.dirname(PENDING_FILE), exist_ok=True)
+    with open(PENDING_FILE + ".lock", "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        if mode == "off":
+        yield
+
+
+def add_pending(packages, remove):
+    """Journal games to add / shortcuts to remove (merged with what already waits). Returns the journal."""
+    with pending_lock():
+        return _add_pending(packages, remove)
+
+
+def _add_pending(packages, remove):
+    """Caller holds the pending lock (flock isn't reentrant across file descriptors)."""
+    pending = pending_library()
+    pending["packages"] = sorted(set(pending["packages"]) | set(packages))
+    pending["remove"].extend(r for r in remove if r not in pending["remove"])
+    _write_json(PENDING_FILE, pending)
+    return pending
+
+
+def consume_pending(applied):
+    """Drop what a worker/hook has applied (`applied`, a journal snapshot) from the journal; entries journaled since
+    that snapshot stay for the next run."""
+    with pending_lock():
+        pending = pending_library()
+        pending["packages"] = [p for p in pending["packages"] if p not in applied["packages"]]
+        pending["remove"] = [r for r in pending["remove"] if r not in applied["remove"]]
+        if not pending["packages"] and not pending["remove"]:
+            pending = {"packages": [], "remove": []}
+        _write_json(PENDING_FILE, pending)
+
+
+def cmd_library_mode(args):
+    """Every install calls this first. The mode is written at once; the hook cleanup needs the shortcut lock and is
+    skipped while another writer holds it (never waited for, discussion #305): a waiting `now` worker re-reads
+    library_mode() every 10 s (later: journals its games and keeps the hooks; off: drops its games) and drops idle
+    hooks when it ends; Steam's post-start check drops them once the journal is empty."""
+    mode = library_mode(args)
+    _write_json(LIBRARY_MODE_FILE, {"mode": mode})
+    if mode == "off":
+        with pending_lock():
             pending = pending_library()
             pending["packages"] = []
             _write_json(PENDING_FILE, pending)
-        drop_library_hooks_if_idle()
-    return {"mode": mode}
+    with shortcut_lock(wait=0) as got:
+        if got:
+            drop_library_hooks_if_idle()
+    return {"mode": mode} if got else {"mode": mode, "worker_active": True}
 
 
 def pending_library():
@@ -1216,19 +1290,18 @@ def pending_library():
 
 
 def queue_library(packages, remove):
-    # Serialize with the worker and Steam's startup hooks; persist before touching the live VDF.
-    os.makedirs(os.path.dirname(STATUS_FILE), exist_ok=True)
-    with open(STATUS_FILE + ".lock", "w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        return _queue_library(packages, remove)
+    # Serialize with the worker and Steam's startup hooks; persist before touching the live VDF. A `now` worker lets
+    # go within 10 s of the switch to `later`; a lock that stays busy longer (a Steam restart in progress) leaves the
+    # live update to the hook at Steam's next start (bounded: never the PC's 600 s agent timeout).
+    with shortcut_lock(wait=30) as got:
+        if got:
+            return _queue_library(packages, remove)
+        return {"state": "pending", **add_pending(packages, remove), "added": [], "errors": []}
 
 
 def _queue_library(packages, remove):
     """Caller holds the shortcut lock."""
-    pending = pending_library()
-    pending["packages"] = sorted(set(pending["packages"]) | set(packages))
-    pending["remove"].extend(remove)
-    _write_json(PENDING_FILE, pending)
+    pending = add_pending(packages, remove)
     result = {"state": "pending", **pending, "added": [], "errors": []}
     for user in library_users():
         update_library(user, packages, result)
@@ -1327,8 +1400,10 @@ def cmd_library_pending(args):
             remove_from_library(user, pending["remove"], result)
         for user in library_users():
             update_library(user, packages, result)
-        pending["errors"] = result["errors"]
-        _write_json(PENDING_FILE, pending)
+        with pending_lock():  # only the errors: what was journaled meanwhile stays
+            current = pending_library()
+            current["errors"] = result["errors"]
+            _write_json(PENDING_FILE, current)
         return result
 
 
@@ -1344,13 +1419,13 @@ def cmd_library_pending_verify(args):
         result = {"state": "done", "added": [], "errors": list(pending.get("errors", []))}
         if not packages and not pending["remove"]:
             if pending["packages"]:  # only uninstalled games were left
-                _write_json(PENDING_FILE, {"packages": [], "remove": []})
+                consume_pending(pending)
             drop_library_hooks_if_idle()
             return result
         for pkg in shortcuts_lost(library_users(), packages):
             add_devkit_entry(pkg, result)
         if not result["errors"]:
-            _write_json(PENDING_FILE, {"packages": [], "remove": []})
+            consume_pending(pending)
             drop_library_hooks_if_idle()
         _write_json(STATUS_FILE, result)
         return result
@@ -1399,11 +1474,18 @@ def cmd_shortcuts(args):
         return queue_library(packages, remove)
     if not packages and not remove and not args.get("restart_now"):
         return {"started": False}
-    current = cmd_shortcut_status({})
-    alive = time.time() - float(current.get("started") or 0) < 60  # a waiting worker rewrites its status every 10 s
-    if (not args.get("restart_now") and current.get("state") == "waiting" and alive
-            and set(packages) <= set(current.get("packages") or []) and not remove):
-        return {"started": False, "waiting": True}  # the update for these games already waits (Gaming Mode / game)
+    if not args.get("restart_now"):
+        # A worker waiting for FramePort/Desktop Mode/a game to close holds the shortcut lock: a second worker would
+        # only queue behind it for a second Steam restart. Journal these changes instead; the waiting worker merges
+        # the journal once Steam is closed. Under the journal lock: the worker leaves "waiting" under it too, so a
+        # change journaled here is never missed.
+        with pending_lock():
+            current = cmd_shortcut_status({})
+            alive = time.time() - float(current.get("started") or 0) < 60  # rewritten every 10 s while waiting
+            if current.get("state") == "waiting" and alive and shortcut_lock_busy():
+                if not set(packages) <= set(current.get("packages") or []) or remove:
+                    _add_pending(packages, remove)
+                return {**current, "started": False, "waiting": True}
     os.makedirs(os.path.dirname(STATUS_FILE), exist_ok=True)
     with open(STATUS_FILE, "w") as f:
         json.dump({"state": "running", "packages": packages, "started": time.time()}, f)
@@ -1497,9 +1579,22 @@ def shortcuts_worker(payload):
         _shortcuts_worker(payload)
 
 
+def _split_devkit(packages):
+    """Games Steam only knows through their devkit entry (this Frame's Steam drops FramePort's shortcuts.vdf
+    entries, GitHub #41/#42): rewriting the vdf changes nothing for them, and the Steam restart would drop the live
+    devkit entry too. They get their art only; Play re-adds a lost devkit entry live. Returns (vdf games, devkit)."""
+    devkit = [p for p in packages if devkit_gameid(p)]
+    for pkg in devkit:
+        appid = devkit_appid(devkit_gameid(pkg))
+        if appid:
+            copy_grid_art(pkg, appid)
+    return [p for p in packages if p not in devkit], devkit
+
+
 def _shortcuts_worker(payload):
     args = json.loads(payload)
     result = {"state": "done", "added": [], "errors": [], "finished": None}
+    applied = None  # the journal entries merged into this run
     os.makedirs(os.path.dirname(STATUS_FILE), exist_ok=True)
     try:  # new art (e.g. the user's own icon) also reaches Linux apps' Desktop Mode entries
         refresh_desktop_entries()
@@ -1507,16 +1602,7 @@ def _shortcuts_worker(payload):
         pass
     try:
         users = library_users()
-        # games Steam only knows through their devkit entry (this Frame's Steam drops FramePort's shortcuts.vdf
-        # entries, GitHub #41/#42): rewriting the vdf changes nothing for them, and the Steam restart would drop the
-        # live devkit entry too. They get their art only; Play re-adds a lost devkit entry live.
-        devkit = [p for p in args["packages"] if devkit_gameid(p)]
-        for pkg in devkit:
-            appid = devkit_appid(devkit_gameid(pkg))
-            if appid:
-                copy_grid_art(pkg, appid)
-        args["packages"] = [p for p in args["packages"] if p not in devkit]
-        result["devkit"] = devkit
+        args["packages"], result["devkit"] = _split_devkit(args["packages"])
         if not args.get("restart_now") and not args.get("remove") and not library_changes(users, args["packages"]):
             # nothing to change in shortcuts.vdf (e.g. a reinstall): only the artwork, no Steam restart
             for user in users:
@@ -1540,11 +1626,16 @@ def _shortcuts_worker(payload):
                 ensure_library_hooks()
                 _queue_library(args["packages"], args.get("remove", []))
                 return
-            if mode == "off" and not args.get("remove"):
-                _write_json(STATUS_FILE, {"state": "done", "disabled": True, "added": [], "errors": []})
-                return
-            if mode == "off":
+            if mode == "off":  # games journaled meanwhile are dropped too; removals still happen
                 args["packages"] = []
+                with pending_lock():
+                    pending = pending_library()
+                    pending["packages"] = []
+                    _write_json(PENDING_FILE, pending)
+                if not args.get("remove") and not pending["remove"]:
+                    _write_json(STATUS_FILE, {"state": "done", "disabled": True, "added": [], "errors": []})
+                    drop_library_hooks_if_idle()
+                    return
             reason = restart_hold()
             if not reason:
                 break
@@ -1552,13 +1643,20 @@ def _shortcuts_worker(payload):
                 json.dump({"state": "waiting", "reason": reason, "packages": args["packages"],
                            "started": time.time()}, f)
             time.sleep(10)
+        with pending_lock():  # cmd_shortcuts journals into a waiting worker under this lock: not after this point
+            _write_json(STATUS_FILE, {"state": "running", "packages": args["packages"], "started": time.time()})
         try:
             service = stop_steam()
         except AgentError:
             raise AgentError("Steam did not close; library not modified") from None
-        pending = pending_library()
-        args["packages"] = sorted(set(args["packages"]) | {p for p in pending["packages"] if deployment(p)})
-        args.setdefault("remove", []).extend(pending["remove"])
+        # Everything journaled for Steam's restart (later installs/uninstalls while this worker waited, discussion
+        # #305): one restart covers it all. An uninstall queued after an install wins: deployments are checked here.
+        with pending_lock():
+            applied = pending_library()
+        extra, devkit = _split_devkit([p for p in applied["packages"] if p not in args["packages"] and deployment(p)])
+        result["devkit"] += devkit
+        args["packages"] = sorted(p for p in set(args["packages"]) | set(extra) if deployment(p))
+        args.setdefault("remove", []).extend(r for r in applied["remove"] if r not in args["remove"])
         for user in steam_users():  # uninstalled games leave every account's library
             remove_from_library(user, args.get("remove", []), result)
         for user in users:
@@ -1580,7 +1678,8 @@ def _shortcuts_worker(payload):
         result["errors"].append(str(exc))
         run(["systemctl", "--user", "start", "steam.service"])
     if result["state"] == "done" and not result["errors"]:
-        _write_json(PENDING_FILE, {"packages": [], "remove": []})
+        if applied is not None:
+            consume_pending(applied)
         drop_library_hooks_if_idle()
     try:
         os.remove(RESTART_REQUEST_FILE)

@@ -818,3 +818,9 @@ asks before ending a running game, and closes local FramePort/Desktop Mode. Purg
 Hook hardening: both lines `-` + `/usr/bin/timeout -k 5 20`; ExecStartPost only `systemd-run --no-block`s the
 verify (unit frameport-library-verify) so Steam's start never waits; drop-in removed once mode != later and nothing
 pending (`drop_library_hooks_if_idle`). Steam = static user unit steam.service (Type=simple, Restart=always, 90 s).
+Agent v124: a waiting `now` worker holds the shortcut lock (`shortcut_lock`) for up to 12 h, so nothing an SSH command
+reaches blocks on it (an install's `library_mode` hung until the 600 s agent timeout): `library_mode` tries once and
+skips the hook cleanup; `cmd_shortcuts` journals into the waiting worker (`pending_lock`, a short separate lock;
+the worker writes "running" under it before merging the journal after stop_steam, one restart for all; the PC
+shows the same "waiting" reason); `queue_library` waits ≤30 s, else journal only; runs drop what they applied
+(`consume_pending`), never later entries.

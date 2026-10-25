@@ -2567,6 +2567,146 @@ def test_manual_restart_worker_wakes_existing_lock_holder(monkeypatch, tmp_path)
     assert json.load(open(a.RESTART_REQUEST_FILE))["requested"] > 0
 
 
+def _deploy(a, pkg, title="X"):
+    anchor = Path(a.ANCHORS) / pkg
+    anchor.mkdir(parents=True, exist_ok=True)
+    (anchor / "deployment.json").write_text(json.dumps({"title": title, "appid": 123, "base": str(anchor)}))
+
+
+def _waiting_worker(monkeypatch, a, clock, during_wait):
+    """Run a `now` worker for com.a.first that waits for FramePort to close; during_wait(n) runs at each 10 s check."""
+    calls = {"updated": [], "removed": [], "stops": 0}
+    holds = ["frameport"]
+    monkeypatch.setattr(a.time, "time", lambda: clock[0])
+    monkeypatch.setattr(a, "refresh_desktop_entries", lambda: None)
+    monkeypatch.setattr(a, "library_users", lambda: ["42"])
+    monkeypatch.setattr(a, "steam_users", lambda: ["42"])
+    monkeypatch.setattr(a, "library_changes", lambda *args: True)
+    monkeypatch.setattr(a, "restart_hold", lambda: holds[0])
+    monkeypatch.setattr(a, "ensure_library_hooks", lambda: None)
+    monkeypatch.setattr(a, "run", lambda *args, **kw: pytest.fail("started a second worker"))
+    monkeypatch.setattr(a, "update_library", lambda user, pkgs, result, shortcuts=True:
+                        calls["updated"].append(sorted(pkgs)))
+    monkeypatch.setattr(a, "remove_from_library", lambda user, remove, result:
+                        calls["removed"].extend(r["exe"] for r in remove))
+    monkeypatch.setattr(a, "stop_steam", lambda: calls.__setitem__("stops", calls["stops"] + 1) or True)
+    monkeypatch.setattr(a, "start_steam", lambda _: None)
+    monkeypatch.setattr(a, "shortcuts_lost", lambda *args: [])
+    n = [0]
+
+    def sleep(seconds):
+        n[0] += 1
+        if during_wait(n[0]):
+            holds[0] = None
+        clock[0] += seconds
+    monkeypatch.setattr(a.time, "sleep", sleep)
+    a.shortcuts_worker(json.dumps({"packages": ["com.a.first"], "remove": []}))
+    return calls
+
+
+def test_library_mode_does_not_wait_for_a_waiting_worker(monkeypatch, tmp_path):
+    """Discussion #305: every install calls library_mode first; it took the worker's lock (blocking) and the install
+    hung until the PC's 600 s agent timeout while the first install's worker waited for FramePort to close."""
+    a = load_agent(monkeypatch, tmp_path)
+    monkeypatch.setattr(a, "run", lambda cmd, **kw: SimpleNamespace(returncode=0))
+    Path(a.STATUS_FILE).parent.mkdir(parents=True)
+    with open(a.STATUS_FILE + ".lock", "w") as lock:
+        a.fcntl.flock(lock, a.fcntl.LOCK_EX)
+        start = a.time.monotonic()
+        assert a.cmd_library_mode({"mode": "now"}) == {"mode": "now", "worker_active": True}
+        a._write_json(a.PENDING_FILE, {"packages": ["com.x.y"], "remove": []})
+        assert a.cmd_library_mode({"mode": "off"})["worker_active"]
+        assert a.time.monotonic() - start < 5
+    assert a.library_mode() == "off" and a.pending_library()["packages"] == []
+
+
+def test_later_queue_is_bounded_while_the_lock_stays_busy(monkeypatch, tmp_path):
+    a = load_agent(monkeypatch, tmp_path)
+    monkeypatch.setattr(a, "ensure_library_hooks", lambda: None)
+    monkeypatch.setattr(a, "library_users", lambda: pytest.fail("touched the live library without the lock"))
+    clock = [0.0]
+    monkeypatch.setattr(a.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(a.time, "sleep", lambda s: clock.__setitem__(0, clock[0] + s))
+    Path(a.STATUS_FILE).parent.mkdir(parents=True)
+    with open(a.STATUS_FILE + ".lock", "w") as lock:
+        a.fcntl.flock(lock, a.fcntl.LOCK_EX)
+        result = a.cmd_shortcuts({"packages": ["com.x.y"], "mode": "later"})
+    assert result["state"] == "pending" and a.pending_library()["packages"] == ["com.x.y"]
+    assert 30 <= clock[0] < 31
+
+
+def test_install_while_a_worker_waits_is_journaled_not_a_second_worker(monkeypatch, tmp_path):
+    a = load_agent(monkeypatch, tmp_path)
+    monkeypatch.setattr(a, "run", lambda *args, **kw: pytest.fail("started a second worker"))
+    a._write_json(a.STATUS_FILE, {"state": "waiting", "reason": "frameport", "packages": ["com.a.first"],
+                                  "started": a.time.time()})
+    with open(a.STATUS_FILE + ".lock", "w") as lock:
+        a.fcntl.flock(lock, a.fcntl.LOCK_EX)
+        out = a.cmd_shortcuts({"packages": ["com.b.second"], "mode": "now"})
+        assert out["waiting"] and out["state"] == "waiting" and out["reason"] == "frameport"  # the PC says why
+        exe = '"' + a.ANCHORS + '/com.c.gone/launch.sh"'
+        assert a.cmd_shortcuts({"remove": [{"exe": exe, "appid": 7}]})["waiting"]
+    assert a.pending_library() == {"packages": ["com.b.second"], "remove": [{"exe": exe, "appid": 7}]}
+    # nobody holds the lock (the worker died): a new worker starts, the stale status isn't trusted
+    started = []
+    monkeypatch.setattr(a, "run", lambda cmd, **kw: started.append(cmd))
+    assert a.cmd_shortcuts({"packages": ["com.b.second"], "mode": "now"})["started"] and started
+
+
+def test_waiting_worker_merges_changes_made_while_it_waited(monkeypatch, tmp_path):
+    a = load_agent(monkeypatch, tmp_path)
+    for pkg in ("com.a.first", "com.b.second", "com.c.third", "com.d.gone"):
+        _deploy(a, pkg)
+    gone = '"' + a.ANCHORS + '/com.d.gone/launch.sh"'
+
+    def during_wait(n):
+        if n == 1:  # another install, an install + uninstall, and a rename while FramePort is open
+            assert a.cmd_library_mode({"mode": "now"})["worker_active"]
+            assert a.cmd_shortcuts({"packages": ["com.b.second"], "mode": "now"})["waiting"]
+            assert a.cmd_shortcuts({"packages": ["com.d.gone"], "mode": "now"})["waiting"]
+            (Path(a.ANCHORS) / "com.d.gone/deployment.json").unlink()
+            assert a.cmd_shortcuts({"remove": [{"exe": gone, "appid": 9}]})["waiting"]
+            return False
+        assert a.cmd_shortcuts({"packages": ["com.c.third"]})["waiting"]
+        return True
+    calls = _waiting_worker(monkeypatch, a, [100.0], during_wait)
+    assert calls["stops"] == 1  # one Steam restart for everything
+    assert calls["updated"] == [["com.a.first", "com.b.second", "com.c.third"]]
+    assert calls["removed"] == [gone]
+    assert a.pending_library() == {"packages": [], "remove": []}
+    assert a.cmd_shortcut_status({})["state"] == "done"
+
+
+def test_entries_journaled_after_the_merge_stay_for_the_next_run(monkeypatch, tmp_path):
+    a = load_agent(monkeypatch, tmp_path)
+    late = {"exe": '"' + a.ANCHORS + '/com.z.late/launch.sh"'}
+    a._write_json(a.PENDING_FILE, {"packages": ["com.a.first", "com.z.late"], "remove": [late]})
+    a.consume_pending({"packages": ["com.a.first"], "remove": []})
+    assert a.pending_library() == {"packages": ["com.z.late"], "remove": [late]}
+    a.consume_pending({"packages": ["com.z.late"], "remove": [late]})
+    assert a.pending_library() == {"packages": [], "remove": []}
+
+
+@pytest.mark.parametrize("mode", ["later", "off"])
+def test_mode_switch_while_waiting_still_honoured_with_journaled_games(monkeypatch, tmp_path, mode):
+    a = load_agent(monkeypatch, tmp_path)
+    for pkg in ("com.a.first", "com.b.second"):
+        _deploy(a, pkg)
+
+    def during_wait(n):
+        if n == 1:
+            assert a.cmd_shortcuts({"packages": ["com.b.second"], "mode": "now"})["waiting"]
+            assert a.cmd_library_mode({"mode": mode})["worker_active"]  # returns at once; the worker sees it
+        return False
+    calls = _waiting_worker(monkeypatch, a, [100.0], during_wait)
+    assert calls["stops"] == 0
+    if mode == "later":
+        assert a.pending_library()["packages"] == ["com.a.first", "com.b.second"]
+        assert a.cmd_shortcut_status({})["state"] == "pending"
+    else:
+        assert a.pending_library()["packages"] == [] and a.cmd_shortcut_status({})["disabled"]
+
+
 def test_library_hook_is_bounded_and_never_fails_steam(monkeypatch, tmp_path):
     a = load_agent(monkeypatch, tmp_path)
     text = a.library_hooks_text(python="/usr/bin/python3", agent="/home/u/100% $HOME/frameport_agent.py",
