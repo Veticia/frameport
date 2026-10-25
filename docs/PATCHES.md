@@ -2,7 +2,7 @@
 
 # Patches
 
-Every patch and game setting FramePort knows: 202 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
+Every patch and game setting FramePort knows: 203 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
 
 Each entry says what the patch does, whether it changes the APK or only the install, when FramePort suggests it, its options, the catalog games whose recipe names it and the launch-test signatures that suggest it. Patches that are on by default are on for every game, so the catalog rarely names them.
 
@@ -13,7 +13,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 - [Patches from OVRPort](#group-overport) (25)
 - [Steam Frame patches](#group-frame) (71)
 - [Game settings](#group-adapter) (82)
-- [Files and settings on the Frame](#group-device) (11)
+- [Files and settings on the Frame](#group-device) (12)
 - [PC VR (Proton and Revive)](#group-pcvr) (13)
 
 ## Index
@@ -204,6 +204,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Foveated rendering (Valve)](#device-foveation) | `device.foveation` | Files and settings on the Frame | 6 |
 | [Headset model](#device-headset_model) | `device.headset_model` | Files and settings on the Frame | default |
 | [Hide Android's navigation bar](#device-hide_navbar) | `device.hide_navbar` | Files and settings on the Frame |  |
+| [Hybrid app: allow the switch into VR](#device-hybrid_app) | `device.hybrid_app` | Files and settings on the Frame |  |
 | [Game language](#device-language) | `device.language` | Files and settings on the Frame |  |
 | [Extra Lepton settings](#device-lepton_env) | `device.lepton_env` | Files and settings on the Frame | 3 |
 | [Share a folder with another game](#device-shared_folder) | `device.shared_folder` | Files and settings on the Frame |  |
@@ -2783,6 +2784,19 @@ Hides Android's back, home and recents buttons, which cover the app's own button
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
 
 > Removes Android's back/home/recents buttons from a 2D app's window, where they cover the app's own controls. Turn it off for an app that needs the on-screen back button.
+
+### <a id="device-hybrid_app"></a>Hybrid app: allow the switch into VR
+
+Lets apps that start as a 2D panel (e.g. YouTube) switch into VR for 360° videos and full screen.
+
+- `device.hybrid_app` · also for 2D apps
+- **Changes:** Install only: written on the Frame when the game is installed; the APK isn't changed.
+- **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
+- **Suggested by launch-test signatures:**
+  - `hybrid-feature-missing` (warning): The app stays in its 2D panel because it can't find a Quest system feature it checks before switching into VR (360° videos, full screen). "Hybrid app: allow the switch into VR" declares that feature for the app.
+- **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
+
+> Horizon OS "hybrid apps" start as a 2D panel and switch into VR for some content (e.g. YouTube's 360° videos and full screen). Before the switch the app checks that the system has the feature oculus.software.vr.app.hybrid; the Frame's Android doesn't, so the app stays in its panel ("Missing hybrid app system feature" in its log). This declares the feature in the app's container (a permissions file mounted by FramePort's Podman wrapper; the APK isn't changed). Whether the app's VR part then works on the Frame depends on the app (GitHub #484). Applied with Update on Frame.
 
 ### <a id="device-language"></a>Game language
 

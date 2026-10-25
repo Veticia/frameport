@@ -942,6 +942,29 @@ class SteamGamepad(Patch):
             ctx.env["FRAMEPORT_GAMEPAD_KEYS"] = "; ".join(lines)
 
 
+class HybridApp(Patch):
+    id = "device.hybrid_app"
+    title = "Hybrid app: allow the switch into VR"
+    description = ("Horizon OS \"hybrid apps\" start as a 2D panel and switch into VR for some content (e.g. YouTube's "
+                   "360° videos and full screen). Before the switch the app checks that the system has the feature "
+                   "oculus.software.vr.app.hybrid; the Frame's Android doesn't, so the app stays in its panel "
+                   "(\"Missing hybrid app system feature\" in its log). This declares the feature in the app's "
+                   "container (a permissions file mounted by FramePort's Podman wrapper; the APK isn't changed). "
+                   "Whether the app's VR part then works on the Frame depends on the app (GitHub #484). Applied with "
+                   "Update on Frame.")
+    category = "device"
+    needs_vr = False
+    stage = "install"  # the launcher exports FRAMEPORT_FEATURES; the agent's Podman wrapper mounts the file
+    FEATURE = "oculus.software.vr.app.hybrid"
+    ENV_KEY = "FRAMEPORT_FEATURES"
+
+    def applies(self, a):
+        return self.FEATURE in ((a.extra or {}).get("features") or {})
+
+    def install(self, ctx: InstallContext) -> None:
+        ctx.env[self.ENV_KEY] = self.FEATURE
+
+
 def foveation_options(params):
     mode = params.get("mode") or ""
     if mode not in ("", "tracked", "fixed", "off"):
@@ -1100,6 +1123,7 @@ register(LeptonEnv)
 register(HideNavBar)
 register(Language)
 register(SteamGamepad)
+register(HybridApp)
 register(SharedFolder)
 register(TextInputWindow)
 register(DisplayMode)

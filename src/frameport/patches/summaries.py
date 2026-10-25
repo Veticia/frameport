@@ -169,6 +169,8 @@ SUMMARIES = {
                                 "keeps working.",
     "device.display_mode": "Choose Flat window if a phone or tablet app shows nothing in the headset, VR if a VR app "
                            "opens as a flat window.",
+    "device.hybrid_app": "Lets apps that start as a 2D panel (e.g. YouTube) switch into VR for 360° videos and full "
+                         "screen.",
     "device.steam_gamepad": "Lets the game use your controllers as a gamepad instead of a pointer, for 2D games with "
                             "touch controls (for example SDL games).",
     "device.lepton_env": "Extra settings for the Android container (for testing).",

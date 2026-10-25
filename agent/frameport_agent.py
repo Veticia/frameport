@@ -49,7 +49,7 @@ try:
 except ImportError:  # Windows: pc_revive loads this file for its VDF code only (GitHub #131)
     fcntl = None
 
-AGENT_VERSION = 124
+AGENT_VERSION = 125
 HOME = os.path.expanduser("~")
 STEAM = os.path.join(HOME, ".local/share/Steam")
 ANCHORS = os.path.join(HOME, "Applications/quest-frame")
@@ -101,6 +101,13 @@ GAMEPAD_LINE = ('[[ "${FRAMEPORT_NO_GAMEPAD:-0}" != 0 ]] || { export FRAMEPORT_G
                 'python3 "$HOME/.local/share/frameport/agent/frameport_agent.py" _gamepad_links "$SteamAppId" $$ '
                 '>"$app_dir/gamepad.log" 2>&1 9>&- & }')
 PAD_DIR = "/dev/fp-input"  # the host's /dev/input inside the container
+# System features for a game's Android (patch device.hybrid_app, per game, GitHub #484): Horizon OS "hybrid apps"
+# (YouTube) only leave their 2D panel for VR when the system has oculus.software.vr.app.hybrid. The launcher exports
+# FRAMEPORT_FEATURES (the patch's env) and puts the Podman wrapper on PATH; the wrapper mounts a permissions file that
+# declares them (Android reads /system/etc/permissions at every container start).
+FEATURES_LINE = ('[[ -z "${FRAMEPORT_FEATURES:-}" || ! -x "$HOME/.local/share/frameport/agent/bin/podman" ]] || '
+                 'export PATH="$HOME/.local/share/frameport/agent/bin:$PATH"')
+FEATURES_TARGET = "/system/etc/permissions/frameport-features.xml"
 
 
 class AgentError(Exception):
@@ -3774,6 +3781,7 @@ def upgrade_launchers():
             new = set_codec_line(new, wants_hw_video(os.path.dirname(path)))
             new = set_tz_line(new)
             new = set_gamepad_line(new, wants_gamepad(os.path.dirname(path)))
+            new = set_features_line(new, "\nexport FRAMEPORT_FEATURES=" in new)
             pkg = os.path.basename(os.path.dirname(path))
             dep = deployment(pkg) or {}
             new = set_openxr_manifest_line(new, pkg, dep.get("static_openxr_loader", False))
@@ -3905,11 +3913,32 @@ def wants_gamepad(anchor):
     return GAMEPAD_PATCH in (recipe.get("patches") or [])
 
 
-def wrapper_lines(hw_video, gamepad):
-    """The launcher's Podman wrapper lines (empty, one or both). The gamepad line comes last, so FramePort's wrapper is
-    first on PATH and hands on to the codec wrapper."""
+def wrapper_lines(hw_video, gamepad, features=False):
+    """The launcher's Podman wrapper lines (none, some or all). FramePort's lines (gamepad, features) come last, so
+    its wrapper is first on PATH and hands on to the codec wrapper."""
     return "\n".join(line for line, want in ((VIDEO_CODEC_LINE, hw_video), (DECODER_USERS_LINE, hw_video),
-                                             (GAMEPAD_LINE, gamepad)) if want)
+                                             (GAMEPAD_LINE, gamepad), (FEATURES_LINE, features)) if want)
+
+
+def set_features_line(text, want):
+    """A Lepton launcher with the features line (want) or without it: after the gamepad line, else after the codec
+    lines, else where they would be. A launcher that has it after those lines keeps it where it is."""
+    here = text.find(FEATURES_LINE + "\n")
+    if want and here >= 0 and all(text.find(line + "\n") < here
+                                  for line in (GAMEPAD_LINE, DECODER_USERS_LINE, VIDEO_CODEC_LINE)):
+        return text
+    text = text.replace(FEATURES_LINE + "\n", "")
+    if not want:
+        return text
+    at = -1
+    for line in (GAMEPAD_LINE, DECODER_USERS_LINE, VIDEO_CODEC_LINE):
+        i = text.find(line + "\n")
+        if i >= 0:
+            at = i + len(line) + 1
+            break
+    if at < 0:
+        at = next((text.index(a) + 1 for a in ("\nchild=''\n", "\nsetsid ") if a in text), -1)
+    return text if at < 0 else text[:at] + FEATURES_LINE + "\n" + text[at:]
 
 
 def set_gamepad_line(text, want):
@@ -4039,9 +4068,13 @@ def podman_run_args(args, env, sys_root="/sys", dev_root="/dev"):
     when its launcher asked for them (FRAMEPORT_GAMEPAD=1, the gamepad line); _gamepad_links then links Steam's pads
     into the container's /dev/input. Anything else: the arguments unchanged. Lepton mounts a tmpfs over /dev, so a
     `--device` node would vanish under it, and its /dev/input holds its own Wayland input pipes: a bind mount next to
-    it, like Lepton's own GPU nodes."""
-    if args[:1] != ["run"] or env.get("FRAMEPORT_GAMEPAD") != "1" or \
-            env.get("FRAMEPORT_NO_GAMEPAD", "0") not in ("", "0"):
+    it, like Lepton's own GPU nodes. System features the launcher names (FRAMEPORT_FEATURES, the features line) are
+    added as a permissions file in the container's /system/etc/permissions (device.hybrid_app)."""
+    if args[:1] != ["run"]:
+        return args
+    gamepad = env.get("FRAMEPORT_GAMEPAD") == "1" and env.get("FRAMEPORT_NO_GAMEPAD", "0") in ("", "0")
+    features = system_features(env.get("FRAMEPORT_FEATURES", ""))
+    if not gamepad and not features:
         return args
     appid = env.get("SteamAppId", "")
     name = None
@@ -4060,6 +4093,17 @@ def podman_run_args(args, env, sys_root="/sys", dev_root="/dev"):
             key, _, value = item.partition("=")
             if key in ("destination", "target", "dst"):
                 taken.add(value)
+    extra = []
+    if gamepad:
+        extra += gamepad_mounts(env, taken, sys_root, dev_root)
+    if features and FEATURES_TARGET not in taken:
+        extra += ["--mount", f"type=bind,source={features_file(features)},destination={FEATURES_TARGET},ro"]
+        print(f"FramePort: system features for this container: {', '.join(features)}", file=sys.stderr)
+    return [args[0], *extra, *args[1:]] if extra else args
+
+
+def gamepad_mounts(env, taken, sys_root="/sys", dev_root="/dev"):
+    """podman_run_args' mounts for Steam Input's virtual gamepad: the host's /dev/input and the key layout."""
     pads = steam_gamepads(sys_root, dev_root)
     extra = []
     if PAD_DIR not in taken:
@@ -4077,7 +4121,33 @@ def podman_run_args(args, env, sys_root="/sys", dev_root="/dev"):
             extra += ["--mount", f"type=bind,source={layout},destination={target},ro"]
     names = ", ".join(f"{p['event']} ({p['name']}, 28de:{p['product']})" for p in pads) or "none"
     print(f"FramePort gamepad: Steam Input virtual gamepads for this container: {names}", file=sys.stderr)
-    return [args[0], *extra, *args[1:]] if extra else args
+    return extra
+
+
+def system_features(value):
+    """The feature names in FRAMEPORT_FEATURES (comma-separated); anything that isn't a feature name is left out."""
+    return sorted({f for f in (part.strip() for part in str(value or "").split(","))
+                   if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+", f) and len(f) <= 128})
+
+
+def features_file(features):
+    """The permissions file that declares `features` (one per distinct set, next to the Podman wrapper)."""
+    text = ('<?xml version="1.0" encoding="utf-8"?>\n<!-- Written by FramePort (device.hybrid_app). -->\n'
+            "<permissions>\n" + "".join(f'    <feature name="{f}" />\n' for f in features) + "</permissions>\n")
+    path = os.path.join(os.path.dirname(PODMAN_BIN),
+                        f"features-{hashlib.sha256(text.encode()).hexdigest()[:12]}.xml")
+    try:
+        with open(path) as f:
+            if f.read() == text:
+                return path
+    except OSError:
+        pass
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = f"{path}.{os.getpid()}.tmp"
+    with open(tmp, "w") as f:
+        f.write(text)
+    os.replace(tmp, path)
+    return path
 
 
 def pid_alive(pid):
@@ -4260,14 +4330,14 @@ def set_openxr_manifest_line(text, pkg, enabled):
 
 
 def write_launcher(anchor, base, pkg, title, appid, lepton, env, hw_video=False, gamepad=False,
-                   config_sync=False, static_openxr=False, scene_room=False):
+                   config_sync=False, static_openxr=False, scene_room=False, features=False):
     extra = "".join(f"export {k}={shlex.quote(str(v))}\n" for k, v in (env or {}).items()
                     if re.fullmatch(r"[A-Z_][A-Z0-9_]*", k))
     text = LAUNCH_SH.format(title=title.replace("\n", " "), pkg=pkg, app_dir=app_dir_lines(base, pkg), appid=appid,
                             lepton_q=shlex.quote(lepton), extra_env=extra, watchdog=WATCHDOG,
                             dashboard=dashboard_line(), logcat=logcat_line(), single=SINGLE_LINE,
                             cloud_dirs=cloud_dirs_line(pkg),
-                            video_codec=wrapper_lines(hw_video, gamepad),
+                            video_codec=wrapper_lines(hw_video, gamepad, features),
                             plays_start=plays_lines(anchor)[0],
                             plays_end=plays_lines(anchor)[1], save_snapshot=snapshot_line(pkg),
                             restart=restart_block(pkg, lepton))
@@ -6232,14 +6302,15 @@ def configure_install(args, prep, moved):
     write_openxr_runtime_manifest(base, static_openxr)
     hw_video = HW_VIDEO_PATCH in (recipe.get("patches") or [])  # the shared codec (install_video_codec)
     gamepad = GAMEPAD_PATCH in (recipe.get("patches") or [])  # Steam Input's virtual gamepad (PODMAN_WRAPPER)
-    if gamepad:
+    features = bool(system_features((args.get("env") or {}).get("FRAMEPORT_FEATURES")))  # device.hybrid_app
+    if gamepad or features:
         ensure_podman_wrapper()
     config_sync = args.get("config_sync") if isinstance(args.get("config_sync"), dict) else {}
     scene_value = settings.get("scene_emul", (recipe.get("adapter") or {}).get(
         "scene_emul", int("adapter.scene_emul" in (recipe.get("patches") or []))))
     scene_room = float(scene_value) != 0
     write_launcher(anchor, base, pkg, title, appid, lepton, args.get("env"), hw_video, gamepad, bool(config_sync),
-                   static_openxr, scene_room)
+                   static_openxr, scene_room, features)
     art_in = os.path.join(base, "incoming-artwork")
     art_moved = False
     if args.get("consume_artwork") and os.path.isdir(art_in):

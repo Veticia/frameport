@@ -179,6 +179,13 @@ signatures:
     severity: fatal
     diagnosis: The app closed at start because it can't find classes from one of Android's optional libraries (for example org.apache.http.legacy in YouTube VR). The Frame's Android has the library, but OVRPort removed the app's request for it from the manifest; "Keep Android's shared libraries the app uses" puts it back. Turn it on and rebuild the game ("Update on Frame").
     suggest: [frame.keep_system_libraries]
+  - id: hybrid-feature-missing
+    # GitHub #484 (YouTube VR): a Horizon OS hybrid app checks for the system feature oculus.software.vr.app.hybrid
+    # before it leaves its 2D panel for VR
+    pattern: 'Missing hybrid app system feature'
+    severity: warning
+    diagnosis: 'The app stays in its 2D panel because it can''t find a Quest system feature it checks before switching into VR (360° videos, full screen). "Hybrid app: allow the switch into VR" declares that feature for the app. Turn it on and press Update on Frame; whether the VR part then works depends on the app.'
+    suggest: [device.hybrid_app]
   - id: web-wrapper
     pattern: '(Creating TwaLauncher for com\.oculus\.browser|NameNotFoundException:? com\.oculus\.browser)'
     severity: fatal

@@ -439,6 +439,11 @@
   "title": "Hide Android's navigation bar",
   "group": "Files and settings on the Frame"
  },
+ "device.hybrid_app": {
+  "anchor": "device-hybrid_app",
+  "title": "Hybrid app: allow the switch into VR",
+  "group": "Files and settings on the Frame"
+ },
  "device.language": {
   "anchor": "device-language",
   "title": "Game language",
