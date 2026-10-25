@@ -362,17 +362,23 @@ def component_filters(manifest: bytes) -> list[tuple[str, str, list[tuple[str, i
 
 
 def vr_activity(manifest: bytes) -> str | None:
-    """The activity with Meta's VR category when it isn't the launcher activity (a 2D launcher that starts the VR
-    part, e.g. WiiCompiled's LauncherActivity -> QuestActivity)."""
+    """The activity with Meta's VR category when it isn't the start activity (a 2D launcher that starts the VR
+    part, e.g. WiiCompiled's LauncherActivity -> QuestActivity). The start activity is the LAUNCHER one, else the
+    INFO one (Quest store builds often give their only activity MAIN + INFO + VR, GitHub #476), else the first MAIN."""
     x = Axml(manifest)
     names = x.strings()
-    vr = launcher = None
+    vr = None
+    start = {}  # category -> first activity
     for el, name, items in component_filters(manifest):
         cats = {names[i] for kind, _, i in items if kind == "category" and i < len(names)}
         if el == "activity" and VR_CATEGORY in cats:
             vr = vr or name
-        if LAUNCHER in cats:
-            launcher = launcher or name
+        for cat in (LAUNCHER, INFO):
+            if cat in cats:
+                start.setdefault(cat, name)
+        if el == "activity" and any(k == "action" and i < len(names) and names[i] == MAIN for k, _, i in items):
+            start.setdefault(MAIN, name)
+    launcher = start.get(LAUNCHER) or start.get(INFO) or start.get(MAIN)
     return vr if vr and vr != launcher else None
 
 

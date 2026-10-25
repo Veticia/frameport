@@ -62,7 +62,9 @@ IL2CPP_METADATA = "assets/bin/Data/Managed/Metadata/global-metadata.dat"
 # 26: browser_query (the manifest's <queries> look for a web browser: frame.browser_handoff, GitHub #466) (2026-10)
 # 27: uses_libraries (the original manifest's <uses-library> names, which OVRPort removes:
 #     frame.keep_system_libraries, GitHub #484) (2026-10)
-ANALYSIS_VERSION = 27  # (cortopia_org_id's TMNT layout, GitHub #422, needed no re-analysis: see the patch)
+# 28: vr_activity counts an INFO activity as the start activity (a single MAIN + INFO + VR activity was taken for
+#     a VR part behind a flat launcher, GitHub #476) (2026-10)
+ANALYSIS_VERSION = 28  # (cortopia_org_id's TMNT layout, GitHub #422, needed no re-analysis: see the patch)
 
 
 # Android versions by API level (for messages); the Frame's Lepton container runs Android 11 (API 30)

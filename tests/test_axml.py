@@ -134,6 +134,24 @@ def _filters(manifest):
             for _, n, items in axml.component_filters(manifest)}
 
 
+def test_a_single_vr_activity_is_not_a_separate_vr_part():
+    """GitHub #476: Quest store builds give their only activity MAIN + INFO + VR (no LAUNCHER); that activity is
+    the game itself, not a VR part behind a flat launcher."""
+    from conftest import build_axml
+
+    def manifest(*cats):
+        categories = [e for c in cats for e in (("start", "category", [("name", "str", c)]), ("end", "category"))]
+        return build_axml([("start", "manifest", [("package", "str", "org.x.game")]), ("start", "application", []),
+                           ("start", "activity", [("name", "str", "com.unity3d.player.UnityPlayerActivity")]),
+                           ("start", "intent-filter", []),
+                           ("start", "action", [("name", "str", axml.MAIN)]), ("end", "action"),
+                           *categories,
+                           ("end", "intent-filter"), ("end", "activity"), ("end", "application"), ("end", "manifest")])
+    assert axml.vr_activity(manifest(axml.INFO, axml.VR_CATEGORY)) is None
+    assert axml.vr_activity(manifest(axml.VR_CATEGORY)) is None
+    assert axml.vr_activity(manifest(axml.LAUNCHER, axml.VR_CATEGORY)) is None
+
+
 def test_start_activity_moves_launcher_to_the_vr_activity():
     m = _two_activity_manifest()
     assert axml.vr_activity(m) == "org.x.game.QuestActivity"
