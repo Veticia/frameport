@@ -155,6 +155,57 @@ static void pass(uint32_t w, uint32_t h, const VkOffset2D *valve, uint32_t count
 
 static int near(int got_value, float want, int tolerance) { return fabsf((float)got_value - want) <= (float)tolerance; }
 
+// A two-view pass like In Death's eye pass: colour + depth/stencil (samples each) and Valve's density map, into a
+// w x h framebuffer whose depth image has the density-map-offset flag (Valve flags it). color: the colour format.
+static void eye_pass(uint32_t w, uint32_t h, VkFormat color, VkSampleCountFlagBits samples, const VkOffset2D *valve,
+                     uint32_t count) {
+    VkDevice dev = (VkDevice)&device_obj;
+    VkCommandBuffer cmd = (VkCommandBuffer)&cmd_obj;
+    VkImageCreateInfo ici = {VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    ici.imageType = VK_IMAGE_TYPE_2D;
+    ici.extent = (VkExtent3D){(w + 31) / 32, (h + 31) / 32, 1};
+    ici.arrayLayers = 2, ici.usage = FDM_USAGE, ici.flags = FDM_OFFSET_FLAG, ici.samples = VK_SAMPLE_COUNT_1_BIT;
+    VkImage map, col, depth;
+    c_CreateImage(dev, &ici, NULL, &map);
+    ici.extent = (VkExtent3D){w, h, 1};
+    ici.samples = samples, ici.format = color, ici.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    c_CreateImage(dev, &ici, NULL, &col);
+    ici.format = VK_FORMAT_D24_UNORM_S8_UINT, ici.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    c_CreateImage(dev, &ici, NULL, &depth);
+    VkImageViewCreateInfo vci = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    vci.subresourceRange.layerCount = 2;
+    VkImageView views[3];
+    vci.image = col, vci.format = color;
+    c_CreateImageView(dev, &vci, NULL, &views[0]);
+    vci.image = depth, vci.format = VK_FORMAT_D24_UNORM_S8_UINT;
+    c_CreateImageView(dev, &vci, NULL, &views[1]);
+    vci.image = map, vci.format = VK_FORMAT_R8G8_UNORM;
+    c_CreateImageView(dev, &vci, NULL, &views[2]);
+    VkAttachmentDescription2 atts[3] = {{VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2}, {VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2},
+                                        {VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2}};
+    atts[0].format = color, atts[0].samples = samples;
+    atts[1].format = VK_FORMAT_D24_UNORM_S8_UINT, atts[1].samples = samples;
+    atts[2].format = VK_FORMAT_R8G8_UNORM, atts[2].samples = VK_SAMPLE_COUNT_1_BIT;
+    VkAttachmentReference2 cref = {VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, NULL, 0}, dref = {VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, NULL, 1};
+    VkSubpassDescription2 sub = {VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_2};
+    sub.viewMask = 3, sub.colorAttachmentCount = 1, sub.pColorAttachments = &cref, sub.pDepthStencilAttachment = &dref;
+    VkRenderPassFragmentDensityMapCreateInfoEXT fdm = {ST_FDM_RP_INFO, NULL, {2, VK_IMAGE_LAYOUT_GENERAL}};
+    VkRenderPassCreateInfo2 rci = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2, &fdm};
+    rci.attachmentCount = 3, rci.pAttachments = atts, rci.subpassCount = 1, rci.pSubpasses = &sub;
+    VkRenderPass rp;
+    c_CreateRenderPass2(dev, &rci, NULL, &rp);
+    VkFramebufferCreateInfo fci = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+    fci.renderPass = rp, fci.attachmentCount = 3, fci.pAttachments = views, fci.width = w, fci.height = h, fci.layers = 1;
+    VkFramebuffer fb;
+    c_CreateFramebuffer(dev, &fci, NULL, &fb);
+    VkRenderPassBeginInfo bi = {VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+    bi.renderPass = rp, bi.framebuffer = fb, bi.renderArea.extent = (VkExtent2D){w, h};
+    c_CmdBeginRenderPass2(cmd, &bi, NULL);
+    c_offset_end o = {ST_FDM_OFFSET_END, NULL, count, valve};
+    VkSubpassEndInfo e = {VK_STRUCTURE_TYPE_SUBPASS_END_INFO, &o};
+    c_CmdEndRenderPass2(cmd, &e);
+}
+
 int main(void) {
     (void)dispatch_key;
     c_device d;
@@ -299,6 +350,47 @@ int main(void) {
     CHECK(strstr(last_log, "handed down 2: v0 -24,-184"));
     bind_in_pass = VK_NULL_HANDLE;
     c_diag = 0;
+
+    // Turnip's bins (tu_bins.h, Adreno 750). In Death's eye pass: 4x RGBA8 + 4x D24S8, two views, 2768x2768.
+    // Measured on the Frame (snapshots, 2026-10-25): 192x224 bins.
+    tb_att idatts[3];
+    CHECK(tb_att_of(VK_FORMAT_R8G8B8A8_SRGB, 4, &idatts[0]) && tb_att_of(VK_FORMAT_D24_UNORM_S8_UINT, 4, &idatts[1]));
+    CHECK(!tb_att_of(VK_FORMAT_ASTC_4x4_UNORM_BLOCK, 1, &idatts[2]));  // not modelled
+    tb_att_of(VK_FORMAT_R8G8_UNORM, 1, &idatts[2]);
+    idatts[0].gmem = idatts[1].gmem = 1;  // the density map isn't in GMEM
+    tb_pass tp;
+    CHECK(tb_pass_config(&TB_ADRENO_750, idatts, 3, &tp) && tp.gmem_pixels == 86016 && tp.tile_align_w == 96);
+    uint32_t tw = 0, th = 0, cw, ch;
+    tb_lrz_constraint(&TB_ADRENO_750, 2768, 2768, 4, 2, &cw, &ch);  // 4x: LRZ fast clear can't cover it anyway
+    CHECK(cw == 2016 && ch == 2032);
+    CHECK(tb_tile_size(&TB_ADRENO_750, &tp, 2768, 2768, 2, cw, ch, &tw, &th) && tw == 192 && th == 224);
+    // a 1x depth image of that size does get a limit (a multiple of the GMEM alignment, at least 192)
+    tb_lrz_constraint(&TB_ADRENO_750, 2768, 2768, 1, 2, &cw, &ch);
+    CHECK(cw < 2016 && cw >= 192 && cw % 16 == 0 && ch % 4 == 0);
+    // the bins whose centre lies in Valve's sharp texels 1024-1824 (lo preset, 87-texel map): 960-1728 / 1120-1792
+    CHECK(tb_bins_centre(1024, 1824, 192) == 1344.0f && tb_bins_centre(1024, 1824, 224) == 1456.0f);
+    CHECK(tb_bins_centre(1024, 1100, 400) < 0);  // no bin centre inside: undecided
+    CHECK(c_sharp_centre(2768, 87, 0, 192) == 1344.0f && c_sharp_centre(2768, 87, 0, 0) == 1424.0f);
+
+    // End to end: with the GPU known, the layer computes 192x224 for that pass and centres those bins on each eye
+    fp_fdm_view indeath[2] = {{2768, 2768, 0, 0, 0, 1730, 1730, 1004, 697}, {2768, 2768, 1, 0, 0, 1730, 1730, 715, 709}};
+    fp_fdm_set_views(indeath, 2);
+    c_fixed = 1, c_level = 1;
+    eye_pass(2768, 2768, VK_FORMAT_R8G8B8A8_SRGB, VK_SAMPLE_COUNT_4_BIT, zero, 2);
+    CHECK(got_count == 2 && near(got[0].x, 1004 - 1424, 4) && near(got[0].y, 697 - 1424, 4));  // GPU unknown: texels
+    c_gpu = &TB_ADRENO_750;
+    eye_pass(2768, 2768, VK_FORMAT_R8G8B8A8_SRGB, VK_SAMPLE_COUNT_4_BIT, zero, 2);
+    CHECK(got_count == 2 && near(got[0].x, 1004 - 1344, 4) && near(got[0].y, 697 - 1456, 4));
+    CHECK(near(got[1].x, 715 - 1344, 4) && near(got[1].y, 709 - 1456, 4));
+    // a colour format tu_bins.h doesn't model: undecided, the texels' centre as before
+    eye_pass(2768, 2768, VK_FORMAT_ASTC_4x4_UNORM_BLOCK, VK_SAMPLE_COUNT_4_BIT, zero, 2);
+    CHECK(near(got[0].x, 1004 - 1424, 4) && near(got[0].y, 697 - 1424, 4));
+    // fdm_bin_w=256, fdm_bin_h=256 (FrameBridge -> fp_fdm_set_bin) wins over the computed size: bins 1024-1792 -> centre 1408
+    fp_fdm_set_bin(256, 256);
+    eye_pass(2768, 2768, VK_FORMAT_R8G8B8A8_SRGB, VK_SAMPLE_COUNT_4_BIT, zero, 2);
+    CHECK(near(got[0].x, 1004 - 1408, 4) && near(got[0].y, 697 - 1408, 4));
+    fp_fdm_set_bin(0, 0);
+    c_gpu = NULL;
     puts("ok");
     return 0;
 }

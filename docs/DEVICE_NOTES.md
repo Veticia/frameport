@@ -1193,6 +1193,30 @@ both eyes -80,+32 px (-4.6%, +1.9% of the rect) off their optical centres, the s
 depends on the bin size (Turnip's tile0: GMEM, attachments, views) and is up to half a bin in each axis; AC Nexus's
 1-2% residual above is the same effect. Vulkan doesn't report Turnip's bin size (no VK_QCOM_tile_properties).
 
+**Fix: the layer computes the bins (2026-10-25).** `native/foveation/tu_bins.h` follows Mesa: the driver on the Frame
+is Mesa 26.3.0-devel `git-e07916b45f` (Valve's build, not a public commit; the layer logs driver name + info at
+device creation), so the code follows upstream main of the 26.3 window (82b868960e), where `tu_util.cc`
+(`tu_tiling_config_update_tile_layout`), `tu_pass.cc` (`tu_render_pass_gmem_config`) and the LRZ limit
+(`fdl6_lrz_get_max_fdm_extra_size`) didn't change in substance. Passes with a density map use
+`TU_GMEM_LAYOUT_AVOID_CCU` (`tu_choose_gmem_layout`): Adreno 750 = 3 MiB GMEM - 6 x 0xc000 VPC attribute buffer - 6 x
+64 KiB / 8 colour CCU = 2801664 bytes for attachments; tile alignment 96x32, max 2016x2032. In Death's eye pass (4x
+RGBA8 + 4x D24S8 in GMEM, a 1x resolve target and the map outside) -> gmem_pixels 86016 -> 192x224 bins, as measured.
+The layer tracks render-target images/views and models render passes (v1/v2) and dynamic rendering; anything it
+doesn't model (another GPU or driver, MSRTSS, a GMEM attachment format not in the table, a depth view it didn't see
+created) keeps the texels' centre (the behaviour before). Per-game override: adapter settings `fdm_bin_w`/`fdm_bin_h`
+(both non-zero; FrameBridge passes them through `fp_fdm_set_bin`). No `frame.adapter` revision bump (like the first
+centring layer): games get it with their next rebuild. Headless, darkening test, `snapshot=15`, Fixed, block centre
+vs optical centre:
+
+| game | swapchain / rect | bins | before (texel centre) | after |
+|---|---|---|---|---|
+| In Death 1x | 2768x2768 / 0,0 1730x1730 | 192x224 | L -76,+31 px, R -83,+35 | L +4,-1, R -3,+3 |
+| AC Nexus (start flash) | 2592x2256 / 0,521 1707x1735 (R 284,521) | 192x224 | (computed: -16,-80) | L +1,+5, R +2,0 |
+
+Full-density blocks stay whole bins (768x672 in both games). AC Nexus' darker later snapshots are too dim for the
+automatic block detection but look centred by eye. Not checked: a GLES/Zink game (dynamic-rendering path), the
+picture in the headset.
+
 
 ## Typing window takes the controllers: SteamVR theater mode (#476, #477, AC Nexus)
 

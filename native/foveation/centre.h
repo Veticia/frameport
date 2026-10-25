@@ -22,8 +22,16 @@
 // views (pipeline without the density-map flag, or a pre-rasterization shader writing ViewportIndex): Turnip then
 // gives every view the finest fragment area of all views in each bin (tu_calc_frag_area, rp.shared_viewport), so
 // each eye gets the union of both eyes' sharp areas (GitHub #394, In Death / The 7th Guest).
+//
+// Bins (#394, second round): Turnip renders each GMEM bin at the density the map has at the bin's centre, on a grid
+// anchored in map space, so the full-density area is the bins whose centre falls in Valve's sharp texels; their centre
+// is off the texels' centre by up to half a bin (In Death: -80,+32 px). The layer computes Turnip's bin size for each
+// foveated pass the way Mesa does (tu_bins.h; Adreno 750 only) and centres those bins on the eye; the per-game setting
+// fdm_bin_w/fdm_bin_h (FrameBridge -> fp_fdm_set_bin) override it. Undecided (another GPU, an unmodelled pass): the texels'
+// centre as before.
 #define CENTRE_NAME "VK_LAYER_FRAMEPORT_fdm_centre"
 #define FP_FDM_MAX_VIEWS 4
+#include "tu_bins.h"
 
 typedef struct {
     uint32_t width, height, layer;   // swapchain image size, array layer
@@ -38,6 +46,12 @@ static int c_level = 1;      // Valve's preset: 1 lo, 2 med, 3 hi (FOVE_LEVEL / 
 static int c_fixed;          // FramePort's Fixed mode (FDM_DEBUG had disable_offsets): ignore Valve's gaze
 static int c_disabled;       // FRAMEPORT_FDM_CENTRE=0
 static int c_diag;           // FRAMEPORT_FDM_DIAG=1: offsets and shared-viewport causes in the log
+static const tb_gpu *c_gpu;  // Turnip on a GPU tu_bins.h knows: bin sizes can be computed
+static uint32_t c_bin_w, c_bin_h;  // fdm_bin_w/fdm_bin_h (per game, from FrameBridge): the bin size, not computed
+
+EXPORT void fp_fdm_set_bin(uint32_t width, uint32_t height) {
+    c_bin_w = width <= 4096 ? width : 0, c_bin_h = height <= 4096 ? height : 0;
+}
 
 EXPORT void fp_fdm_set_views(const fp_fdm_view *views, uint32_t count) {
     if (count > FP_FDM_MAX_VIEWS) count = FP_FDM_MAX_VIEWS;
@@ -54,8 +68,8 @@ static const float c_preset[4][4] = {{0, 0, 0, 0}, {.364f, .367f, .295f, .286f},
 
 // Where Turnip puts the centre of Valve's sharp texels, in framebuffer pixels: Turnip samples the map with a texel
 // size of 2^ceil(log2(framebuffer / map)) pixels (at least 32), see tu_fragment_density_map_sample().
-static float c_valve_centre(uint32_t fb, uint32_t texels, int axis) {
-    if (!texels) return fb / 2.0f;
+// Valve's sharp texels in framebuffer pixels: [lo, hi)
+static void c_sharp_range(uint32_t fb, uint32_t texels, int axis, uint32_t *lo_px, uint32_t *hi_px) {
     uint32_t ratio = fb / texels, shift = 0;
     while ((1u << shift) < ratio) ++shift;
     if (shift < 5) shift = 5;
@@ -64,7 +78,22 @@ static float c_valve_centre(uint32_t fb, uint32_t texels, int axis) {
     float n = (float)(texels > 1 ? texels - 1 : 1);
     int first = (int)ceilf(lo * n - 1e-4f), last = (int)floorf(hi * n + 1e-4f);
     if (last < first) last = first;
-    return (float)(1u << shift) * ((float)(first + last + 1) / 2.0f);
+    *lo_px = (uint32_t)first << shift, *hi_px = (uint32_t)(last + 1) << shift;
+}
+static float c_valve_centre(uint32_t fb, uint32_t texels, int axis) {
+    if (!texels) return fb / 2.0f;
+    uint32_t lo, hi;
+    c_sharp_range(fb, texels, axis, &lo, &hi);
+    return (float)(lo + hi) / 2.0f;
+}
+// The centre of the bins Turnip renders at full density (bin: Turnip's bin size along the axis, 0 = unknown); the
+// texels' centre when unknown or no bin centre falls inside the sharp texels.
+static float c_sharp_centre(uint32_t fb, uint32_t texels, int axis, uint32_t bin) {
+    if (!texels || !bin) return c_valve_centre(fb, texels, axis);
+    uint32_t lo, hi;
+    c_sharp_range(fb, texels, axis, &lo, &hi);
+    float c = tb_bins_centre(lo, hi, bin);
+    return c >= 0 ? c : (float)(lo + hi) / 2.0f;
 }
 
 // ---------------------------------------------------------------- object tracking (handles below Valve's layer)
@@ -162,6 +191,31 @@ static const VkBaseInStructure *c_chain(const void *next, VkStructureType type) 
 typedef struct { VkStructureType sType; const void *pNext; uint32_t count; const VkOffset2D *offsets; } c_offset_end;
 typedef struct { VkStructureType sType; const void *pNext; } c_rendering_end;
 
+// Render targets (colour/depth images and their views), for Turnip's bin size (tu_bins.h): image a = width | height << 32,
+// b = samples | layers << 16 | format << 32, c = flags | usage << 32; view: the same with the view's format.
+#define C_RT_SLOTS 8192
+static c_slot c_rtimgs[C_RT_SLOTS], c_rtviews[C_RT_SLOTS];
+#define RT_USAGE (VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)
+
+static int c_is_depth(VkFormat f) {
+    return f == VK_FORMAT_D16_UNORM || f == VK_FORMAT_X8_D24_UNORM_PACK32 || f == VK_FORMAT_D32_SFLOAT ||
+           f == VK_FORMAT_D16_UNORM_S8_UINT || f == VK_FORMAT_D24_UNORM_S8_UINT || f == VK_FORMAT_D32_SFLOAT_S8_UINT;
+}
+
+// The tile-size limit a depth image with the density-map-offset flag sets (Turnip's max_tile_*_constraint_fdm)
+static void c_image_constraint(const c_slot *v, uint32_t *max_w, uint32_t *max_h) {
+    uint32_t flags = (uint32_t)v->c, usage = (uint32_t)(v->c >> 32);
+    VkFormat format = (VkFormat)(uint32_t)(v->b >> 32);
+    if (!c_gpu || !(flags & FDM_OFFSET_FLAG) || !(usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT) ||
+        !c_is_depth(format))
+        return;
+    uint32_t w, h;
+    tb_lrz_constraint(c_gpu, (uint32_t)v->a, (uint32_t)(v->a >> 32), (uint32_t)v->b & 0xffff,
+                      (uint32_t)(v->b >> 16) & 0xffff, &w, &h);
+    if (w < *max_w) *max_w = w;
+    if (h < *max_h) *max_h = h;
+}
+
 // Images are never changed here: Valve flags them for offsets itself (all but external-memory ones) when its offsets
 // are on. Flagging more (imported Zink/AHardwareBuffer images, as a first version did for Fixed) crashed Turnip.
 static VKAPI_ATTR VkResult VKAPI_CALL c_CreateImage(VkDevice device, const VkImageCreateInfo *ci,
@@ -177,10 +231,25 @@ static VKAPI_ATTR VkResult VKAPI_CALL c_CreateImage(VkDevice device, const VkIma
             LOG("fdm_centre: density map %ux%u[%u] flags 0x%x", ci->extent.width, ci->extent.height, ci->arrayLayers,
                 ci->flags);
     }
+    if (r == VK_SUCCESS && c_gpu && (ci->usage & RT_USAGE)) {
+        take_lock(&c_obj_lock);
+        c_slot *s = c_find_n(c_rtimgs, C_RT_SLOTS, H(*image), 1);
+        if (s)
+            s->a = ci->extent.width | (uint64_t)ci->extent.height << 32,
+            s->b = (ci->samples & 0xffff) | (uint64_t)(ci->arrayLayers & 0xffff) << 16 | (uint64_t)ci->format << 32,
+            s->c = ci->flags | (uint64_t)ci->usage << 32;
+        drop_lock(&c_obj_lock);
+    }
     return r;
 }
 static VKAPI_ATTR void VKAPI_CALL c_DestroyImage(VkDevice device, VkImage image, const VkAllocationCallbacks *a) {
     c_forget(c_images, H(image));
+    if (c_gpu) {
+        take_lock(&c_obj_lock);
+        c_slot *s = c_find_n(c_rtimgs, C_RT_SLOTS, H(image), 0);
+        if (s) s->key = ~0ull;
+        drop_lock(&c_obj_lock);
+    }
     c_dev(device)->DestroyImage(device, image, a);
 }
 static VKAPI_ATTR VkResult VKAPI_CALL c_CreateImageView(VkDevice device, const VkImageViewCreateInfo *ci,
@@ -193,22 +262,124 @@ static VKAPI_ATTR VkResult VKAPI_CALL c_CreateImageView(VkDevice device, const V
         // d = first array layer | layer count << 32: Valve gives a one-eye pass the map layer of that eye
         if (s) s->a = img->a, s->b = img->b, s->c = img->c,
                s->d = ci->subresourceRange.baseArrayLayer | (uint64_t)ci->subresourceRange.layerCount << 32;
+        c_slot *rt = c_gpu ? c_find_n(c_rtimgs, C_RT_SLOTS, H(ci->image), 0) : NULL;
+        c_slot *v = rt ? c_find_n(c_rtviews, C_RT_SLOTS, H(*view), 1) : NULL;
+        if (v) v->a = rt->a, v->b = (rt->b & 0xffffffffull) | (uint64_t)ci->format << 32, v->c = rt->c, v->d = 0;
         drop_lock(&c_obj_lock);
     }
     return r;
 }
 static VKAPI_ATTR void VKAPI_CALL c_DestroyImageView(VkDevice device, VkImageView view, const VkAllocationCallbacks *a) {
     c_forget(c_ivs, H(view));
+    if (c_gpu) {
+        take_lock(&c_obj_lock);
+        c_slot *s = c_find_n(c_rtviews, C_RT_SLOTS, H(view), 0);
+        if (s) s->key = ~0ull;
+        drop_lock(&c_obj_lock);
+    }
     c_dev(device)->DestroyImageView(device, view, a);
 }
-// render pass: a = map attachment index, b = the subpasses' view masks ORed (multiview)
-static void c_note_rp(const void *next, VkRenderPass rp, uint32_t view_mask) {
+
+// A render pass as Turnip's GMEM setup sees it (tu_render_pass_gmem_config); 0: not modelled (no bin size then)
+typedef struct {
+    tb_att atts[TB_MAX_ATTS];
+    int known[TB_MAX_ATTS];  // format modelled
+    uint32_t n, depth_mask;  // depth_mask: attachments with a depth format
+    int bad;
+} c_rp_model;
+static void c_model_init(c_rp_model *m, uint32_t n) {
+    memset(m, 0, sizeof(*m));
+    m->n = n;
+    if (n > TB_MAX_ATTS) m->bad = 1;
+}
+static void c_model_att(c_rp_model *m, uint32_t i, VkFormat format, VkSampleCountFlagBits samples) {
+    if (i >= m->n || m->bad) return;
+    m->known[i] = tb_att_of(format, (uint32_t)samples, &m->atts[i]);
+    m->atts[i].first = ~0u, m->atts[i].last = 0;
+    if (c_is_depth(format)) m->depth_mask |= 1u << i;
+}
+static void c_model_range(c_rp_model *m, uint32_t a, uint32_t subpass, int gmem) {
+    if (a == VK_ATTACHMENT_UNUSED || m->bad) return;
+    if (a >= m->n) { m->bad = 1; return; }
+    tb_att *t = &m->atts[a];
+    if (subpass < t->first) t->first = subpass;
+    if (subpass > t->last) t->last = subpass;
+    if (gmem) {
+        t->gmem = 1;
+        if (!m->known[a]) m->bad = 1;  // an attachment in GMEM with a format tu_bins.h doesn't know
+    }
+}
+#define ST_MSRTSS ((VkStructureType)1000376002)  // VkMultisampledRenderToSingleSampledInfoEXT
+#define ST_DS_RESOLVE ((VkStructureType)1000199001)  // VkSubpassDescriptionDepthStencilResolve
+static int c_msrtss(const void *next) {
+    const VkBaseInStructure *b = c_chain(next, ST_MSRTSS);
+    return b && ((const struct { VkStructureType t; const void *n; VkBool32 on; } *)b)->on;
+}
+static void c_model2(const VkRenderPassCreateInfo2 *ci, c_rp_model *m) {
+    c_model_init(m, ci->attachmentCount);
+    for (uint32_t i = 0; i < ci->attachmentCount && !m->bad; ++i)
+        c_model_att(m, i, ci->pAttachments[i].format, ci->pAttachments[i].samples);
+    for (uint32_t i = 0; i < ci->subpassCount && !m->bad; ++i) {
+        const VkSubpassDescription2 *sp = &ci->pSubpasses[i];
+        if (c_msrtss(sp->pNext)) m->bad = 1;
+        for (uint32_t j = 0; j < sp->inputAttachmentCount; ++j) c_model_range(m, sp->pInputAttachments[j].attachment, i, 0);
+        for (uint32_t j = 0; j < sp->colorAttachmentCount; ++j) {
+            c_model_range(m, sp->pColorAttachments[j].attachment, i, 1);
+            if (sp->pResolveAttachments && sp->pResolveAttachments[j].attachment != VK_ATTACHMENT_UNUSED &&
+                sp->pColorAttachments[j].attachment != VK_ATTACHMENT_UNUSED)
+                c_model_range(m, sp->pResolveAttachments[j].attachment, i, 0);
+        }
+        if (sp->pDepthStencilAttachment) c_model_range(m, sp->pDepthStencilAttachment->attachment, i, 1);
+        const VkSubpassDescriptionDepthStencilResolve *dr = (const void *)c_chain(sp->pNext, ST_DS_RESOLVE);
+        if (dr && dr->pDepthStencilResolveAttachment && sp->pDepthStencilAttachment &&
+            sp->pDepthStencilAttachment->attachment != VK_ATTACHMENT_UNUSED)
+            c_model_range(m, dr->pDepthStencilResolveAttachment->attachment, i, 0);
+    }
+}
+static void c_model1(const VkRenderPassCreateInfo *ci, c_rp_model *m) {
+    c_model_init(m, ci->attachmentCount);
+    for (uint32_t i = 0; i < ci->attachmentCount && !m->bad; ++i)
+        c_model_att(m, i, ci->pAttachments[i].format, ci->pAttachments[i].samples);
+    for (uint32_t i = 0; i < ci->subpassCount && !m->bad; ++i) {
+        const VkSubpassDescription *sp = &ci->pSubpasses[i];
+        for (uint32_t j = 0; j < sp->inputAttachmentCount; ++j) c_model_range(m, sp->pInputAttachments[j].attachment, i, 0);
+        for (uint32_t j = 0; j < sp->colorAttachmentCount; ++j) {
+            c_model_range(m, sp->pColorAttachments[j].attachment, i, 1);
+            if (sp->pResolveAttachments && sp->pResolveAttachments[j].attachment != VK_ATTACHMENT_UNUSED &&
+                sp->pColorAttachments[j].attachment != VK_ATTACHMENT_UNUSED)
+                c_model_range(m, sp->pResolveAttachments[j].attachment, i, 0);
+        }
+        if (sp->pDepthStencilAttachment) c_model_range(m, sp->pDepthStencilAttachment->attachment, i, 1);
+    }
+}
+
+// render pass: a = map attachment index, b = the subpasses' view masks ORed (multiview), c = Turnip's GMEM budget
+// (gmem_pixels | tile_align_w << 32 | min_cpp << 48, 0: not modelled), d = depth-format attachments | samples of
+// attachment 0 << 32 (Turnip takes those for an imageless framebuffer's depth constraint)
+static void c_note_rp(const void *next, VkRenderPass rp, uint32_t view_mask, const c_rp_model *m,
+                      VkSampleCountFlagBits samples0) {
     const VkRenderPassFragmentDensityMapCreateInfoEXT *f = (const void *)c_chain(next, ST_FDM_RP_INFO);
     if (!f || f->fragmentDensityMapAttachment.attachment == VK_ATTACHMENT_UNUSED) return;
+    tb_pass p = {0, 0, 0};
+    int ok = c_gpu && m && !m->bad && tb_pass_config(c_gpu, m->atts, m->n, &p);
     take_lock(&c_obj_lock);
     c_slot *s = c_find(c_rps, H(rp), 1);
-    if (s) s->a = f->fragmentDensityMapAttachment.attachment, s->b = view_mask;
+    if (s) {
+        s->a = f->fragmentDensityMapAttachment.attachment, s->b = view_mask;
+        s->c = ok ? (p.gmem_pixels | (uint64_t)(p.tile_align_w & 0xffff) << 32 |
+                     (uint64_t)(p.min_cpp > 0xffff ? 0 : p.min_cpp) << 48) : 0;
+        s->d = (m ? m->depth_mask : 0) | (uint64_t)samples0 << 32;
+    }
     drop_lock(&c_obj_lock);
+    static int logged;
+    if (c_gpu && logged++ < 8) {
+        char atts[160] = "";
+        for (uint32_t i = 0; m && i < m->n && i < 8; ++i)
+            snprintf(atts + strlen(atts), sizeof(atts) - strlen(atts), "%s%u%s", i ? "," : "", m->atts[i].cpp,
+                     m->atts[i].gmem ? "" : "-");
+        LOG("fdm_centre: foveated render pass: attachments cpp %s (- = not in GMEM) -> %sgmem_pixels %u, tile "
+            "align %u", atts, ok ? "" : "NOT MODELLED, ", p.gmem_pixels, p.tile_align_w);
+    }
 }
 static uint32_t c_masks2(const VkRenderPassCreateInfo2 *ci) {
     uint32_t m = 0;
@@ -221,30 +392,58 @@ static uint32_t c_masks1(const VkRenderPassCreateInfo *ci) {
     for (uint32_t i = 0; mv && mv->pViewMasks && i < mv->subpassCount; ++i) m |= mv->pViewMasks[i];
     return m;
 }
+static void c_note_rp2(const VkRenderPassCreateInfo2 *ci, VkRenderPass rp) {
+    if (!c_chain(ci->pNext, ST_FDM_RP_INFO)) return;
+    c_rp_model m;
+    c_model2(ci, &m);
+    c_note_rp(ci->pNext, rp, c_masks2(ci), &m, ci->attachmentCount ? ci->pAttachments[0].samples : VK_SAMPLE_COUNT_1_BIT);
+}
 static VKAPI_ATTR VkResult VKAPI_CALL c_CreateRenderPass(VkDevice device, const VkRenderPassCreateInfo *ci,
                                                          const VkAllocationCallbacks *a, VkRenderPass *rp) {
     VkResult r = c_dev(device)->CreateRenderPass(device, ci, a, rp);
-    if (r == VK_SUCCESS) c_note_rp(ci->pNext, *rp, c_masks1(ci));
+    if (r == VK_SUCCESS && c_chain(ci->pNext, ST_FDM_RP_INFO)) {
+        c_rp_model m;
+        c_model1(ci, &m);
+        c_note_rp(ci->pNext, *rp, c_masks1(ci), &m, ci->attachmentCount ? ci->pAttachments[0].samples : VK_SAMPLE_COUNT_1_BIT);
+    }
     return r;
 }
 static VKAPI_ATTR VkResult VKAPI_CALL c_CreateRenderPass2(VkDevice device, const VkRenderPassCreateInfo2 *ci,
                                                           const VkAllocationCallbacks *a, VkRenderPass *rp) {
     VkResult r = c_dev(device)->CreateRenderPass2(device, ci, a, rp);
-    if (r == VK_SUCCESS) c_note_rp(ci->pNext, *rp, c_masks2(ci));
+    if (r == VK_SUCCESS) c_note_rp2(ci, *rp);
     return r;
 }
 static VKAPI_ATTR VkResult VKAPI_CALL c_CreateRenderPass2KHR(VkDevice device, const VkRenderPassCreateInfo2 *ci,
                                                              const VkAllocationCallbacks *a, VkRenderPass *rp) {
     VkResult r = c_dev(device)->CreateRenderPass2KHR(device, ci, a, rp);
-    if (r == VK_SUCCESS) c_note_rp(ci->pNext, *rp, c_masks2(ci));
+    if (r == VK_SUCCESS) c_note_rp2(ci, *rp);
     return r;
 }
 static VKAPI_ATTR void VKAPI_CALL c_DestroyRenderPass(VkDevice device, VkRenderPass rp, const VkAllocationCallbacks *a) {
     c_forget(c_rps, H(rp));
     c_dev(device)->DestroyRenderPass(device, rp, a);
 }
-// framebuffer: a = width | height << 32, b = density map view (0: imageless), c = map attachment index + 1,
-// d = layers | render pass view mask << 32
+
+static uint32_t c_last_bit(uint32_t mask) {
+    uint32_t n = 0;
+    while (mask >> n) ++n;
+    return n;
+}
+// Turnip's bin size for a framebuffer of a modelled pass: width | height << 16, 0 when undecided
+static uint32_t c_bin_size(uint64_t pass_c, uint32_t fb_w, uint32_t fb_h, uint32_t layers, uint32_t max_w,
+                           uint32_t max_h) {
+    if (!c_gpu || !pass_c) return 0;
+    tb_pass p = {(uint32_t)pass_c, (uint32_t)(pass_c >> 32) & 0xffff, (uint32_t)(pass_c >> 48)};
+    if (!p.min_cpp) p.min_cpp = UINT32_MAX;
+    uint32_t w = 0, h = 0;
+    if (!tb_tile_size(c_gpu, &p, fb_w, fb_h, layers, max_w, max_h, &w, &h) || w > 0xffff || h > 0xffff) return 0;
+    return w | h << 16;
+}
+
+#define ST_FB_ATTACHMENTS ((VkStructureType)1000108001)  // VkFramebufferAttachmentsCreateInfo
+// framebuffer: a = width | height << 32, b = density map view (0: imageless), c = map attachment index + 1 | Turnip's
+// bin size << 32 (width | height << 16, 0: undecided), d = layers | render pass view mask << 32
 static VKAPI_ATTR VkResult VKAPI_CALL c_CreateFramebuffer(VkDevice device, const VkFramebufferCreateInfo *ci,
                                                           const VkAllocationCallbacks *a, VkFramebuffer *fb) {
     VkResult r = c_dev(device)->CreateFramebuffer(device, ci, a, fb);
@@ -252,12 +451,46 @@ static VKAPI_ATTR VkResult VKAPI_CALL c_CreateFramebuffer(VkDevice device, const
         take_lock(&c_obj_lock);
         c_slot *rp = c_find(c_rps, H(ci->renderPass), 0);
         if (rp) {
+            uint32_t bin = 0;
+            if (rp->c) {
+                // the first depth attachment with the offset flag limits the tile size (tu_CreateFramebuffer)
+                uint32_t max_w = ~0u, max_h = ~0u;
+                int known = 1;
+                if (ci->flags & VK_FRAMEBUFFER_CREATE_IMAGELESS_BIT) {
+                    const VkFramebufferAttachmentsCreateInfo *fa = (const void *)c_chain(ci->pNext, ST_FB_ATTACHMENTS);
+                    for (uint32_t i = 0; fa && i < fa->attachmentImageInfoCount; ++i) {
+                        const VkFramebufferAttachmentImageInfo *ii = &fa->pAttachmentImageInfos[i];
+                        if ((ii->flags & FDM_OFFSET_FLAG) && (ii->usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)) {
+                            // Turnip takes the pass's first attachment's sample count here
+                            tb_lrz_constraint(c_gpu, ii->width, ii->height, (uint32_t)(rp->d >> 32), ii->layerCount,
+                                              &max_w, &max_h);
+                            break;
+                        }
+                    }
+                } else {
+                    for (uint32_t i = 0; ci->pAttachments && i < ci->attachmentCount; ++i) {
+                        c_slot *v = c_find_n(c_rtviews, C_RT_SLOTS, H(ci->pAttachments[i]), 0);
+                        if (!v) {
+                            if (i < 32 && (rp->d >> i & 1)) known = 0;  // a depth attachment not seen created
+                            continue;
+                        }
+                        if (((uint32_t)v->c & FDM_OFFSET_FLAG) &&
+                            ((uint32_t)(v->c >> 32) & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)) {
+                            c_image_constraint(v, &max_w, &max_h);
+                            break;
+                        }
+                    }
+                }
+                uint32_t layers = ci->layers, views = c_last_bit((uint32_t)rp->b);
+                if (views > layers) layers = views;
+                if (known) bin = c_bin_size(rp->c, ci->width, ci->height, layers, max_w, max_h);
+            }
             c_slot *s = c_find(c_fbs, H(*fb), 1);
             if (s) {
                 s->a = ci->width | (uint64_t)ci->height << 32;
                 s->b = (!(ci->flags & VK_FRAMEBUFFER_CREATE_IMAGELESS_BIT) && ci->pAttachments &&
                         rp->a < ci->attachmentCount) ? H(ci->pAttachments[rp->a]) : 0;
-                s->c = rp->a + 1;
+                s->c = (rp->a + 1) | (uint64_t)bin << 32;
                 s->d = ci->layers | rp->b << 32;
             }
         }
@@ -268,6 +501,46 @@ static VKAPI_ATTR VkResult VKAPI_CALL c_CreateFramebuffer(VkDevice device, const
 static VKAPI_ATTR void VKAPI_CALL c_DestroyFramebuffer(VkDevice device, VkFramebuffer fb, const VkAllocationCallbacks *a) {
     c_forget(c_fbs, H(fb));
     c_dev(device)->DestroyFramebuffer(device, fb, a);
+}
+
+// Dynamic rendering: Turnip builds the pass per vkCmdBeginRendering (tu_setup_dynamic_render_pass/_framebuffer):
+// colour attachments, then depth/stencil in GMEM; the framebuffer ends at the render area's end.
+static uint32_t c_dynamic_bin(const VkRenderingInfo *info) {
+    if (!c_gpu || c_msrtss(info->pNext)) return 0;
+    tb_att atts[TB_MAX_ATTS];
+    uint32_t n = 0;
+    uint32_t max_w = ~0u, max_h = ~0u;
+    take_lock(&c_obj_lock);
+    int ok = info->colorAttachmentCount < TB_MAX_ATTS;
+    for (uint32_t i = 0; ok && i < info->colorAttachmentCount; ++i) {
+        VkImageView view = info->pColorAttachments[i].imageView;
+        if (!view) continue;
+        c_slot *v = c_find_n(c_rtviews, C_RT_SLOTS, H(view), 0);
+        ok = v && tb_att_of((VkFormat)(uint32_t)(v->b >> 32), (uint32_t)v->b & 0xffff, &atts[n]);
+        if (ok) atts[n].gmem = 1, atts[n].first = atts[n].last = 0, ++n;
+    }
+    const VkRenderingAttachmentInfo *ds = info->pDepthAttachment && info->pDepthAttachment->imageView ?
+        info->pDepthAttachment : info->pStencilAttachment && info->pStencilAttachment->imageView ?
+        info->pStencilAttachment : NULL;
+    if (ok && ds) {
+        c_slot *v = c_find_n(c_rtviews, C_RT_SLOTS, H(ds->imageView), 0);
+        ok = v && tb_att_of((VkFormat)(uint32_t)(v->b >> 32), (uint32_t)v->b & 0xffff, &atts[n]);
+        if (ok) atts[n].gmem = 1, atts[n].first = atts[n].last = 0, ++n;
+        if (ok && info->pDepthAttachment && info->pDepthAttachment->imageView) {
+            c_slot *dv = c_find_n(c_rtviews, C_RT_SLOTS, H(info->pDepthAttachment->imageView), 0);
+            if (dv) c_image_constraint(dv, &max_w, &max_h);
+        }
+    }
+    drop_lock(&c_obj_lock);
+    tb_pass p;
+    if (!ok || !tb_pass_config(c_gpu, atts, n, &p)) return 0;
+    uint32_t layers = info->viewMask ? 1 : info->layerCount, views = c_last_bit(info->viewMask);
+    if (views > layers) layers = views;
+    uint64_t pass_c = p.gmem_pixels | (uint64_t)(p.tile_align_w & 0xffff) << 32 |
+                      (uint64_t)(p.min_cpp > 0xffff ? 0 : p.min_cpp) << 48;
+    return c_bin_size(pass_c, (uint32_t)(info->renderArea.offset.x + (int32_t)info->renderArea.extent.width),
+                      (uint32_t)(info->renderArea.offset.y + (int32_t)info->renderArea.extent.height), layers, max_w,
+                      max_h);
 }
 
 // ---------------------------------------------------------------- diagnostics (FRAMEPORT_FDM_DIAG=1)
@@ -495,7 +768,9 @@ typedef struct {
     uint32_t fbw, fbh, mw, mh, first, map_layers, n, flagged;
     int32_t eye[FP_FDM_MAX_VIEWS];  // index into views[] per offset, -1: no single matching view
     fp_fdm_view views[FP_FDM_MAX_VIEWS];
-    float vx, vy;
+    float vx, vy;               // where the full-density area is centred without offsets
+    uint32_t bin_w, bin_h;      // Turnip's bins (0: unknown)
+    int bin_source;             // 0 unknown, 1 computed, 2 fdm_bin_w/fdm_bin_h
 } c_pass_info;
 static void c_diag_pass(VkCommandBuffer cmd, const c_pass_info *pi, uint32_t in_count, const VkOffset2D *in,
                         const VkOffset2D *out, uint32_t handed) {
@@ -509,12 +784,13 @@ static void c_diag_pass(VkCommandBuffer cmd, const c_pass_info *pi, uint32_t in_
     drop_lock(&c_obj_lock);
     if (!(pass_no <= 40 || pass_no % 1000 == 0 || (shared && total_shared <= 20))) return;
     char text[640];
-    int len = snprintf(text, sizeof(text), "fdm_diag: pass #%llu %ux%u map %ux%u layer %u+%u%s, Valve centre %.0f,%.0f: "
+    int len = snprintf(text, sizeof(text), "fdm_diag: pass #%llu %ux%u map %ux%u layer %u+%u%s, bins %ux%u, sharp centre %.0f,%.0f: "
                        "%llu pipeline bind(s)%s, %llu Turnip shares one viewport for%s (first: 0x%x), %llu writing "
                        "ViewportIndex -> %s [%llu of %llu passes shared; pipelines created %llu, without density map "
                        "%llu, writing ViewportIndex %llu]; offsets in %u:",
                        (unsigned long long)pass_no, pi->fbw, pi->fbh, pi->mw, pi->mh, pi->first, pi->map_layers,
-                       pi->flagged ? "" : " (map without offset flag)", pi->vx, pi->vy, (unsigned long long)binds,
+                       pi->flagged ? "" : " (map without offset flag)", pi->bin_w, pi->bin_h, pi->vx, pi->vy,
+                       (unsigned long long)binds,
                        d >> 62 ? " incl. secondaries" : "", (unsigned long long)shared,
                        c_app_per_view_viewports ? " (app enabled per-view viewports)" : "", (uint32_t)d & 0x7fffffffu,
                        (unsigned long long)vp, shared ? "SHARED VIEWPORT (each view gets all views' sharp bins)"
@@ -548,16 +824,17 @@ static uint32_t c_pass_views(uint32_t view_mask, uint32_t layers) {
     return layers ? layers : 1;
 }
 
-// command buffer state: a = framebuffer width | height << 32, b = map width | height << 32 (0: no map), c = map flags,
-// d = offsets Turnip reads | first map layer << 16 | map view's layer count << 32
-static void c_begin(VkCommandBuffer cmd, uint32_t fbw, uint32_t fbh, VkImageView map, uint32_t views) {
+// command buffer state: a = framebuffer width | height << 32, b = map width | height << 32 (0: no map), c = map flags
+// | Turnip's bin size << 32 (width | height << 16, 0: undecided), d = offsets Turnip reads | first map layer << 16 |
+// map view's layer count << 32
+static void c_begin(VkCommandBuffer cmd, uint32_t fbw, uint32_t fbh, VkImageView map, uint32_t views, uint32_t bin) {
     take_lock(&c_obj_lock);
     c_slot *iv = map ? c_find(c_ivs, H(map), 0) : NULL;
     c_slot *s = c_find(c_cmds, H(cmd), iv != NULL);
     if (s) {
         s->a = fbw | (uint64_t)fbh << 32;
         s->b = iv ? (iv->a | iv->b << 32) : 0;
-        s->c = iv ? iv->c : 0;
+        s->c = iv ? ((iv->c & 0xffffffffull) | (uint64_t)bin << 32) : 0;
         s->d = iv ? ((views & 0xffff) | (iv->d & 0xffff) << 16 | (iv->d >> 32) << 32) : 0;
     }
     drop_lock(&c_obj_lock);
@@ -569,12 +846,12 @@ static void c_begin_rp(VkCommandBuffer cmd, const VkRenderPassBeginInfo *info) {
     c_slot *fb = c_find(c_fbs, H(info->framebuffer), 0);
     uint64_t size = fb ? fb->a : 0, view = fb ? fb->b : 0, index = fb ? fb->c : 0, lm = fb ? fb->d : 0;
     drop_lock(&c_obj_lock);
-    if (fb && !view && index) {  // imageless framebuffer: the views come with the begin
+    if (fb && !view && (uint32_t)index) {  // imageless framebuffer: the views come with the begin
         const VkRenderPassAttachmentBeginInfo *ab = (const void *)c_chain(info->pNext, ST_RP_ATTACHMENT_BEGIN);
-        if (ab && index - 1 < ab->attachmentCount) view = H(ab->pAttachments[index - 1]);
+        if (ab && (uint32_t)index - 1 < ab->attachmentCount) view = H(ab->pAttachments[(uint32_t)index - 1]);
     }
     c_begin(cmd, (uint32_t)size, (uint32_t)(size >> 32), (VkImageView)(uintptr_t)view,
-            c_pass_views((uint32_t)(lm >> 32), (uint32_t)lm));
+            c_pass_views((uint32_t)(lm >> 32), (uint32_t)lm), (uint32_t)(index >> 32));
 }
 static VKAPI_ATTR void VKAPI_CALL c_CmdBeginRenderPass(VkCommandBuffer cmd, const VkRenderPassBeginInfo *info,
                                                        VkSubpassContents contents) {
@@ -597,7 +874,7 @@ static void c_begin_rendering(VkCommandBuffer cmd, const VkRenderingInfo *info) 
     // Turnip: a dynamic-rendering framebuffer ends where the render area ends
     c_begin(cmd, (uint32_t)(info->renderArea.offset.x + (int32_t)info->renderArea.extent.width),
             (uint32_t)(info->renderArea.offset.y + (int32_t)info->renderArea.extent.height), f ? f->imageView : VK_NULL_HANDLE,
-            c_pass_views(info->viewMask, info->layerCount));
+            c_pass_views(info->viewMask, info->layerCount), f && f->imageView ? c_dynamic_bin(info) : 0);
 }
 static VKAPI_ATTR void VKAPI_CALL c_CmdBeginRendering(VkCommandBuffer cmd, const VkRenderingInfo *info) {
     c_begin_rendering(cmd, info);
@@ -628,9 +905,13 @@ static uint32_t c_offsets_for(VkCommandBuffer cmd, c_device *d, uint32_t in_coun
     uint32_t n = (uint32_t)(shape & 0xffff), first = (uint32_t)((shape >> 16) & 0xffff);
     uint32_t map_layers = (uint32_t)(shape >> 32);
     uint32_t fbw = (uint32_t)size, fbh = (uint32_t)(size >> 32), mw = (uint32_t)map, mh = (uint32_t)(map >> 32);
-    float vx = c_valve_centre(fbw, mw, 0), vy = c_valve_centre(fbh, mh, 1);
+    // Turnip's bins: the per-game setting, else computed for this pass (0: undecided -> the texels' centre)
+    uint32_t bin = (uint32_t)(flags >> 32), bin_w = bin & 0xffff, bin_h = bin >> 16;
+    int bin_source = bin ? 1 : 0;
+    if (c_bin_w && c_bin_h) bin_w = c_bin_w, bin_h = c_bin_h, bin_source = 2;
+    float vx = c_sharp_centre(fbw, mw, 0, bin_w), vy = c_sharp_centre(fbh, mh, 1, bin_h);
     *pi = (c_pass_info){fbw, fbh, mw, mh, first, map_layers, map ? n : 0, (flags & FDM_OFFSET_FLAG) != 0,
-                        {-1, -1, -1, -1}, {{0}}, vx, vy};
+                        {-1, -1, -1, -1}, {{0}}, vx, vy, bin_w, bin_h, bin_source};
     fp_fdm_view *views = pi->views;
     take_lock(&c_lock);
     uint32_t nviews = c_view_count;
@@ -667,10 +948,12 @@ static uint32_t c_offsets_for(VkCommandBuffer cmd, c_device *d, uint32_t in_coun
     }
     static int logged;
     if (matched && logged++ < 8)
-        LOG("fdm_centre: pass %ux%u map %ux%u layer %u+%u (preset %d, Valve centre %.0f,%.0f, %s): %u view(s), %u "
-            "offset(s) from Valve %d,%d -> %d,%d%s", fbw, fbh, mw, mh, first, map_layers, c_level, vx, vy,
-            c_fixed ? "Fixed" : gaze ? "gaze" : "no gaze", n, in_count, in_count ? in[0].x : 0, in_count ? in[0].y : 0,
-            out[0].x, out[0].y, n > 1 ? " (+ more views)" : "");
+        LOG("fdm_centre: pass %ux%u map %ux%u layer %u+%u (preset %d, bins %ux%u %s, sharp centre %.0f,%.0f, texel "
+            "centre %.0f,%.0f, %s): %u view(s), %u offset(s) from Valve %d,%d -> %d,%d%s", fbw, fbh, mw, mh, first,
+            map_layers, c_level, bin_w, bin_h, bin_source == 2 ? "from fdm_bin_w/_h" : bin_source ? "computed" : "unknown",
+            vx, vy, c_valve_centre(fbw, mw, 0), c_valve_centre(fbh, mh, 1), c_fixed ? "Fixed" : gaze ? "gaze" : "no gaze",
+            n, in_count, in_count ? in[0].x : 0, in_count ? in[0].y : 0, out[0].x, out[0].y,
+            n > 1 ? " (+ more views)" : "");
     return matched ? n : 0;
 }
 static uint32_t c_offsets(VkCommandBuffer cmd, c_device *d, uint32_t in_count, const VkOffset2D *in, VkOffset2D *out) {
@@ -851,12 +1134,19 @@ static VKAPI_ATTR VkResult VKAPI_CALL c_CreateDevice(VkPhysicalDevice pd, const 
     }
     PFN_vkGetPhysicalDeviceProperties2 props2 =
         (PFN_vkGetPhysicalDeviceProperties2)next_gipa(instance, "vkGetPhysicalDeviceProperties2");
-    struct { VkStructureType sType; void *pNext; VkExtent2D gran; } offset_props = {ST_FDM_OFFSET_PROPS, NULL, {0, 0}};
+    VkPhysicalDeviceDriverProperties driver;
+    memset(&driver, 0, sizeof(driver));
+    driver.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
+    struct { VkStructureType sType; void *pNext; VkExtent2D gran; } offset_props = {ST_FDM_OFFSET_PROPS, &driver, {0, 0}};
     VkPhysicalDeviceProperties2 p2;
     memset(&p2, 0, sizeof(p2));
     p2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, p2.pNext = &offset_props;
     if (props2) props2(pd, &p2);
     if (offset_props.gran.width && offset_props.gran.height) d.gran = offset_props.gran;
+    // Turnip's bin size is only modelled for the Frame's GPU (tu_bins.h); anything else keeps the texels' centre
+    const tb_gpu *gpu = driver.driverID == VK_DRIVER_ID_MESA_TURNIP &&
+                        strstr(p2.properties.deviceName, "Adreno (TM) 750") ? &TB_ADRENO_750 : NULL;
+    if (gpu) c_gpu = gpu;
     take_lock(&c_dev_lock);
     int slot = 0;
     for (int i = 0; i < MAX_HANDLES; i++)
@@ -865,8 +1155,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL c_CreateDevice(VkPhysicalDevice pd, const 
     drop_lock(&c_dev_lock);
     static int logged;
     if (logged++ < 4)
-        LOG("fdm_centre: active on device %p (preset %d, %s, granularity %ux%u)", (void *)*device, c_level,
-            c_fixed ? "Fixed: optical centre" : "gaze", d.gran.width, d.gran.height);
+        LOG("fdm_centre: active on device %p (preset %d, %s, granularity %ux%u; %s, %s %s: bins %s)", (void *)*device,
+            c_level, c_fixed ? "Fixed: optical centre" : "gaze", d.gran.width, d.gran.height,
+            p2.properties.deviceName, driver.driverName, driver.driverInfo,
+            gpu ? "computed as Turnip does" : "unknown (texel centre)");
     return r;
 }
 

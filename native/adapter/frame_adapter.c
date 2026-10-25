@@ -138,6 +138,7 @@ static int swapchain_fix = 1;
 static int cube_quads = 1;
 static int cube_standin = 1;  // cube swapchains the runtime refuses: served by the adapter (cube_standin.c)
 static int rect_clamp = 1;
+static unsigned fdm_bin_w, fdm_bin_h;  // fdm_bin_w/_h: Turnip's bin size for the foveation centring layer (#394)
 static int fixed_resolution;
 static int swapchain_pool = 0;
 static int fb_color_space;  // fb_color_space: offer XR_FB_color_space when the runtime lacks it (#336)
@@ -222,6 +223,8 @@ static void read_settings(const char *path) {
         if (sscanf(line, "cube_standin=%f", &value) == 1) cube_standin = value != 0;
         if (sscanf(line, "fixed_resolution=%f", &value) == 1) fixed_resolution = value != 0;
         if (sscanf(line, "rect_clamp=%f", &value) == 1) rect_clamp = value != 0;
+        if (sscanf(line, "fdm_bin_w=%f", &value) == 1) fdm_bin_w = value > 0 && value <= 4096 ? (unsigned)value : 0;
+        if (sscanf(line, "fdm_bin_h=%f", &value) == 1) fdm_bin_h = value > 0 && value <= 4096 ? (unsigned)value : 0;
         if (sscanf(line, "swapchain_pool=%f", &value) == 1) swapchain_pool = value != 0;
         if (sscanf(line, "fb_color_space=%f", &value) == 1) fb_color_space = value != 0;
         if (sscanf(line, "action_dedup=%f", &value) == 1) action_dedup = value != 0;

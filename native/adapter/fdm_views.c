@@ -29,10 +29,19 @@ static int fdm_view_of(const XrCompositionLayerProjectionView *pv, int gles, fdm
 
 // In libVkLayer_fdm_darken.so (a DT_NEEDED of the arm64 build); NULL without it (32-bit builds).
 extern void fp_fdm_set_views(const fdm_view_info *views, uint32_t count) __attribute__((weak));
+// Settings fdm_bin_w/fdm_bin_h (per game): the bin size Turnip uses for the eye passes, for when the layer's own
+// computation of it (centre.h) is wrong or undecided.
+extern void fp_fdm_set_bin(uint32_t width, uint32_t height) __attribute__((weak));
 
 static void fdm_views_end_frame(const XrFrameEndInfo *info) {
     void (*set_views)(const fdm_view_info *, uint32_t) = fp_fdm_set_views;
     if (!set_views || !info) return;
+    static int bin_sent;
+    if (!bin_sent && fdm_bin_w && fdm_bin_h && fp_fdm_set_bin) {
+        fp_fdm_set_bin(fdm_bin_w, fdm_bin_h);
+        LOG("fdm views: bin size %ux%u from fdm_bin_w/fdm_bin_h", fdm_bin_w, fdm_bin_h);
+    }
+    bin_sent = 1;
     const XrCompositionLayerProjection *proj = NULL;
     for (uint32_t i = 0; i < info->layerCount && !proj; ++i)
         if (info->layers[i] && info->layers[i]->type == XR_TYPE_COMPOSITION_LAYER_PROJECTION)

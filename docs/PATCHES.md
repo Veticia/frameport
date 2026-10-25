@@ -2,7 +2,7 @@
 
 # Patches
 
-Every patch and game setting FramePort knows: 203 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
+Every patch and game setting FramePort knows: 205 entries in 5 groups. A game's recipe is its chosen patches and settings; tested games get theirs from the catalog ([GAMES.md](GAMES.md)), and other games get the patches FramePort suggests from its analysis. You change them on the game page under Customize.
 
 Each entry says what the patch does, whether it changes the APK or only the install, when FramePort suggests it, its options, the catalog games whose recipe names it and the launch-test signatures that suggest it. Patches that are on by default are on for every game, so the catalog rarely names them.
 
@@ -12,7 +12,7 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 
 - [Patches from OVRPort](#group-overport) (25)
 - [Steam Frame patches](#group-frame) (71)
-- [Game settings](#group-adapter) (82)
+- [Game settings](#group-adapter) (84)
 - [Files and settings on the Frame](#group-device) (12)
 - [PC VR (Proton and Revive)](#group-pcvr) (13)
 
@@ -135,6 +135,8 @@ Link to an entry with its id, dots replaced by dashes: `PATCHES.md#frame-unity_t
 | [Per-eye diagnostics (log)](#adapter-eye_debug) | `adapter.eye_debug` | Game settings |  |
 | [Draw fades over the picture](#adapter-fade_quad) | `adapter.fade_quad` | Game settings | 2 |
 | [Colour space support](#adapter-fb_color_space) | `adapter.fb_color_space` | Game settings | 1 |
+| [Foveation bin height](#adapter-fdm_bin_h) | `adapter.fdm_bin_h` | Game settings |  |
+| [Foveation bin width](#adapter-fdm_bin_w) | `adapter.fdm_bin_w` | Game settings |  |
 | [Keep full resolution (no dynamic resolution)](#adapter-fixed_resolution) | `adapter.fixed_resolution` | Game settings | 2 |
 | [Upside-down panel images (diagnostics)](#adapter-flip_dump) | `adapter.flip_dump` | Game settings |  |
 | [Fix upside-down menus](#adapter-flip_emul) | `adapter.flip_emul` | Game settings |  |
@@ -1755,6 +1757,34 @@ For games that stop at start because the headset reports no colour space (for ex
 - **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
 
 > Offers Meta's colour-space extension when the Frame's runtime lacks it: the game is told the headset uses Rec.709 and may choose any colour space (no conversion is done). For games that quit before their VR session with "Rec.709 color space unavailable" (for example OutRun Quest VR, GitHub #336). Only reaches games that use their own OpenXR loader; OVRPort's dispatcher can't forward the new functions.
+
+### <a id="adapter-fdm_bin_h"></a>Foveation bin height
+
+Set together with the width. 0 = automatic.
+
+- `adapter.fdm_bin_h`
+- **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
+- **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
+- **Options:**
+  - Value: int, default `0`.
+  - Game settings → Troubleshooting → "Foveation bin height" (advanced): slider 0–2048 in steps of 32.
+- **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
+
+> Height in pixels of the driver's GMEM bins for the eye passes, 0 = worked out automatically. See fdm_bin_w.
+
+### <a id="adapter-fdm_bin_w"></a>Foveation bin width
+
+Only if the full-resolution area of Valve's foveation sits off-centre in this game. 0 = automatic.
+
+- `adapter.fdm_bin_w`
+- **Changes:** Game setting: stored in the build and on the Frame (settings.conf); can be changed without a rebuild.
+- **Suggested:** not automatically; set on the game page (Customize), by a recipe or after a launch test.
+- **Options:**
+  - Value: int, default `0`.
+  - Game settings → Troubleshooting → "Foveation bin width" (advanced): slider 0–2016 in steps of 96.
+- **Source:** [patches/settings.py](../src/frameport/patches/settings.py)
+
+> Width in pixels of the GMEM bins the Frame's driver (Turnip) renders the eye passes in, 0 = worked out automatically. The driver gives each bin the density Valve's map has at the bin's centre, so the full-resolution area is a block of whole bins; FramePort centres that block on each eye and works out the bin size the way the driver does. Set this and fdm_bin_h (both non-zero) only when that comes out wrong for a game: the sizes are measured with "Darken coarse fragments (test)" and snapshot=N (multiples of 96 wide, 32 high; GitHub #394).
 
 ### <a id="adapter-fixed_resolution"></a>Keep full resolution (no dynamic resolution)
 

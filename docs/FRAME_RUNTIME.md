@@ -573,7 +573,14 @@ The inspected arm64 `libVkLayer_VALVE_fdm_injection.so` has these semantics (vir
   in Valve's rectangle: the area's size snaps to the bin grid (bins are ~150-200 px here and get relatively
   smaller as render resolution grows), so the same preset looks bigger or smaller and changes
   shape between render scales. The bin snapping is the driver's design, not a setting; FramePort can't
-  pick the bins.
+  pick the bins. With density-map offsets the bins slide but the sample grid stays anchored at 0 in map
+  space (a screen bin centred at s samples s - offset), so the area's centre is the centre of the bins
+  whose map-space centre lies in Valve's sharp texels, up to half a bin off the texels' centre. Turnip
+  picks the bin size per framebuffer (`tu_tiling_config_update_tile_layout`: the GMEM budget split
+  between the pass's attachments, fewest bins, FDM passes use the AVOID_CCU layout; Adreno 750 = 3 MiB
+  GMEM, tile alignment 96x32); Vulkan doesn't report it (no `VK_QCOM_tile_properties`). The centring
+  layer recomputes it (`native/foveation/tu_bins.h`, Mesa 26.3.0-devel `git-e07916b45f` on SteamOS
+  0.5.x, logged by the layer); per-game override `fdm_bin_w`/`fdm_bin_h`.
 
 Per-game library preferences now store `level`. Legacy radius choices are translated on read
 (and written as `level` on Save): nearest old nominal .30 → lo, .25 → med, .20 → hi,

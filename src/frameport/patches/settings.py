@@ -296,6 +296,14 @@ SETTINGS = [
      "fragment-density-map foveation when the driver offers it and expects the density map from the headset, which the "
      "Frame doesn't provide: image views and barriers for a missing image, then a crash in the Frame's Vulkan driver "
      "(for example Metro Awakening). Valve's own foveation layer isn't affected."),
+    ("fdm_bin_w", "int", 0, "Foveation: bin width (Valve foveation)",
+     "Width in pixels of the GMEM bins the Frame's driver (Turnip) renders the eye passes in, 0 = worked out "
+     "automatically. The driver gives each bin the density Valve's map has at the bin's centre, so the full-resolution "
+     "area is a block of whole bins; FramePort centres that block on each eye and works out the bin size the way the "
+     "driver does. Set this and fdm_bin_h (both non-zero) only when that comes out wrong for a game: the sizes are "
+     "measured with \"Darken coarse fragments (test)\" and snapshot=N (multiples of 96 wide, 32 high; GitHub #394)."),
+    ("fdm_bin_h", "int", 0, "Foveation: bin height (Valve foveation)",
+     "Height in pixels of the driver's GMEM bins for the eye passes, 0 = worked out automatically. See fdm_bin_w."),
     ("ovrp_begin_gate", "int", 0, "Unity frame loop: wait for skipped frames",
      "Unity's built-in Oculus frame loop (frame.unity_oculus_check): before each frame wait, wait up to 50 ms for the "
      "last waited frame to begin and skip the wait if it doesn't. Fixes a freeze at the first scene switch (for "
@@ -547,6 +555,11 @@ UI: dict[str, dict] = {
     "vk_hide_fdm": dict(group="troubleshooting", level="advanced", label="Hide Vulkan foveation",
                 help="For Unreal Engine 5 games that crash on the Frame (for example Metro Awakening).",
                 control=("switch",)),
+    "fdm_bin_w": dict(group="troubleshooting", level="advanced", label="Foveation bin width",
+                help="Only if the full-resolution area of Valve's foveation sits off-centre in this game. 0 = "
+                     "automatic.", control=("slider", 0, 2016, 96, "{:.0f} px")),
+    "fdm_bin_h": dict(group="troubleshooting", level="advanced", label="Foveation bin height",
+                help="Set together with the width. 0 = automatic.", control=("slider", 0, 2048, 32, "{:.0f} px")),
     "ovrp_begin_gate": dict(group="troubleshooting", level="advanced",
                             label="Unity frame loop: wait for skipped frames",
                 help="For older Unity games that freeze at the first scene change (for example Sniper "
@@ -683,6 +696,9 @@ class AdapterSetting(Patch):
             "ovrp_hold_physics": lambda a: a.engine == "Unity" and "libOVRPlugin.so" in a.libs,
             "vk_shader_fix": lambda a: a.engine == "Unreal",  # read by the Vulkan shim, which only Unreal games get
             "vk_hide_fdm": lambda a: a.engine == "Unreal",  # Unreal's Vulkan isn't always detected (Metro Awakening)
+            # read by the foveation centring layer, which every arm64 FrameBridge build carries
+            "fdm_bin_w": lambda a: "arm64-v8a" in a.abis,
+            "fdm_bin_h": lambda a: "arm64-v8a" in a.abis,
             "vk_query_slots": lambda a: a.engine == "Unreal" and ap.is_vulkan(a),
             "vk_validation": lambda a: a.engine == "Unreal",
             "vk_pipeline_log": lambda a: a.engine in ("Unreal", "Other") and "arm64-v8a" in a.abis,
