@@ -124,6 +124,18 @@ def test_shader_fix_layer_findings():
     assert "adapter.zink_shader_dump" in r.suggestions()
 
 
+def test_shader_fix_unmatched():
+    for prefix in ("vk shim", "shader fix layer"):
+        log = LOG_OK + (f"09-28 17:39:06.000  1147  1174 I FrameBridge: {prefix}: 2 shader fix(es) configured, none matched"
+                        " after 812 modules in 300 s (game updated?)\n")
+        r = triage(log, "RUNNING", "com.example.game")
+        f = next(f for f in r.findings if f.id == "shader-fix-unmatched")
+        assert f.severity == "info" and r.verdict != "fail"
+    # a fix that matched logs its own line, not this one
+    log = LOG_OK + "09-28 17:39:06.000  1147  1174 I FrameBridge: vk shim: fixed shader module (100 -> 108 bytes): 0\n"
+    assert "shader-fix-unmatched" not in {f.id for f in triage(log, "RUNNING", "com.example.game").findings}
+
+
 def test_launcher_signature():
     r = triage("lepton: APP_ACTIVITY is empty\n", "NEVER_STARTED")
     assert r.suggestions() == ["frame.launcher"]

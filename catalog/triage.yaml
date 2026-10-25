@@ -275,6 +275,16 @@ signatures:
       GraphicsEnv functions it uses were not found or behaved differently, for example after a Lepton update), so the game's
       OpenGL ES shader fixes (zink_shader_fix) don't apply.
     suggest: []
+  - id: shader-fix-unmatched
+    # vkshim (vk_shader_fix) / the shader-fix layer (zink_shader_fix), once per session, 5 minutes after the first shader
+    pattern: '(?:vk shim|shader fix layer): \d+ shader fix\(es\) configured, none matched'
+    severity: info
+    diagnosis: This game's recipe has a shader fix (for a GPU hang at one effect or scene), but none of the shaders it
+      fixes showed up in the first minutes of play. If you haven't reached that part of the game yet, that's expected.
+      Otherwise a game update may have changed the shader, so the fix no longer applies and the old hang can come back.
+      If the game freezes or closes there, please send a problem report with diagnostics so the fix can be updated.
+    suggest: []
+    report: true
   - id: zink-device-lost
     pattern: 'zink.*DEVICE[_ ]LOST|VK_ERROR_DEVICE_LOST'
     severity: fatal

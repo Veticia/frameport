@@ -47,6 +47,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #define TAG "FrameBridge"
@@ -530,6 +531,36 @@ static VKAPI_ATTR VkResult VKAPI_CALL create_render_pass2_khr(VkDevice device, c
 }
 
 static int fixes_applied;
+#define WATCH_PREFIX "vk shim"
+// Fix watch: a fix matches by exact size + SHA-256, so a game (or driver) update that changes the shader makes it
+// silently do nothing. Once per session, when fixes are configured and none has matched WATCH_SECONDS after the first
+// module, one line says so (triage `shader-fix-unmatched`); checked only when a module is created, never per frame.
+#define WATCH_SECONDS 300
+static int watch_matched, watch_done;
+static unsigned watch_modules;
+static long watch_start;
+
+static long watch_now(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long)ts.tv_sec;
+}
+
+static void watch_module(int matched) {
+    if (!nfixes || __atomic_load_n(&watch_done, __ATOMIC_RELAXED)) return;
+    if (matched) {
+        __atomic_store_n(&watch_matched, 1, __ATOMIC_RELAXED);
+        __atomic_store_n(&watch_done, 1, __ATOMIC_RELAXED);
+        return;
+    }
+    unsigned n = __atomic_add_fetch(&watch_modules, 1, __ATOMIC_RELAXED);
+    long now = watch_now(), start = 0;
+    if (__atomic_compare_exchange_n(&watch_start, &start, now, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) return;  // first
+    if (now - start >= WATCH_SECONDS && !__atomic_exchange_n(&watch_done, 1, __ATOMIC_RELAXED) &&
+        !__atomic_load_n(&watch_matched, __ATOMIC_RELAXED))
+        LOG(WATCH_PREFIX ": %d shader fix(es) configured, none matched after %u modules in %ld s (game updated?)", nfixes,
+            n, now - start);
+}
 
 EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule(VkDevice device, const VkShaderModuleCreateInfo *ci,
                                                            const VkAllocationCallbacks *alloc, VkShaderModule *module) {
@@ -540,6 +571,7 @@ EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule(VkDevice device, cons
     if (dump_on && ci) dump_module(ci->pCode, ci->codeSize);  // the game's own module, before any fix
     size_t size = 0;
     uint32_t *code = nfixes && ci && ci->pCode ? fixed_shader(ci->pCode, ci->codeSize, &size) : NULL;
+    watch_module(code != NULL);
     if (!code) {
         VkResult r = real(device, ci, alloc, module);
         if (pl_on && ci && module) {
