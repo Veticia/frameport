@@ -1097,9 +1097,8 @@ def test_swapchain_pool_is_opt_in_for_gles_and_vulkan():
 
 def test_ac_nexus_uses_the_vulkan_panel_pool(monkeypatch):
     """GitHub #424: the Vulkan panel pool frees the swapchain slots its Quest 3 eye images need (headless on the dev
-    Frame, 2026-10-23). Until the release with it reaches users the catalog keeps the Quest 2 identity, since 1.3.0
-    apps (GLES-only pool) read the same remote entry: at that release, drop device.headset_model from frame_remove and
-    update this test. device.text_input_window stays off (its Android window took the controllers' input)."""
+    Frame, 2026-10-23), so AC Nexus is a Quest 3 again from 1.4.0 (min_app: 1.3.0 apps have a GLES-only pool).
+    device.text_input_window stays off (its Android window took the controllers' input)."""
     from pathlib import Path
 
     import yaml
@@ -1110,10 +1109,12 @@ def test_ac_nexus_uses_the_vulkan_panel_pool(monkeypatch):
     path = Path(__file__).resolve().parents[1] / "catalog/games/com.Ubisoft.ACNexusVR.yaml"
     entry = yaml.safe_load(path.read_text())
     assert entry["adapter"] == {"swapchain_pool": 1} and "#424" in entry["notes"]
-    assert entry.get("frame_remove") == ["device.headset_model", "device.text_input_window"]
+    assert entry.get("frame_remove") == ["device.text_input_window"]
     assert "device.text_input_window" not in (entry.get("device") or [])
     assert base.get("frame.adapter").revision_for("com.Ubisoft.ACNexusVR") == 3
-    monkeypatch.setattr(frameport, "__version__", "1.3.0")  # 1.3.0 knows swapchain_pool: the entry stays usable
+    monkeypatch.setattr(frameport, "__version__", "1.3.0")
+    assert catalog.unusable_reason(entry) == "needs FramePort 1.4.0"
+    monkeypatch.setattr(frameport, "__version__", "1.4.0")
     assert catalog.unusable_reason(entry) is None
 
 

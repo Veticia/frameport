@@ -9,9 +9,9 @@ notes: 'FrameBridge turns its upside-down UI panels upright (flip emulation, in 
   login may not work. frame.unity_text_input added from detection (not headset-verified); no device.text_input_window:
   its Android window took the controllers'' input (owner, 2026-10-23).
 
-  Keeps the Quest 2 headset identity for now: as a Quest 3 it switches to larger eye images after the intro, which
-  the Frame''s swapchain limit refused (GitHub #424). With the Vulkan panel pool (swapchain_pool) it runs as a Quest
-  3 (checked headless 2026-10-23); the Quest 3 identity comes back with the FramePort release that has it.'
+  Runs as a Quest 3 with the Vulkan panel pool (swapchain_pool): as a Quest 3 it switches to larger eye images after
+  the intro, which the Frame''s swapchain limit refused before the pool (GitHub #424; checked headless 2026-10-23,
+  FramePort 1.4.0).'
 details: Ubisoft online login may not work. Data folder holds raw assets (start0..2, .climb, bundles), not .obb
   files; install to obb as-is.
 overport_extra:
@@ -19,7 +19,6 @@ overport_extra:
 frame:
 - frame.unity_text_input
 frame_remove:
-- device.headset_model
 - device.text_input_window
 verified:
   date: '2026-09-28'
@@ -28,7 +27,7 @@ verified:
   known_good_sha256: 89644a12bf8df956fa3d3a9a40540ba9e1fb62f63494714a05c9f05984383ac8
   no_appsw_90: '2026-10-02, OVRPort 1.2.5 (owner: 90 Hz felt better than 72 Hz; same known issues)'
   flip_in_place: '2026-10-14, owner in the headset: launch warnings and tutorial pop-ups upright (GitHub #138)'
-updated: '2026-10-23'
-min_app: 1.3.0
+updated: '2026-10-25'
+min_app: 1.4.0
 adapter:
   swapchain_pool: 1
